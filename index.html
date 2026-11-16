@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#02040f">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="UNIVERSUM">
+  <title>UNIVERSUM — Strategico Spaziale</title>
+
+  <link rel="manifest" href="./manifest.json">
+  <link id="dynamic-apple-icon" rel="apple-touch-icon" href="">
+  <link id="dynamic-favicon" rel="icon" type="image/png" href="">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <canvas id="starfield"></canvas>
+
+  <!-- CONTENITORE TOAST -->
+  <div id="toast-container"></div>
+
+  <!-- MODALE UNIVERSALE -->
+  <div id="universal-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+    <div class="modal-box glass-panel">
+      <div class="modal-header">
+        <h3 id="modal-title" class="modal-title">TITOLO</h3>
+        <button type="button" id="modal-close-btn" class="btn btn-ghost btn-sm" aria-label="Chiudi">✕</button>
+      </div>
+      <div id="modal-body"></div>
+    </div>
+  </div>
+
+  <!-- =========================================================
+       SCHERMATA 1: LE MIE PARTITE (LOBBY)
+       ========================================================= -->
+  <section id="screen-lobby">
+    <header class="lobby-header glass-panel">
+      <h1 class="lobby-title">UNIVERSUM</h1>
+      <p class="lobby-subtitle">COMANDO STRATEGICO GALATTICO • SINGLE-PLAYER VS BOT</p>
+      <div class="lobby-actions-top">
+        <button type="button" id="btn-open-create" class="btn btn-green">+ CREA NUOVO UNIVERSO</button>
+        <button type="button" id="btn-import-json" class="btn btn-blue">⬆ IMPORTA UNIVERSO (JSON)</button>
+        <button type="button" id="btn-install-pwa" class="btn btn-ghost">📲 INSTALLA APP</button>
+        <input type="file" id="input-import-file" accept=".json,application/json" class="hidden">
+      </div>
+    </header>
+
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; padding:0 4px;">
+      <h2 style="font-size:1rem; color:var(--res-crystal);">LE MIE PARTITE SALVATE</h2>
+      <span id="universe-count-badge" class="badge badge-blue">0 / 10</span>
+    </div>
+
+    <div id="universe-list" class="universe-list">
+      <!-- Popolato dinamicamente da db.js / ui.js -->
+    </div>
+  </section>
+
+  <!-- =========================================================
+       SCHERMATA 2: PLANCIA DI COMANDO (GIOCO ATTIVO)
+       ========================================================= -->
+  <section id="screen-game" class="hidden">
+    <header class="game-topbar">
+      <div class="topbar-row-1">
+        <select id="active-planet-select" class="planet-selector" aria-label="Seleziona Pianeta"></select>
+        <button type="button" id="btn-turbo-toggle" class="btn btn-blue btn-turbo">⚡ TURBO</button>
+        <button type="button" id="btn-back-lobby" class="btn btn-ghost btn-sm" title="Torna alle partite">🏠</button>
+      </div>
+
+      <div class="resources-bar">
+        <div class="res-pill">
+          <span class="res-label text-metal">Metallo</span>
+          <span id="res-metal-val" class="res-val text-metal">0</span>
+        </div>
+        <div class="res-pill">
+          <span class="res-label text-crystal">Cristallo</span>
+          <span id="res-crystal-val" class="res-val text-crystal">0</span>
+        </div>
+        <div class="res-pill">
+          <span class="res-label text-deuterium">Deuterio</span>
+          <span id="res-deuterium-val" class="res-val text-deuterium">0</span>
+        </div>
+        <div class="res-pill">
+          <span class="res-label text-energy">Energia</span>
+          <span id="res-energy-val" class="res-val text-energy">0 / 0</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- BARRA RAPIDA MODALITÀ CREATIVA -->
+    <div id="creative-quick-bar" class="creative-bar hidden">
+      <button type="button" data-creative="add-res" class="btn btn-creative">+10M Risorse</button>
+      <button type="button" data-creative="finish-queues" class="btn btn-creative">Completa Code</button>
+      <button type="button" data-creative="unlock-tech" class="btn btn-creative">Sblocca Tecnologie Lv.15</button>
+      <button type="button" data-creative="add-rip" class="btn btn-creative">+10 Morti Nere</button>
+    </div>
+
+    <div class="game-shell">
+      <!-- SIDEBAR DESKTOP (>= 900px) -->
+      <aside class="desktop-sidebar" id="desktop-sidebar">
+        <button type="button" class="sidebar-btn active" data-view="overview">🛰️ Panoramica</button>
+        <button type="button" class="sidebar-btn" data-view="buildings">🏗️ Edifici & Risorse</button>
+        <button type="button" class="sidebar-btn" data-view="research">🔬 Ricerche</button>
+        <button type="button" class="sidebar-btn" data-view="shipyard">🚀 Cantiere Navale</button>
+        <button type="button" class="sidebar-btn" data-view="defense">🛡️ Difesa Planetaria</button>
+        <button type="button" class="sidebar-btn" data-view="fleet">🛸 Flotta & Missioni</button>
+        <button type="button" class="sidebar-btn" data-view="galaxy">🌌 Galassia</button>
+        <button type="button" class="sidebar-btn" data-view="espionage">👁️ Spionaggio & Report</button>
+        <button type="button" class="sidebar-btn" data-view="diplomacy">🤝 Commercio & BOT</button>
+        <button type="button" class="sidebar-btn" data-view="moon">🌑 Luna & Falange</button>
+        <button type="button" class="sidebar-btn" data-view="empire">👑 Imperiale & Quest</button>
+        <button type="button" class="sidebar-btn" data-view="highscore">🏆 Classifica</button>
+      </aside>
+
+      <!-- VIEWPORT PRINCIPALE -->
+      <main id="game-viewport"></main>
+    </div>
+
+    <!-- BOTTOM NAVIGATION BAR MOBILE -->
+    <nav class="mobile-bottom-nav" aria-label="Navigazione principale">
+      <button type="button" class="nav-tab-btn active" data-view="overview">
+        <span class="nav-icon">🛰️</span>
+        <span>Panoramica</span>
+      </button>
+      <button type="button" class="nav-tab-btn" data-view="buildings">
+        <span class="nav-icon">🏗️</span>
+        <span>Edifici</span>
+      </button>
+      <button type="button" class="nav-tab-btn" data-view="fleet">
+        <span class="nav-icon">🛸</span>
+        <span>Flotta</span>
+      </button>
+      <button type="button" class="nav-tab-btn" data-view="galaxy">
+        <span class="nav-icon">🌌</span>
+        <span>Galassia</span>
+      </button>
+      <button type="button" class="nav-tab-btn" id="btn-mobile-menu">
+        <span class="nav-icon">☰</span>
+        <span>Menu</span>
+      </button>
+    </nav>
+
+    <!-- DRAWER MENU MOBILE -->
+    <div id="mobile-menu-drawer" class="mobile-drawer-overlay hidden">
+      <div class="mobile-drawer-sheet">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <h3 style="font-size:1rem; color:var(--res-crystal);">SISTEMI DI COMANDO</h3>
+          <button type="button" id="btn-close-drawer" class="btn btn-ghost btn-sm">✕</button>
+        </div>
+        <div class="drawer-grid">
+          <button type="button" class="drawer-item" data-view="overview"><span class="icon">🛰️</span>Panoramica</button>
+          <button type="button" class="drawer-item" data-view="buildings"><span class="icon">🏗️</span>Edifici</button>
+          <button type="button" class="drawer-item" data-view="research"><span class="icon">🔬</span>Ricerche</button>
+          <button type="button" class="drawer-item" data-view="shipyard"><span class="icon">🚀</span>Cantiere</button>
+          <button type="button" class="drawer-item" data-view="defense"><span class="icon">🛡️</span>Difesa</button>
+          <button type="button" class="drawer-item" data-view="fleet"><span class="icon">🛸</span>Flotta</button>
+          <button type="button" class="drawer-item" data-view="galaxy"><span class="icon">🌌</span>Galassia</button>
+          <button type="button" class="drawer-item" data-view="espionage"><span class="icon">👁️</span>Spionaggio</button>
+          <button type="button" class="drawer-item" data-view="diplomacy"><span class="icon">🤝</span>Commercio</button>
+          <button type="button" class="drawer-item" data-view="moon"><span class="icon">🌑</span>Luna</button>
+          <button type="button" class="drawer-item" data-view="empire"><span class="icon">👑</span>Imperiale</button>
+          <button type="button" class="drawer-item" data-view="highscore"><span class="icon">🏆</span>Classifica</button>
+          <button type="button" class="drawer-item" id="drawer-btn-lobby"><span class="icon">🏠</span>Partite</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- REGISTRAZIONE SERVICE WORKER -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js').catch((err) => {
+          console.warn('Registrazione Service Worker non riuscita:', err);
+        });
+      });
+    }
+  </script>
+
+  <!-- MODULI APPLICAZIONE IN ORDINE OBBLIGATORIO -->
+  <script src="./db.js"></script>
+  <script src="./data.js"></script>
+  <script src="./engine.js"></script>
+  <script src="./galaxy.js"></script>
+  <script src="./ui.js"></script>
+</body>
+</html>
