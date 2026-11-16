@@ -1,4 +1,4 @@
-const CACHE_NAME = 'universum-v2';
+const CACHE_NAME = 'universum-v3';
 const STATIC_ASSETS = [
   './',
   './index.html',
@@ -43,7 +43,7 @@ self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   if (!event.request.url.startsWith('http')) return;
 
-  // Non cachare chiamate API dinamiche di Firebase/Firestore
+  // Non intercettare le richieste API real-time di Firebase / Google APIs
   if (
     event.request.url.includes('firestore.googleapis.com') ||
     event.request.url.includes('identitytoolkit.googleapis.com') ||
