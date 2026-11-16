@@ -1,1027 +1,965 @@
 (function () {
   'use strict';
 
-  const COL_USERS = 'users';
-  const COL_UNIVERSES = 'online_universes';
-
-  let currentUserProfile = null;
-  let radarUnsubscribe = null;
-  let chatUnsubscribe = null;
-  let fleetSweepTimer = null;
-
-  function ensureFirebase() {
-    if (!window.fbAuth || !window.fbDB) {
-      throw new Error('Firebase non inizializzato. Configura le chiavi in firebase-config.js.');
-    }
-    return { auth: window.fbAuth, db: window.fbDB };
+  function getAuth() {
+    if (!window.fbAuth) throw new Error('Firebase Auth non inizializzato.');
+    return window.fbAuth;
   }
 
-  function coordKey(g, s, p) {
-    return `${g}:${s}:${p}`;
+  function getDB() {
+    if (!window.fbDB) throw new Error('Firebase Firestore non inizializzato.');
+    return window.fbDB;
   }
 
-  function nicknameToEmail(nickname) {
-    const clean = String(nickname || '')
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, '');
+  function coordsToKey(coords) {
+    return `${coords.g}_${coords.s}_${coords.p}`;
+  }
+
+  function parseCoordsKey(key) {
+    const [g, s, p] = String(key).split('_').map(Number);
+    return { g, s, p };
+  }
+
+  function sanitizeNickname(nick) {
+    return String(nick || '').trim().slice(0, 20);
+  }
+
+  function nicknameToInternalEmail(nick) {
+    const clean = String(nick || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
     if (clean.length < 3) {
       throw new Error('Il nickname deve contenere almeno 3 caratteri alfanumerici.');
     }
     return `${clean}@universum.pvp`;
   }
 
-  // =========================================================================
-  // 1. AUTENTICAZIONE SEMPLIFICATA (NICKNAME + PASSWORD)
-  // =========================================================================
-  async function registerOrLogin(nickname, password, isRegister = false) {
-    const { auth, db } = ensureFirebase();
-    const displayNick = String(nickname || '').trim().substring(0, 24);
-    const email = nicknameToEmail(displayNick);
+  function generatePlanetSpecs(coords) {
+    const pos = Number(coords.p);
+    let maxTemp = 35;
+    let fieldsMax = 200;
 
+    if (pos <= 3) {
+      maxTemp = 110 - pos * 15;
+      fieldsMax = 155 + pos * 12;
+    } else if (pos <= 12) {
+      maxTemp = 55 - pos * 5;
+      fieldsMax = 210 + (pos % 4) * 15;
+    } else {
+      maxTemp = -30 - (pos - 12) * 18;
+      fieldsMax = 175 + (pos % 3) * 15;
+    }
+
+    return {
+      minTemp: maxTemp - 40,
+      maxTemp,
+      fieldsMax
+    };
+  }
+
+  function createStarterPlanetDoc(uniId, coords, ownerUid, ownerName, planetName, isNpc = false) {
+    const specs = generatePlanetSpecs(coords);
+    const key = coordsToKey(coords);
+    return {
+      id: `mp_pl_${uniId}_${key}`,
+      coords: { g: Number(coords.g), s: Number(coords.s), p: Number(coords.p) },
+      key,
+      ownerUid,
+      ownerName,
+      isNpc: Boolean(isNpc),
+      name: planetName,
+      planetName,
+      minTemp: specs.minTemp,
+      maxTemp: specs.maxTemp,
+      fieldsMax: specs.fieldsMax,
+      resources: isNpc
+        ? { metal: 50000, crystal: 35000, deuterium: 15000 }
+        : { metal: 1500, crystal: 1000, deuterium: 300 },
+      buildings: isNpc
+        ? { metalMine: 8, crystalMine: 7, deuteriumSynth: 5, solarPlant: 9, roboticsFactory: 3, shipyard: 3 }
+        : { metalMine: 1, crystalMine: 1, deuteriumSynth: 0, solarPlant: 1, roboticsFactory: 0, shipyard: 0, researchLab: 0 },
+      defenses: isNpc
+        ? { rocketLauncher: 25, lightLaser: 12, smallShieldDome: 1 }
+        : {},
+      fleet: isNpc
+        ? { lightFighter: 10, smallCargo: 8 }
+        : {},
+      buildQueue: [],
+      shipyardQueue: [],
+      defenseQueue: [],
+      moon: null,
+      debris: { metal: 0, crystal: 0 },
+      lastUpdated: Date.now()
+    };
+  }
+
+  // =========================================================
+  // 1. AUTENTICAZIONE SEMPLIFICATA (NICKNAME + PASSWORD)
+  // =========================================================
+  async function registerOrLogin(nickname, password, isRegister) {
+    const auth = getAuth();
+    const db = getDB();
+    const cleanNick = sanitizeNickname(nickname);
+    if (cleanNick.length < 3) {
+      throw new Error('Inserisci un nickname di almeno 3 caratteri.');
+    }
     if (!password || String(password).length < 6) {
       throw new Error('La password deve avere almeno 6 caratteri.');
     }
 
+    const email = nicknameToInternalEmail(cleanNick);
     let cred;
+
     if (isRegister) {
       cred = await auth.createUserWithEmailAndPassword(email, password);
-      await cred.user.updateProfile({ displayName: displayNick });
-      const profile = {
+      await cred.user.updateProfile({ displayName: cleanNick });
+      await db.collection('users').doc(cred.user.uid).set({
         uid: cred.user.uid,
-        nickname: displayNick,
-        createdAt: Date.now(),
-        lastLogin: Date.now()
-      };
-      await db.collection(COL_USERS).doc(cred.user.uid).set(profile);
-      currentUserProfile = profile;
-      return profile;
+        nickname: cleanNick,
+        createdAt: Date.now()
+      }, { merge: true });
     } else {
       cred = await auth.signInWithEmailAndPassword(email, password);
-      const userRef = db.collection(COL_USERS).doc(cred.user.uid);
-      const snap = await userRef.get();
-      if (snap.exists) {
-        await userRef.update({ lastLogin: Date.now() });
-        currentUserProfile = snap.data();
-      } else {
-        currentUserProfile = {
-          uid: cred.user.uid,
-          nickname: cred.user.displayName || displayNick,
-          createdAt: Date.now(),
-          lastLogin: Date.now()
-        };
-        await userRef.set(currentUserProfile);
+      if (!cred.user.displayName) {
+        await cred.user.updateProfile({ displayName: cleanNick });
       }
-      return currentUserProfile;
     }
+
+    return cred.user;
   }
 
-  async function logout() {
-    stopListeners();
-    if (window.fbAuth) {
-      await window.fbAuth.signOut();
-    }
-    currentUserProfile = null;
-  }
-
-  function getCurrentUser() {
-    const authUser = window.fbAuth ? window.fbAuth.currentUser : null;
-    if (!authUser) return null;
-    return currentUserProfile || {
-      uid: authUser.uid,
-      nickname: authUser.displayName || 'Comandante'
-    };
-  }
-
-  // =========================================================================
-  // 2. LOBBY SERVER / UNIVERSI ONLINE
-  // =========================================================================
+  // =========================================================
+  // 2. GESTIONE UNIVERSI ONLINE (ZERO BOT O MAX 10 AVAMPOSTI)
+  // =========================================================
   async function getOnlineUniverses() {
-    const { db } = ensureFirebase();
-    const snap = await db.collection(COL_UNIVERSES).orderBy('createdAt', 'desc').get();
+    const db = getDB();
+    const snap = await db.collection('online_universes')
+      .orderBy('createdAt', 'desc')
+      .limit(30)
+      .get();
+
     return snap.docs.map((doc) => {
-      const data = doc.data();
+      const d = doc.data();
       return {
         id: doc.id,
-        name: data.name,
-        speed: data.speed || 10,
-        galaxies: data.galaxies || 3,
-        systemsPerGalaxy: data.systemsPerGalaxy || 250,
-        playerCount: data.playerCount || 0,
-        hasPassword: Boolean(data.roomPassword),
-        creativeMode: false, // Forzatamente disabilitata online
-        createdBy: data.createdByName || 'Sistema',
-        createdAt: data.createdAt || Date.now()
+        name: d.name,
+        founderUid: d.founderUid,
+        founderName: d.founderName,
+        speed: d.speed || 10,
+        galaxies: d.galaxies || 3,
+        systemsPerGalaxy: d.systemsPerGalaxy || 100,
+        npcMode: d.npcMode || 'none',
+        playerCount: d.playerCount || 1,
+        hasPasscode: Boolean(d.passcode),
+        createdAt: d.createdAt || Date.now()
       };
     });
+  }
+
+  async function generateNeutralOutpostsOnce(uniId, galaxies, systemsPerGalaxy) {
+    const db = getDB();
+    const outpostNames = [
+      'Mercato Galattico Alpha',
+      'Avamposto Mercantile Orion',
+      'Covo Pirata Nebulosa',
+      'Stazione Franco-Doganale',
+      'Bazar Orbitale Vega',
+      'Deposito Minerario Krell',
+      'Rifugio Contrabbandieri',
+      'Nodo Commerciale Sirius',
+      'Avamposto Neutrale Altair',
+      'Cittadella Libera Zenit'
+    ];
+
+    const usedKeys = new Set();
+    const batch = db.batch();
+    const count = 8 + Math.floor(Math.random() * 3); // 8 - 10 avamposti fissi
+
+    for (let i = 0; i < count; i++) {
+      let coords;
+      let key;
+      let attempts = 0;
+      do {
+        coords = {
+          g: 1 + Math.floor(Math.random() * galaxies),
+          s: 1 + Math.floor(Math.random() * systemsPerGalaxy),
+          p: 4 + Math.floor(Math.random() * 9)
+        };
+        key = coordsToKey(coords);
+        attempts++;
+      } while (usedKeys.has(key) && attempts < 40);
+
+      usedKeys.add(key);
+      const docRef = db.collection('online_universes').doc(uniId).collection('planets').doc(key);
+      const outpostDoc = createStarterPlanetDoc(
+        uniId,
+        coords,
+        `npc_outpost_${i + 1}`,
+        'Avamposto Neutrale',
+        outpostNames[i % outpostNames.length],
+        true
+      );
+      batch.set(docRef, outpostDoc);
+    }
+
+    await batch.commit();
   }
 
   async function createOnlineUniverse(config) {
-    const { db } = ensureFirebase();
-    const user = getCurrentUser();
-    if (!user) throw new Error('Effettua prima il login PvP per creare un universo online.');
+    const auth = getAuth();
+    const db = getDB();
+    const user = auth.currentUser;
+    if (!user) throw new Error('Devi accedere prima di creare un universo online.');
 
-    const name = String(config.name || 'Universo PvP').trim().substring(0, 32);
+    const name = String(config.name || '').trim().slice(0, 32);
+    if (name.length < 3) throw new Error('Inserisci un nome valido per l’universo.');
+
     const speed = Math.min(1000, Math.max(1, Number(config.speed) || 10));
     const galaxies = Math.min(9, Math.max(1, Number(config.galaxies) || 3));
-    const systemsPerGalaxy = Math.min(499, Math.max(50, Number(config.systemsPerGalaxy) || 250));
-    const roomPassword = String(config.roomPassword || '').trim();
+    const systemsPerGalaxy = Math.min(499, Math.max(20, Number(config.systemsPerGalaxy) || 100));
+    const npcMode = config.npcMode === 'limited' ? 'limited' : 'none';
+    const passcode = String(config.passcode || '').trim().slice(0, 20);
+    const founderName = user.displayName || user.email.split('@')[0];
 
-    const uniData = {
+    const uniRef = db.collection('online_universes').doc();
+    const uniId = uniRef.id;
+
+    await uniRef.set({
       name,
+      founderUid: user.uid,
+      founderName,
       speed,
       galaxies,
       systemsPerGalaxy,
-      roomPassword,
+      npcMode,
+      passcode,
       creativeMode: false,
       playerCount: 0,
-      createdByUid: user.uid,
-      createdByName: user.nickname,
       createdAt: Date.now()
-    };
+    });
 
-    const docRef = await db.collection(COL_UNIVERSES).add(uniData);
-    return Object.assign({ id: docRef.id, hasPassword: Boolean(roomPassword) }, uniData);
+    if (npcMode === 'limited') {
+      await generateNeutralOutpostsOnce(uniId, galaxies, systemsPerGalaxy);
+    }
+
+    return await joinOnlineUniverse(uniId, passcode);
   }
 
-  async function joinOnlineUniverse(universeId, passwordAttempt = '') {
-    const { db } = ensureFirebase();
-    const user = getCurrentUser();
-    if (!user) throw new Error('Devi accedere prima di entrare in un universo online.');
+  async function findFreeHomeCoords(uniId, galaxies, systemsPerGalaxy) {
+    const db = getDB();
+    const planetsCol = db.collection('online_universes').doc(uniId).collection('planets');
 
-    const uniRef = db.collection(COL_UNIVERSES).doc(universeId);
+    for (let attempt = 0; attempt < 60; attempt++) {
+      const coords = {
+        g: 1 + Math.floor(Math.random() * galaxies),
+        s: 1 + Math.floor(Math.random() * systemsPerGalaxy),
+        p: 4 + Math.floor(Math.random() * 9)
+      };
+      const key = coordsToKey(coords);
+      const snap = await planetsCol.doc(key).get();
+      if (!snap.exists) {
+        return coords;
+      }
+    }
+    throw new Error('Nessuna coordinata libera trovata. Riprova.');
+  }
+
+  async function joinOnlineUniverse(universeId, passcode = '') {
+    const auth = getAuth();
+    const db = getDB();
+    const user = auth.currentUser;
+    if (!user) throw new Error('Devi accedere prima di entrare in un universo.');
+
+    const uniRef = db.collection('online_universes').doc(universeId);
     const uniSnap = await uniRef.get();
     if (!uniSnap.exists) throw new Error('Universo online non trovato.');
 
-    const uni = Object.assign({ id: uniSnap.id, creativeMode: false }, uniSnap.data());
-    if (uni.roomPassword && uni.roomPassword !== String(passwordAttempt || '').trim()) {
-      throw new Error('Password della stanza errata.');
+    const uniData = uniSnap.data();
+    if (uniData.passcode && uniData.passcode !== String(passcode || '').trim()) {
+      throw new Error('Codice stanza errato.');
     }
 
+    const playerName = user.displayName || user.email.split('@')[0];
     const playerRef = uniRef.collection('players').doc(user.uid);
     const playerSnap = await playerRef.get();
-    let playerData;
 
-    if (playerSnap.exists) {
-      playerData = playerSnap.data();
-    } else {
-      // Prima entrata: trova uno slot libero e assegna Pianeta Madre
-      const planetsCol = uniRef.collection('planets');
-      let assignedCoords = null;
+    let playerState;
+    let myPlanets = [];
 
-      for (let attempt = 0; attempt < 40; attempt++) {
-        const g = Math.floor(Math.random() * (uni.galaxies || 3)) + 1;
-        const s = Math.floor(Math.random() * (uni.systemsPerGalaxy || 250)) + 1;
-        const p = Math.floor(Math.random() * 9) + 4; // Slot temperati 4..12
-        const key = coordKey(g, s, p);
-        const checkSnap = await planetsCol.doc(key).get();
-        if (!checkSnap.exists || checkSnap.data().ownerUid === null) {
-          assignedCoords = { g, s, p, key };
-          break;
-        }
-      }
+    if (!playerSnap.exists) {
+      const homeCoords = await findFreeHomeCoords(
+        universeId,
+        uniData.galaxies || 3,
+        uniData.systemsPerGalaxy || 100
+      );
+      const homeKey = coordsToKey(homeCoords);
+      const homePlanet = createStarterPlanetDoc(
+        universeId,
+        homeCoords,
+        user.uid,
+        playerName,
+        `Pianeta Madre ${playerName}`,
+        false
+      );
 
-      if (!assignedCoords) {
-        throw new Error('Nessuno slot libero trovato al momento. Riprova.');
-      }
+      await uniRef.collection('planets').doc(homeKey).set(homePlanet);
 
-      const maxTemp = Math.floor(Math.random() * 45) + 25;
-      const minTemp = maxTemp - 40;
-
-      const homePlanetDoc = {
-        coords: { g: assignedCoords.g, s: assignedCoords.s, p: assignedCoords.p },
-        ownerUid: user.uid,
-        ownerName: user.nickname,
-        planetName: 'Pianeta Madre',
-        temperature: { min: minTemp, max: maxTemp },
-        minTemp,
-        maxTemp,
-        fieldsMax: 220,
-        resources: { metal: 10000, crystal: 10000, deuterium: 2500 },
-        buildings: {
-          metalMine: 0, crystalMine: 0, deuteriumSynth: 0, solarPlant: 0, fusionReactor: 0,
-          roboticsFactory: 0, naniteFactory: 0, shipyard: 0, metalStorage: 0, crystalStorage: 0,
-          deuteriumTank: 0, researchLab: 0, terraformer: 0, hiddenBunker: 0
-        },
-        defenses: {},
-        fleet: {},
-        moon: null,
-        debris: { metal: 0, crystal: 0 },
-        lastUpdated: Date.now()
-      };
-
-      playerData = {
+      playerState = {
         uid: user.uid,
-        nickname: user.nickname,
+        nickname: playerName,
+        researches: {},
+        researchQueue: null,
+        points: 0,
+        planetCount: 1,
         joinedAt: Date.now(),
-        researches: {
-          energyTech: 0, laserTech: 0, ionTech: 0, hyperspaceTech: 0, plasmaTech: 0,
-          combustionDrive: 0, impulseDrive: 0, hyperspaceDrive: 0, espionageTech: 0,
-          computerTech: 0, astrophysics: 0, intergalacticNetwork: 0, weaponsTech: 0,
-          shieldingTech: 0, armourTech: 0, lunarTech: 0, jumpGateTech: 0, deathStarTech: 0
-        }
+        lastSeen: Date.now()
       };
+      await playerRef.set(playerState);
 
-      const batch = db.batch();
-      batch.set(planetsCol.doc(assignedCoords.key), homePlanetDoc);
-      batch.set(playerRef, playerData);
-      batch.update(uniRef, {
+      await uniRef.update({
         playerCount: firebase.firestore.FieldValue.increment(1)
       });
-      await batch.commit();
+
+      myPlanets = [homePlanet];
+    } else {
+      playerState = playerSnap.data();
+      await playerRef.update({ lastSeen: Date.now(), nickname: playerName });
+
+      const planetsSnap = await uniRef.collection('planets')
+        .where('ownerUid', '==', user.uid)
+        .get();
+
+      myPlanets = planetsSnap.docs.map((d) => calculateLiveResources(d.data(), uniData.speed || 10));
     }
 
-    // Carica tutti i pianeti posseduti dal giocatore in questo universo
-    const myPlanetsSnap = await uniRef.collection('planets').where('ownerUid', '==', user.uid).get();
-    const myPlanets = myPlanetsSnap.docs.map((d) => {
-      const pData = d.data();
-      return calculateLiveResources(pData, uni.speed, playerData.researches);
-    });
+    // Carica ultimi messaggi di combattimento / spionaggio per il giocatore
+    const msgSnap = await uniRef.collection('messages')
+      .where('recipientUid', '==', user.uid)
+      .orderBy('timestamp', 'desc')
+      .limit(20)
+      .get()
+      .catch(() => ({ docs: [] }));
 
-    startRealtimeListeners(universeId);
+    const messages = msgSnap.docs.map((d) => d.data());
 
     return {
-      universe: uni,
-      player: playerData,
-      planets: myPlanets
+      id: universeId,
+      name: uniData.name,
+      emperor: playerName,
+      speed: uniData.speed || 10,
+      galaxies: uniData.galaxies || 3,
+      systemsPerGalaxy: uniData.systemsPerGalaxy || 100,
+      npcMode: uniData.npcMode || 'none',
+      creativeMode: false,
+      planets: myPlanets,
+      activePlanetId: myPlanets[0]?.id,
+      researches: playerState.researches || {},
+      researchQueue: playerState.researchQueue || null,
+      fleetsInFlight: [],
+      incomingAttacks: [],
+      spyReports: [],
+      messages
     };
   }
 
-  // =========================================================================
-  // 3. SINCRONIZZAZIONE PIANETI E RISORSE REAL-TIME
-  // =========================================================================
-  function calculateLiveResources(planetDoc, universeSpeed = 10, researches = {}) {
-    if (!planetDoc) return null;
+  // =========================================================
+  // 3. SINCRONIZZAZIONE RISORSE REAL-TIME E STATO GIOCATORE
+  // =========================================================
+  function calculateLiveResources(planetDoc, speed = 10) {
+    if (!planetDoc) return planetDoc;
     const now = Date.now();
-    const lastUpdated = Number(planetDoc.lastUpdated) || now;
-    const deltaSec = Math.max(0, (now - lastUpdated) / 1000);
+    const last = Number(planetDoc.lastUpdated || now);
+    const elapsedHours = Math.max(0, (now - last) / 3600000);
 
-    const cloned = JSON.parse(JSON.stringify(planetDoc));
-    if (cloned.temperature && cloned.maxTemp === undefined) {
-      cloned.maxTemp = cloned.temperature.max;
-      cloned.minTemp = cloned.temperature.min;
-    }
+    const cloned = Object.assign({}, planetDoc, {
+      resources: Object.assign({ metal: 0, crystal: 0, deuterium: 0 }, planetDoc.resources || {})
+    });
 
-    if (deltaSec <= 0 || !window.UniversumEngine) {
-      return cloned;
-    }
-
-    const fakeUni = {
-      creativeMode: false,
-      speed: universeSpeed,
-      turboUntil: 0,
-      researches: researches || {}
-    };
-
-    const prod = window.UniversumEngine.getPlanetProduction(cloned, fakeUni);
-    const curM = Number(cloned.resources?.metal || 0);
-    const curC = Number(cloned.resources?.crystal || 0);
-    const curD = Number(cloned.resources?.deuterium || 0);
-
-    if (curM < prod.caps.metal) {
-      cloned.resources.metal = Math.min(prod.caps.metal, curM + prod.metalPerSec * deltaSec);
-    }
-    if (curC < prod.caps.crystal) {
-      cloned.resources.crystal = Math.min(prod.caps.crystal, curC + prod.crystalPerSec * deltaSec);
-    }
-    const dDelta = prod.deuteriumPerSec * deltaSec;
-    if (dDelta > 0 && curD < prod.caps.deuterium) {
-      cloned.resources.deuterium = Math.min(prod.caps.deuterium, curD + dDelta);
-    } else if (dDelta < 0) {
-      cloned.resources.deuterium = Math.max(0, curD + dDelta);
+    if (elapsedHours > 0 && window.UniversumEngine?.getPlanetProduction) {
+      const prod = window.UniversumEngine.getPlanetProduction(cloned, { speed, creativeMode: false });
+      cloned.resources.metal = Math.floor(cloned.resources.metal + prod.metalPerHour * elapsedHours);
+      cloned.resources.crystal = Math.floor(cloned.resources.crystal + prod.crystalPerHour * elapsedHours);
+      cloned.resources.deuterium = Math.max(0, Math.floor(cloned.resources.deuterium + prod.deuteriumPerHour * elapsedHours));
     }
 
     cloned.lastUpdated = now;
     return cloned;
   }
 
-  async function syncPlanetState(uniId, planetDoc) {
-    const { db } = ensureFirebase();
-    if (!planetDoc || !planetDoc.coords) {
-      throw new Error('Documento pianeta non valido.');
+  function computePlayerPoints(universeObj) {
+    const Data = window.UniversumData;
+    let pts = 0;
+    for (const p of universeObj.planets || []) {
+      for (const lv of Object.values(p.buildings || {})) pts += (Number(lv) || 0) * 150;
+      for (const [sId, cnt] of Object.entries(p.fleet || {})) {
+        const spec = Data?.SHIPS?.[sId];
+        if (spec) pts += Math.floor(((spec.cost.metal + spec.cost.crystal + spec.cost.deuterium) / 1000) * cnt);
+      }
+      for (const [dId, cnt] of Object.entries(p.defenses || {})) {
+        const spec = Data?.DEFENSES?.[dId];
+        if (spec) pts += Math.floor(((spec.cost.metal + spec.cost.crystal + spec.cost.deuterium) / 1000) * cnt);
+      }
     }
-    const key = coordKey(planetDoc.coords.g, planetDoc.coords.s, planetDoc.coords.p);
-    const payload = Object.assign({}, planetDoc, {
-      lastUpdated: Date.now()
-    });
-    await db.collection(COL_UNIVERSES).doc(uniId).collection('planets').doc(key).set(payload, { merge: true });
-    return payload;
+    for (const lv of Object.values(universeObj.researches || {})) {
+      pts += (Number(lv) || 0) * 350;
+    }
+    return pts;
+  }
+
+  async function syncPlayerState(universeObj) {
+    const auth = getAuth();
+    const db = getDB();
+    const user = auth.currentUser;
+    if (!user || !universeObj?.id) return;
+
+    const uniRef = db.collection('online_universes').doc(universeObj.id);
+    const batch = db.batch();
+
+    for (const p of universeObj.planets || []) {
+      const key = coordsToKey(p.coords);
+      const pRef = uniRef.collection('planets').doc(key);
+      batch.set(pRef, {
+        name: p.name,
+        planetName: p.name,
+        resources: p.resources,
+        buildings: p.buildings,
+        defenses: p.defenses,
+        fleet: p.fleet,
+        buildQueue: p.buildQueue || [],
+        shipyardQueue: p.shipyardQueue || [],
+        defenseQueue: p.defenseQueue || [],
+        moon: p.moon || null,
+        lastUpdated: Date.now()
+      }, { merge: true });
+    }
+
+    const totalPoints = computePlayerPoints(universeObj);
+    const playerRef = uniRef.collection('players').doc(user.uid);
+    batch.set(playerRef, {
+      nickname: universeObj.emperor || user.displayName || 'Comandante',
+      researches: universeObj.researches || {},
+      researchQueue: universeObj.researchQueue || null,
+      points: totalPoints,
+      planetCount: (universeObj.planets || []).length,
+      lastSeen: Date.now()
+    }, { merge: true });
+
+    await batch.commit();
   }
 
   async function renameOnlinePlanet(uniId, coords, newName) {
-    const { db } = ensureFirebase();
-    const user = getCurrentUser();
-    if (!user) throw new Error('Non autenticato.');
-    const cleaned = String(newName || '').trim().substring(0, 24);
-    if (!cleaned) throw new Error('Il nome del pianeta non può essere vuoto.');
-
-    const key = coordKey(coords.g, coords.s, coords.p);
-    const ref = db.collection(COL_UNIVERSES).doc(uniId).collection('planets').doc(key);
-    const snap = await ref.get();
-    if (!snap.exists || snap.data().ownerUid !== user.uid) {
-      throw new Error('Non sei il proprietario di questo pianeta.');
-    }
-    await ref.update({ planetName: cleaned });
-    return cleaned;
+    const db = getDB();
+    const key = coordsToKey(coords);
+    await db.collection('online_universes').doc(uniId).collection('planets').doc(key).update({
+      name: newName,
+      planetName: newName
+    });
   }
 
-  async function renameOnlineMoon(uniId, coords, newName) {
-    const { db } = ensureFirebase();
-    const user = getCurrentUser();
-    if (!user) throw new Error('Non autenticato.');
-    const cleaned = String(newName || '').trim().substring(0, 24);
-    if (!cleaned) throw new Error('Il nome della Luna non può essere vuoto.');
-
-    const key = coordKey(coords.g, coords.s, coords.p);
-    const ref = db.collection(COL_UNIVERSES).doc(uniId).collection('planets').doc(key);
-    const snap = await ref.get();
-    if (!snap.exists || snap.data().ownerUid !== user.uid || !snap.data().moon) {
-      throw new Error('Nessuna Luna modificabile su queste coordinate.');
-    }
-    await ref.update({ 'moon.name': cleaned });
-    return cleaned;
+  async function renameOnlineMoon(uniId, coords, newMoonName) {
+    const db = getDB();
+    const key = coordsToKey(coords);
+    await db.collection('online_universes').doc(uniId).collection('planets').doc(key).update({
+      'moon.name': newMoonName
+    });
   }
 
-  // =========================================================================
-  // 4. GALASSIA CONDIVISA
-  // =========================================================================
+  // =========================================================
+  // 4. GALASSIA CONDIVISA (ZERO BOT PROCEDURALI)
+  // =========================================================
   async function getOnlineSystem(uniId, galaxy, system) {
-    const { db } = ensureFirebase();
-    const user = getCurrentUser();
-    const myUid = user ? user.uid : null;
+    const db = getDB();
+    const uniRef = db.collection('online_universes').doc(uniId);
+    const uniSnap = await uniRef.get();
+    const speed = uniSnap.exists ? (uniSnap.data().speed || 10) : 10;
 
-    const g = Math.max(1, Number(galaxy) || 1);
-    const s = Math.max(1, Number(system) || 1);
-
-    const planetsSnap = await db.collection(COL_UNIVERSES).doc(uniId).collection('planets')
-      .where('coords.g', '==', g)
-      .where('coords.s', '==', s)
+    const snap = await uniRef.collection('planets')
+      .where('coords.g', '==', Number(galaxy))
+      .where('coords.s', '==', Number(system))
       .get();
 
-    const occupiedMap = {};
-    planetsSnap.forEach((doc) => {
-      const data = doc.data();
-      if (data.coords && data.coords.p) {
-        occupiedMap[data.coords.p] = data;
-      }
+    const occupiedByPos = new Map();
+    snap.docs.forEach((doc) => {
+      const liveData = calculateLiveResources(doc.data(), speed);
+      occupiedByPos.set(Number(liveData.coords.p), liveData);
     });
 
     const slots = [];
-    for (let p = 1; p <= 15; p++) {
-      const key = coordKey(g, s, p);
-      const existing = occupiedMap[p];
-
-      if (existing && existing.ownerUid) {
-        const isMine = existing.ownerUid === myUid;
-        slots.push({
-          coords: { g, s, p },
-          key,
-          type: 'planet',
-          ownerType: isMine ? 'player' : 'enemy_player',
-          ownerUid: existing.ownerUid,
-          emperor: existing.ownerName || 'Comandante',
-          name: existing.planetName || 'Colonia',
-          maxTemp: existing.maxTemp ?? existing.temperature?.max ?? 30,
-          minTemp: existing.minTemp ?? existing.temperature?.min ?? -10,
-          fieldsMax: existing.fieldsMax || 200,
-          moon: existing.moon || null,
-          debris: existing.debris || { metal: 0, crystal: 0 }
-        });
+    for (let pos = 1; pos <= 15; pos++) {
+      if (occupiedByPos.has(pos)) {
+        const pl = occupiedByPos.get(pos);
+        slots.push(Object.assign({}, pl, {
+          planetId: pl.id,
+          ownerType: pl.isNpc ? 'outpost' : 'player'
+        }));
       } else {
-        const maxTemp = p <= 3 ? 75 : p <= 11 ? 25 : -45;
+        const specs = generatePlanetSpecs({ g: galaxy, s: system, p: pos });
         slots.push({
-          coords: { g, s, p },
-          key,
-          type: 'empty',
-          ownerType: 'none',
+          coords: { g: Number(galaxy), s: Number(system), p: pos },
+          name: 'Pianeta Disabitato',
+          planetName: 'Pianeta Disabitato',
           ownerUid: null,
-          emperor: null,
-          name: 'Pianeta Disabitato (Colonizzabile)',
-          maxTemp,
-          minTemp: maxTemp - 40,
-          fieldsMax: 180 + (5 - Math.abs(8 - p)) * 12,
+          ownerName: null,
+          isNpc: false,
+          ownerType: 'empty',
+          minTemp: specs.minTemp,
+          maxTemp: specs.maxTemp,
+          fieldsMax: specs.fieldsMax,
           moon: null,
-          debris: (existing && existing.debris) || { metal: 0, crystal: 0 }
+          debris: { metal: 0, crystal: 0 }
         });
       }
     }
 
     return {
-      galaxy: g,
-      system: s,
-      slots,
-      expeditionSlot: {
-        coords: { g, s, p: 16 },
-        key: coordKey(g, s, 16),
-        name: 'Spazio Profondo (Pos. 16)'
-      }
+      galaxy: Number(galaxy),
+      system: Number(system),
+      slots
     };
   }
 
-  // =========================================================================
-  // 5. FLOTTE PvP, RADAR IN TEMPO REALE E RISOLUZIONE ATOMICA (TRANSACTION)
-  // =========================================================================
-  async function launchOnlineFleet(uniId, originCoords, targetCoords, mission, fleetSelection, cargo = { metal: 0, crystal: 0, deuterium: 0 }) {
-    const { db } = ensureFirebase();
-    const user = getCurrentUser();
-    if (!user) throw new Error('Non autenticato.');
+  // =========================================================
+  // 5. FLOTTE PvP, SPIONAGGIO, BATTAGLIE E RADAR REAL-TIME
+  // =========================================================
+  async function launchOnlineFleet(universeObj, originPlanetIndex, targetCoords, mission, shipsSelected, cargo = {}, options = {}) {
+    const auth = getAuth();
+    const db = getDB();
+    const user = auth.currentUser;
+    if (!user) throw new Error('Utente non autenticato.');
 
-    const uniRef = db.collection(COL_UNIVERSES).doc(uniId);
-    const uniSnap = await uniRef.get();
-    if (!uniSnap.exists) throw new Error('Universo non trovato.');
-    const uni = uniSnap.data();
+    const planet = universeObj.planets[originPlanetIndex];
+    if (!planet) throw new Error('Pianeta di partenza non valido.');
 
-    const originKey = coordKey(originCoords.g, originCoords.s, originCoords.p);
-    const targetKey = coordKey(targetCoords.g, targetCoords.s, targetCoords.p);
-
-    const originRef = uniRef.collection('planets').doc(originKey);
-    const targetRef = uniRef.collection('planets').doc(targetKey);
-    const playerRef = uniRef.collection('players').doc(user.uid);
-
-    const [playerSnap, targetSnap] = await Promise.all([playerRef.get(), targetRef.get()]);
-    const researches = playerSnap.exists ? (playerSnap.data().researches || {}) : {};
-    const defenderUid = (targetSnap.exists && targetSnap.data().ownerUid) ? targetSnap.data().ownerUid : null;
-
-    if (defenderUid === user.uid && (mission === 'attack' || mission === 'spy' || mission === 'destroyMoon')) {
-      throw new Error('Non puoi attaccare o spiare un tuo stesso pianeta.');
-    }
-
-    const Data = window.UniversumData;
-    const Galaxy = window.UniversumGalaxy;
-
-    const cleanFleet = {};
+    const cleanShips = {};
     let totalShips = 0;
-    let totalCargoCap = 0;
-    for (const [id, rawQty] of Object.entries(fleetSelection || {})) {
-      const qty = Math.max(0, Math.floor(Number(rawQty) || 0));
-      if (qty <= 0 || id === 'solarSatellite') continue;
-      cleanFleet[id] = qty;
-      totalShips += qty;
-      totalCargoCap += (Data.SHIPS[id]?.cargo || 0) * qty;
+    for (const [sId, count] of Object.entries(shipsSelected || {})) {
+      const qty = Math.max(0, Math.floor(Number(count) || 0));
+      if (qty > 0) {
+        if ((planet.fleet[sId] || 0) < qty) {
+          throw new Error(`Navi insufficienti (${sId}).`);
+        }
+        cleanShips[sId] = qty;
+        totalShips += qty;
+      }
     }
     if (totalShips === 0) throw new Error('Seleziona almeno una nave.');
 
-    const dist = Galaxy.calculateDistance(originCoords, targetCoords);
-    const fakeUni = { speed: uni.speed || 10, researches, creativeMode: false };
-    const { durationSec, fuelCost } = Galaxy.getFleetSpeedAndFuel(fakeUni, cleanFleet, dist);
+    const dist = window.UniversumGalaxy.calculateDistance(planet.coords, targetCoords);
+    const flightStats = window.UniversumGalaxy.getFleetSpeedAndFuel(universeObj, cleanShips, dist);
 
-    const loadM = Math.max(0, Math.floor(Number(cargo.metal) || 0));
-    const loadC = Math.max(0, Math.floor(Number(cargo.crystal) || 0));
-    const loadD = Math.max(0, Math.floor(Number(cargo.deuterium) || 0));
+    const cargoM = Math.max(0, Math.floor(Number(cargo.metal) || 0));
+    const cargoC = Math.max(0, Math.floor(Number(cargo.crystal) || 0));
+    const cargoD = Math.max(0, Math.floor(Number(cargo.deuterium) || 0));
 
-    if (loadM + loadC + loadD + fuelCost > totalCargoCap) {
-      throw new Error('Capacità stiva insufficiente per carico e carburante.');
+    if (planet.resources.metal < cargoM || planet.resources.crystal < cargoC || planet.resources.deuterium < cargoD + flightStats.fuelCost) {
+      throw new Error('Risorse o Deuterio per il carburante insufficienti.');
     }
 
-    const now = Date.now();
-    const fleetDocId = `flt_${now}_${Math.random().toString(36).substring(2, 7)}`;
-    const fleetRef = uniRef.collection('fleets').doc(fleetDocId);
+    // Scala navi e risorse dal pianeta locale e sincronizza
+    for (const [sId, qty] of Object.entries(cleanShips)) {
+      planet.fleet[sId] -= qty;
+    }
+    planet.resources.metal -= cargoM;
+    planet.resources.crystal -= cargoC;
+    planet.resources.deuterium -= (cargoD + flightStats.fuelCost);
 
-    const missionPayload = {
-      id: fleetDocId,
-      mission,
+    await syncPlayerState(universeObj);
+
+    // Determina eventuale proprietario del pianeta bersaglio per notifiche radar
+    const targetKey = coordsToKey(targetCoords);
+    const uniRef = db.collection('online_universes').doc(universeObj.id);
+    const targetSnap = await uniRef.collection('planets').doc(targetKey).get();
+    const defenderUid = targetSnap.exists ? (targetSnap.data().ownerUid || null) : null;
+
+    const now = Date.now();
+    const arrivalTime = now + flightStats.durationSec * 1000;
+    const returnTime = arrivalTime + flightStats.durationSec * 1000;
+
+    const fleetDoc = {
       attackerUid: user.uid,
-      attackerName: user.nickname,
-      attackerResearches: researches,
+      attackerName: universeObj.emperor || user.displayName || 'Comandante',
+      attackerTech: {
+        weaponsTech: universeObj.researches?.weaponsTech || 0,
+        shieldingTech: universeObj.researches?.shieldingTech || 0,
+        armourTech: universeObj.researches?.armourTech || 0
+      },
       defenderUid,
-      originCoords: Object.assign({}, originCoords),
-      originKey,
-      targetCoords: Object.assign({}, targetCoords),
+      originCoords: Object.assign({}, planet.coords),
+      targetCoords: { g: Number(targetCoords.g), s: Number(targetCoords.s), p: Number(targetCoords.p) },
       targetKey,
-      fleet: cleanFleet,
-      cargo: { metal: loadM, crystal: loadC, deuterium: loadD },
-      status: 'outbound', // 'outbound' | 'returning' | 'completed'
-      startTime: now,
-      arrivalTime: now + durationSec * 1000,
-      returnTime: now + durationSec * 2000,
-      durationSec
+      mission,
+      ships: cleanShips,
+      cargo: { metal: cargoM, crystal: cargoC, deuterium: cargoD },
+      blackHole: Boolean(options.blackHole),
+      status: 'outbound',
+      departureTime: now,
+      arrivalTime,
+      returnTime,
+      resolved: false
     };
 
-    await db.runTransaction(async (tx) => {
-      const oSnap = await tx.get(originRef);
-      if (!oSnap.exists || oSnap.data().ownerUid !== user.uid) {
-        throw new Error('Pianeta di partenza non valido o non tuo.');
-      }
+    const ref = await uniRef.collection('fleets').add(fleetDoc);
+    fleetDoc.id = ref.id;
+    universeObj.fleetsInFlight.push(fleetDoc);
 
-      const liveOrigin = calculateLiveResources(oSnap.data(), uni.speed || 10, researches);
-      for (const [id, qty] of Object.entries(cleanFleet)) {
-        if ((liveOrigin.fleet?.[id] || 0) < qty) {
-          throw new Error(`Navi insufficienti in orbita (${id}).`);
-        }
-        liveOrigin.fleet[id] -= qty;
-      }
-
-      if (
-        liveOrigin.resources.metal < loadM ||
-        liveOrigin.resources.crystal < loadC ||
-        liveOrigin.resources.deuterium < (loadD + fuelCost)
-      ) {
-        throw new Error(`Risorse o carburante insufficienti (${fuelCost.toLocaleString()} D).`);
-      }
-
-      liveOrigin.resources.metal -= loadM;
-      liveOrigin.resources.crystal -= loadC;
-      liveOrigin.resources.deuterium -= (loadD + fuelCost);
-      liveOrigin.lastUpdated = now;
-
-      tx.set(originRef, liveOrigin);
-      tx.set(fleetRef, missionPayload);
-    });
-
-    return missionPayload;
+    return fleetDoc;
   }
 
-  async function resolveSingleArrivedFleet(uniId, uniSpeed, fleetDocRef) {
-    const { db } = ensureFirebase();
-    const uniRef = db.collection(COL_UNIVERSES).doc(uniId);
-    const Galaxy = window.UniversumGalaxy;
+  function listenIncomingFleets(universeObj, callback) {
+    const auth = getAuth();
+    const db = getDB();
+    const user = auth.currentUser;
+    if (!user || !universeObj?.id) return () => {};
 
-    await db.runTransaction(async (tx) => {
-      const fSnap = await tx.get(fleetDocRef);
-      if (!fSnap.exists) return;
-      const flt = fSnap.data();
-      const now = Date.now();
-
-      // FASE 1: ARRIVO A DESTINAZIONE (OUTBOUND -> RETURNING)
-      if (flt.status === 'outbound' && now >= flt.arrivalTime) {
-        const targetRef = uniRef.collection('planets').doc(flt.targetKey);
-        const tSnap = await tx.get(targetRef);
-
-        let defResearches = {};
-        if (flt.defenderUid) {
-          const defPlayerSnap = await tx.get(uniRef.collection('players').doc(flt.defenderUid));
-          if (defPlayerSnap.exists) defResearches = defPlayerSnap.data().researches || {};
-        }
-
-        // MISSIONE SPIONAGGIO
-        if (flt.mission === 'spy') {
-          if (tSnap.exists && tSnap.data().ownerUid) {
-            const liveTarget = calculateLiveResources(tSnap.data(), uniSpeed, defResearches);
-            const msgAttRef = uniRef.collection('messages').doc();
-            tx.set(msgAttRef, {
-              recipientUid: flt.attackerUid,
-              time: now,
-              type: 'spy',
-              title: `👁️ Rapporto Spia PvP [${flt.targetKey}]`,
-              body: `Pianeta di ${liveTarget.ownerName}: Metallo ${Math.floor(liveTarget.resources.metal).toLocaleString()}, Cristallo ${Math.floor(liveTarget.resources.crystal).toLocaleString()}, Deuterio ${Math.floor(liveTarget.resources.deuterium).toLocaleString()}.`,
-              reportData: {
-                coords: flt.targetCoords,
-                ownerName: liveTarget.ownerName,
-                resources: liveTarget.resources,
-                fleet: liveTarget.fleet,
-                defenses: liveTarget.defenses,
-                buildings: liveTarget.buildings,
-                moon: liveTarget.moon
-              }
-            });
-
-            if (liveTarget.ownerUid) {
-              const msgDefRef = uniRef.collection('messages').doc();
-              tx.set(msgDefRef, {
-                recipientUid: liveTarget.ownerUid,
-                time: now,
-                type: 'alert',
-                title: `🚨 Sonde Spia Rilevate su [${flt.targetKey}]!`,
-                body: `Il giocatore ${flt.attackerName} ha scansionato il tuo pianeta ${liveTarget.planetName}.`
-              });
-            }
-          }
-          tx.update(fleetDocRef, { status: 'returning' });
-          return;
-        }
-
-        // MISSIONE COLONIZZAZIONE
-        if (flt.mission === 'colonize') {
-          if (!tSnap.exists || !tSnap.data().ownerUid) {
-            const remColonyShips = Math.max(0, (flt.fleet.colonyShip || 1) - 1);
-            const updatedFleet = Object.assign({}, flt.fleet, { colonyShip: remColonyShips });
-            const maxTemp = flt.targetCoords.p <= 3 ? 75 : flt.targetCoords.p <= 11 ? 25 : -45;
-
-            tx.set(targetRef, {
-              coords: flt.targetCoords,
-              ownerUid: flt.attackerUid,
-              ownerName: flt.attackerName,
-              planetName: 'Colonia PvP',
-              temperature: { min: maxTemp - 40, max: maxTemp },
-              minTemp: maxTemp - 40,
-              maxTemp,
-              fieldsMax: 200,
-              resources: {
-                metal: 1500 + (flt.cargo.metal || 0),
-                crystal: 1500 + (flt.cargo.crystal || 0),
-                deuterium: 500 + (flt.cargo.deuterium || 0)
-              },
-              buildings: {
-                metalMine: 0, crystalMine: 0, deuteriumSynth: 0, solarPlant: 0, fusionReactor: 0,
-                roboticsFactory: 0, naniteFactory: 0, shipyard: 0, metalStorage: 0, crystalStorage: 0,
-                deuteriumTank: 0, researchLab: 0, terraformer: 0, hiddenBunker: 0
-              },
-              defenses: {},
-              fleet: {},
-              moon: null,
-              debris: (tSnap.exists && tSnap.data().debris) || { metal: 0, crystal: 0 },
-              lastUpdated: now
-            });
-
-            tx.update(fleetDocRef, {
-              status: 'returning',
-              fleet: updatedFleet,
-              cargo: { metal: 0, crystal: 0, deuterium: 0 }
-            });
-          } else {
-            tx.update(fleetDocRef, { status: 'returning' });
-          }
-          return;
-        }
-
-        // MISSIONE TRASPORTO
-        if (flt.mission === 'transport') {
-          if (tSnap.exists && tSnap.data().ownerUid) {
-            const liveTarget = calculateLiveResources(tSnap.data(), uniSpeed, defResearches);
-            liveTarget.resources.metal += flt.cargo.metal || 0;
-            liveTarget.resources.crystal += flt.cargo.crystal || 0;
-            liveTarget.resources.deuterium += flt.cargo.deuterium || 0;
-            liveTarget.lastUpdated = now;
-            tx.set(targetRef, liveTarget);
-          }
-          tx.update(fleetDocRef, {
-            status: 'returning',
-            cargo: { metal: 0, crystal: 0, deuterium: 0 }
-          });
-          return;
-        }
-
-        // MISSIONE RICICLAGGIO
-        if (flt.mission === 'recycle') {
-          if (tSnap.exists) {
-            const pData = tSnap.data();
-            const debris = pData.debris || { metal: 0, crystal: 0 };
-            const Data = window.UniversumData;
-            let recCap = 0;
-            for (const [id, qty] of Object.entries(flt.fleet || {})) {
-              recCap += (Data.SHIPS[id]?.cargo || 0) * qty;
-            }
-            const used = (flt.cargo.metal || 0) + (flt.cargo.crystal || 0) + (flt.cargo.deuterium || 0);
-            const free = Math.max(0, recCap - used);
-            const takeM = Math.min(debris.metal, Math.floor(free * 0.6));
-            const takeC = Math.min(debris.crystal, free - takeM);
-
-            tx.update(targetRef, {
-              debris: {
-                metal: Math.max(0, debris.metal - takeM),
-                crystal: Math.max(0, debris.crystal - takeC)
-              }
-            });
-            tx.update(fleetDocRef, {
-              status: 'returning',
-              cargo: {
-                metal: (flt.cargo.metal || 0) + takeM,
-                crystal: (flt.cargo.crystal || 0) + takeC,
-                deuterium: flt.cargo.deuterium || 0
-              }
-            });
-          } else {
-            tx.update(fleetDocRef, { status: 'returning' });
-          }
-          return;
-        }
-
-        // MISSIONE ATTACCO / DISTRUZIONE LUNA PvP
-        if (flt.mission === 'attack' || flt.mission === 'destroyMoon') {
-          if (!tSnap.exists || !tSnap.data().ownerUid) {
-            tx.update(fleetDocRef, { status: 'returning' });
-            return;
-          }
-
-          const liveTarget = calculateLiveResources(tSnap.data(), uniSpeed, defResearches);
-          const combat = Galaxy.resolveCombat(flt.fleet, flt.attackerResearches || {}, {
-            fleet: liveTarget.fleet || {},
-            defenses: liveTarget.defenses || {},
-            tech: defResearches,
-            resources: liveTarget.resources,
-            buildings: liveTarget.buildings || {},
-            moon: liveTarget.moon
-          });
-
-          const prevDebris = liveTarget.debris || { metal: 0, crystal: 0 };
-          const updatedDebris = {
-            metal: prevDebris.metal + combat.debris.metal,
-            crystal: prevDebris.crystal + combat.debris.crystal
-          };
-
-          const updatedCargo = {
-            metal: (flt.cargo.metal || 0) + combat.loot.metal,
-            crystal: (flt.cargo.crystal || 0) + combat.loot.crystal,
-            deuterium: (flt.cargo.deuterium || 0) + combat.loot.deuterium
-          };
-
-          let summaryText = `Scontro su [${flt.targetKey}] tra ${flt.attackerName} e ${liveTarget.ownerName}. Esito: ${combat.result.toUpperCase()} (${combat.roundsPlayed} round). Bottino: ${combat.loot.metal.toLocaleString()} M, ${combat.loot.crystal.toLocaleString()} C, ${combat.loot.deuterium.toLocaleString()} D.`;
-
-          if (combat.planetDestroyed) {
-            // 1% Morte Nera: pianeta polverizzato e reso di nuovo colonizzabile
-            tx.set(targetRef, {
-              coords: flt.targetCoords,
-              ownerUid: null,
-              ownerName: null,
-              planetName: 'Slot Vuoto (Distrutto da Morte Nera)',
-              resources: { metal: 0, crystal: 0, deuterium: 0 },
-              buildings: {},
-              defenses: {},
-              fleet: {},
-              moon: null,
-              debris: updatedDebris,
-              lastUpdated: now
-            });
-            summaryText += ' ☄️ UNA MORTE NERA HA DISINTEGRATO L’INTERO PIANETA!';
-          } else {
-            liveTarget.resources.metal = Math.max(0, liveTarget.resources.metal - combat.loot.metal);
-            liveTarget.resources.crystal = Math.max(0, liveTarget.resources.crystal - combat.loot.crystal);
-            liveTarget.resources.deuterium = Math.max(0, liveTarget.resources.deuterium - combat.loot.deuterium);
-            liveTarget.fleet = combat.defenderFleetSurvivors;
-            liveTarget.defenses = combat.repairedDefenses;
-            liveTarget.debris = updatedDebris;
-            if (combat.moonDestroyed && liveTarget.moon) {
-              liveTarget.moon = null;
-              summaryText += ' 🌑💥 LA LUNA È STATA DISTRUTTA!';
-            }
-
-            // Conquista pianeta nemico se distrutto tutto + nave colonizzatrice/madre sopravvissuta
-            const noDefLeft =
-              Object.keys(combat.defenderFleetSurvivors).length === 0 &&
-              Object.keys(combat.repairedDefenses).length === 0;
-            const hasConqShip = (combat.attackerSurvivors.colonyShip || 0) >= 1 || (combat.attackerSurvivors.mothership || 0) >= 1;
-
-            if (flt.mission === 'attack' && combat.result === 'attacker_win' && noDefLeft && hasConqShip) {
-              if ((combat.attackerSurvivors.colonyShip || 0) >= 1) {
-                combat.attackerSurvivors.colonyShip -= 1;
-              }
-              liveTarget.ownerUid = flt.attackerUid;
-              liveTarget.ownerName = flt.attackerName;
-              summaryText += ` 👑 ${flt.attackerName} HA CONQUISTATO IL PIANETA!`;
-            }
-
-            liveTarget.lastUpdated = now;
-            tx.set(targetRef, liveTarget);
-          }
-
-          // Invia rapporto di battaglia a entrambi i giocatori
-          tx.set(uniRef.collection('messages').doc(), {
-            recipientUid: flt.attackerUid,
-            time: now,
-            type: 'combat',
-            title: `⚔️ Rapporto Battaglia PvP [${flt.targetKey}]`,
-            body: summaryText
-          });
-
-          if (flt.defenderUid) {
-            tx.set(uniRef.collection('messages').doc(), {
-              recipientUid: flt.defenderUid,
-              time: now,
-              type: 'combat',
-              title: `🛡️ Difesa Planetaria PvP [${flt.targetKey}]`,
-              body: summaryText
-            });
-          }
-
-          tx.update(fleetDocRef, {
-            status: 'returning',
-            fleet: combat.attackerSurvivors,
-            cargo: updatedCargo
-          });
-          return;
-        }
-
-        // Altre missioni (es. explore): rientro semplice
-        tx.update(fleetDocRef, { status: 'returning' });
-      }
-
-      // FASE 2: RIENTRO ALLA BASE (RETURNING -> COMPLETED)
-      const freshSnap = await tx.get(fleetDocRef);
-      const updatedFlt = freshSnap.data();
-      if (updatedFlt && updatedFlt.status === 'returning' && now >= updatedFlt.returnTime) {
-        const originRef = uniRef.collection('planets').doc(updatedFlt.originKey);
-        const oSnap = await tx.get(originRef);
-
-        if (oSnap.exists && oSnap.data().ownerUid === updatedFlt.attackerUid) {
-          const homePlanet = oSnap.data();
-          if (!homePlanet.fleet) homePlanet.fleet = {};
-          for (const [id, qty] of Object.entries(updatedFlt.fleet || {})) {
-            homePlanet.fleet[id] = (homePlanet.fleet[id] || 0) + qty;
-          }
-          homePlanet.resources.metal = (homePlanet.resources.metal || 0) + (updatedFlt.cargo?.metal || 0);
-          homePlanet.resources.crystal = (homePlanet.resources.crystal || 0) + (updatedFlt.cargo?.crystal || 0);
-          homePlanet.resources.deuterium = (homePlanet.resources.deuterium || 0) + (updatedFlt.cargo?.deuterium || 0);
-          tx.set(originRef, homePlanet);
-        }
-
-        tx.delete(fleetDocRef);
-      }
-    });
-  }
-
-  async function resolveArrivedOnlineFleets(uniId) {
-    const { db } = ensureFirebase();
-    const user = getCurrentUser();
-    if (!user) return;
-
-    const uniRef = db.collection(COL_UNIVERSES).doc(uniId);
-    const uniSnap = await uniRef.get();
-    if (!uniSnap.exists) return;
-    const uniSpeed = uniSnap.data().speed || 10;
-
-    // Controlla sia flotte lanciate dal giocatore sia flotte dirette contro il giocatore
-    const [outSnap, inSnap] = await Promise.all([
-      uniRef.collection('fleets').where('attackerUid', '==', user.uid).get(),
-      uniRef.collection('fleets').where('defenderUid', '==', user.uid).get()
-    ]);
-
-    const seenIds = new Set();
-    const candidates = [];
-    outSnap.forEach((doc) => {
-      seenIds.add(doc.id);
-      candidates.push(doc);
-    });
-    inSnap.forEach((doc) => {
-      if (!seenIds.has(doc.id)) candidates.push(doc);
-    });
-
-    const now = Date.now();
-    for (const doc of candidates) {
-      const f = doc.data();
-      const shouldProcess =
-        (f.status === 'outbound' && now >= f.arrivalTime) ||
-        (f.status === 'returning' && now >= f.returnTime);
-
-      if (shouldProcess) {
-        try {
-          await resolveSingleArrivedFleet(uniId, uniSpeed, doc.ref);
-        } catch (err) {
-          console.warn('[MP] Errore risoluzione transazione flotta:', err);
-        }
-      }
-    }
-  }
-
-  // Radar in tempo reale per attacchi / spionaggi nemici in arrivo
-  function listenIncomingRadar(uniId, onAlertCallback) {
-    const { db } = ensureFirebase();
-    const user = getCurrentUser();
-    if (!user) return;
-
-    if (radarUnsubscribe) {
-      radarUnsubscribe();
-      radarUnsubscribe = null;
-    }
-
-    radarUnsubscribe = db.collection(COL_UNIVERSES).doc(uniId).collection('fleets')
+    return db.collection('online_universes').doc(universeObj.id).collection('fleets')
       .where('defenderUid', '==', user.uid)
       .where('status', '==', 'outbound')
-      .onSnapshot((snapshot) => {
-        const incoming = snapshot.docs.map((d) => d.data());
-        if (typeof onAlertCallback === 'function') {
-          onAlertCallback(incoming);
-        }
-        if (incoming.length > 0 && window.UniversumUI) {
-          window.UniversumUI.playSound?.('alarm');
-          window.UniversumUI.toast?.(
-            `🚨 RADAR PvP: ${incoming.length} flotta/e ostile/i in avvicinamento ai tuoi pianeti!`,
-            'error'
-          );
-        }
+      .onSnapshot((snap) => {
+        const list = snap.docs
+          .map((d) => Object.assign({ id: d.id }, d.data()))
+          .filter((f) => f.attackerUid !== user.uid && (f.mission === 'attack' || f.mission === 'spy' || f.mission === 'destroyMoon'));
+        callback(list);
+      }, (err) => {
+        console.warn('[MP Radar] Errore listener flotte in arrivo:', err);
       });
   }
 
-  function startRealtimeListeners(uniId) {
-    listenIncomingRadar(uniId, null);
-    if (fleetSweepTimer) clearInterval(fleetSweepTimer);
-    fleetSweepTimer = setInterval(() => {
-      resolveArrivedOnlineFleets(uniId).catch(() => {});
-    }, 5000);
+  async function resolveArrivedOnlineFleets(uniId) {
+    const db = getDB();
+    const uniRef = db.collection('online_universes').doc(uniId);
+    const now = Date.now();
+
+    const arrivedSnap = await uniRef.collection('fleets')
+      .where('status', '==', 'outbound')
+      .where('arrivalTime', '<=', now)
+      .limit(10)
+      .get();
+
+    if (arrivedSnap.empty) return;
+
+    const uniSnap = await uniRef.get();
+    const speed = uniSnap.exists ? (uniSnap.data().speed || 10) : 10;
+
+    for (const fDoc of arrivedSnap.docs) {
+      const fleet = fDoc.data();
+      const fleetRef = fDoc.ref;
+      const targetPlanetRef = uniRef.collection('planets').doc(fleet.targetKey);
+      const originPlanetRef = uniRef.collection('planets').doc(coordsToKey(fleet.originCoords));
+
+      try {
+        await db.runTransaction(async (tx) => {
+          const freshFleetSnap = await tx.get(fleetRef);
+          if (!freshFleetSnap.exists || freshFleetSnap.data().resolved) return;
+
+          const targetSnap = await tx.get(targetPlanetRef);
+          const originSnap = await tx.get(originPlanetRef);
+
+          const targetPlanet = targetSnap.exists ? calculateLiveResources(targetSnap.data(), speed) : null;
+          const originPlanet = originSnap.exists ? calculateLiveResources(originSnap.data(), speed) : null;
+
+          let reportTitle = `Missione ${fleet.mission.toUpperCase()} [${fleet.targetKey}]`;
+          let reportBody = 'Missione completata.';
+
+          if (fleet.mission === 'spy' && targetPlanet) {
+            reportTitle = `👁️ Rapporto Spionaggio su ${targetPlanet.name} [${fleet.targetKey}]`;
+            reportBody = `Risorse rilevate — Metallo: ${Math.floor(targetPlanet.resources.metal)}, Cristallo: ${Math.floor(targetPlanet.resources.crystal)}, Deuterio: ${Math.floor(targetPlanet.resources.deuterium)}.`;
+          } else if (fleet.mission === 'transport' && targetPlanet) {
+            targetPlanet.resources.metal += fleet.cargo.metal || 0;
+            targetPlanet.resources.crystal += fleet.cargo.crystal || 0;
+            targetPlanet.resources.deuterium += fleet.cargo.deuterium || 0;
+            tx.set(targetPlanetRef, targetPlanet, { merge: true });
+            reportTitle = `📦 Consegna Risorse su ${targetPlanet.name}`;
+            reportBody = `Consegnati ${fleet.cargo.metal} M, ${fleet.cargo.crystal} C, ${fleet.cargo.deuterium} D.`;
+          } else if (fleet.mission === 'colonize' && !targetPlanet) {
+            const newColony = createStarterPlanetDoc(
+              uniId,
+              fleet.targetCoords,
+              fleet.attackerUid,
+              fleet.attackerName,
+              `Colonia ${fleet.targetKey}`,
+              false
+            );
+            tx.set(targetPlanetRef, newColony);
+            reportTitle = `🌍 Nuova Colonia Fondata [${fleet.targetKey}]`;
+            reportBody = `Il pianeta in coordinate [${fleet.targetKey}] è ora sotto il tuo comando.`;
+          } else if (fleet.mission === 'attack' && targetPlanet && window.UniversumGalaxy?.resolveCombat) {
+            const combat = window.UniversumGalaxy.resolveCombat(
+              fleet.ships,
+              fleet.attackerTech,
+              {
+                fleet: targetPlanet.fleet || {},
+                defenses: targetPlanet.defenses || {},
+                tech: { weaponsTech: 0, shieldingTech: 0, armourTech: 0 },
+                resources: targetPlanet.resources,
+                buildings: targetPlanet.buildings || {},
+                moon: targetPlanet.moon || null
+              }
+            );
+
+            targetPlanet.fleet = combat.defenderSurvivors;
+            targetPlanet.defenses = combat.defenderDefenseSurvivors;
+            targetPlanet.resources.metal = Math.max(0, targetPlanet.resources.metal - combat.loot.metal);
+            targetPlanet.resources.crystal = Math.max(0, targetPlanet.resources.crystal - combat.loot.crystal);
+            targetPlanet.resources.deuterium = Math.max(0, targetPlanet.resources.deuterium - combat.loot.deuterium);
+            targetPlanet.debris = {
+              metal: (targetPlanet.debris?.metal || 0) + combat.debris.metal,
+              crystal: (targetPlanet.debris?.crystal || 0) + combat.debris.crystal
+            };
+            tx.set(targetPlanetRef, targetPlanet, { merge: true });
+
+            if (originPlanet) {
+              for (const [sId, surv] of Object.entries(combat.attackerSurvivors)) {
+                originPlanet.fleet[sId] = (originPlanet.fleet[sId] || 0) + surv;
+              }
+              originPlanet.resources.metal += combat.loot.metal;
+              originPlanet.resources.crystal += combat.loot.crystal;
+              originPlanet.resources.deuterium += combat.loot.deuterium;
+              tx.set(originPlanetRef, originPlanet, { merge: true });
+            }
+
+            reportTitle = `⚔️ Battaglia PvP su ${targetPlanet.name} [${fleet.targetKey}]`;
+            reportBody = `Esito: ${combat.result}. Bottino: ${combat.loot.metal} M, ${combat.loot.crystal} C, ${combat.loot.deuterium} D.`;
+          }
+
+          // Ritorno immediato navi superstiti per missioni non di combattimento
+          if (fleet.mission !== 'attack' && originPlanet) {
+            for (const [sId, qty] of Object.entries(fleet.ships)) {
+              if (fleet.mission === 'colonize' && sId === 'colonyShip') continue;
+              originPlanet.fleet[sId] = (originPlanet.fleet[sId] || 0) + qty;
+            }
+            tx.set(originPlanetRef, originPlanet, { merge: true });
+          }
+
+          tx.update(fleetRef, { status: 'completed', resolved: true });
+
+          const msgAttRef = uniRef.collection('messages').doc();
+          tx.set(msgAttRef, {
+            recipientUid: fleet.attackerUid,
+            title: reportTitle,
+            body: reportBody,
+            timestamp: now
+          });
+
+          if (fleet.defenderUid && fleet.defenderUid !== fleet.attackerUid && !targetPlanet?.isNpc) {
+            const msgDefRef = uniRef.collection('messages').doc();
+            tx.set(msgDefRef, {
+              recipientUid: fleet.defenderUid,
+              title: `🚨 ${reportTitle}`,
+              body: `Attaccante: ${fleet.attackerName}. ${reportBody}`,
+              timestamp: now
+            });
+          }
+        });
+      } catch (err) {
+        console.warn('[MP Transaction] Risoluzione flotta rinviata:', err);
+      }
+    }
   }
 
-  function stopListeners() {
-    if (radarUnsubscribe) {
-      radarUnsubscribe();
-      radarUnsubscribe = null;
-    }
-    if (chatUnsubscribe) {
-      chatUnsubscribe();
-      chatUnsubscribe = null;
-    }
-    if (fleetSweepTimer) {
-      clearInterval(fleetSweepTimer);
-      fleetSweepTimer = null;
-    }
-  }
-
-  // =========================================================================
-  // 6. CLASSIFICA GLOBALE E CHAT GALATTICA IN TEMPO REALE
-  // =========================================================================
+  // =========================================================
+  // 6. CLASSIFICA GLOBALE (SOLO GIOCATORI UMANI)
+  // =========================================================
   async function getLeaderboard(uniId) {
-    const { db } = ensureFirebase();
-    const Data = window.UniversumData;
-    const uniRef = db.collection(COL_UNIVERSES).doc(uniId);
+    const db = getDB();
+    const snap = await db.collection('online_universes').doc(uniId).collection('players')
+      .orderBy('points', 'desc')
+      .limit(50)
+      .get();
 
-    const [playersSnap, planetsSnap] = await Promise.all([
-      uniRef.collection('players').get(),
-      uniRef.collection('planets').get()
-    ]);
-
-    const scoreMap = {};
-    playersSnap.forEach((doc) => {
-      const p = doc.data();
-      let researchPts = 0;
-      for (const lv of Object.values(p.researches || {})) {
-        researchPts += (Number(lv) || 0) * 350;
-      }
-      scoreMap[doc.id] = {
-        uid: doc.id,
-        nickname: p.nickname || 'Comandante',
-        buildingPts: 0,
-        researchPts,
-        fleetPts: 0,
-        planetCount: 0,
-        totalPts: researchPts
-      };
-    });
-
-    planetsSnap.forEach((doc) => {
-      const pl = doc.data();
-      if (!pl.ownerUid || !scoreMap[pl.ownerUid]) return;
-      const entry = scoreMap[pl.ownerUid];
-      entry.planetCount += 1;
-
-      for (const lv of Object.values(pl.buildings || {})) {
-        entry.buildingPts += (Number(lv) || 0) * 150;
-      }
-      for (const [sId, cnt] of Object.entries(pl.fleet || {})) {
-        const spec = Data?.SHIPS?.[sId];
-        if (spec) {
-          entry.fleetPts += Math.floor(((spec.cost.metal + spec.cost.crystal + spec.cost.deuterium) / 1000) * cnt);
-        }
-      }
-      entry.totalPts = entry.buildingPts + entry.researchPts + entry.fleetPts;
-    });
-
-    return Object.values(scoreMap).sort((a, b) => b.totalPts - a.totalPts);
+    return snap.docs.map((d) => d.data());
   }
 
+  // =========================================================
+  // 7. CHAT GALATTICA (LIMITE ULTIMI 50 MESSAGGI)
+  // =========================================================
   async function sendChatMessage(uniId, text) {
-    const { db } = ensureFirebase();
-    const user = getCurrentUser();
-    if (!user) throw new Error('Accedi per scrivere nella Chat Galattica.');
+    const auth = getAuth();
+    const db = getDB();
+    const user = auth.currentUser;
+    if (!user) throw new Error('Devi accedere per inviare messaggi.');
 
-    const cleaned = String(text || '').trim().substring(0, 240);
-    if (!cleaned) return;
+    const cleanText = String(text || '').trim().slice(0, 240);
+    if (!cleanText) return;
 
-    await db.collection(COL_UNIVERSES).doc(uniId).collection('chat').add({
-      senderUid: user.uid,
-      senderName: user.nickname,
-      text: cleaned,
-      time: Date.now()
+    const nickname = user.displayName || user.email.split('@')[0];
+    await db.collection('online_universes').doc(uniId).collection('chat').add({
+      uid: user.uid,
+      nickname,
+      text: cleanText,
+      timestamp: Date.now()
     });
   }
 
   function listenChat(uniId, callback) {
-    const { db } = ensureFirebase();
-    if (chatUnsubscribe) {
-      chatUnsubscribe();
-      chatUnsubscribe = null;
-    }
-
-    chatUnsubscribe = db.collection(COL_UNIVERSES).doc(uniId).collection('chat')
-      .orderBy('time', 'desc')
-      .limit(40)
-      .onSnapshot((snapshot) => {
-        const msgs = snapshot.docs.map((d) => Object.assign({ id: d.id }, d.data())).reverse();
-        if (typeof callback === 'function') {
-          callback(msgs);
-        }
+    const db = getDB();
+    return db.collection('online_universes').doc(uniId).collection('chat')
+      .orderBy('timestamp', 'desc')
+      .limit(50)
+      .onSnapshot((snap) => {
+        const messages = snap.docs
+          .map((d) => Object.assign({ id: d.id }, d.data()))
+          .reverse();
+        callback(messages);
+      }, (err) => {
+        console.warn('[MP Chat] Errore listener chat galattica:', err);
       });
-
-    return chatUnsubscribe;
   }
 
-  // Esposizione API globale
+  // =========================================================
+  // 8. MESSAGGI PRIVATI TRA GIOCATORI (LIMITE 15 MESSAGGI)
+  // =========================================================
+  function _getPrivateChatId(uid1, uid2) {
+    return [String(uid1), String(uid2)].sort().join('_');
+  }
+
+  async function getUniversePlayers(uniId) {
+    const auth = getAuth();
+    const db = getDB();
+    const myUid = auth.currentUser?.uid;
+    if (!myUid) return [];
+
+    const snap = await db.collection('online_universes').doc(uniId).collection('players')
+      .orderBy('nickname', 'asc')
+      .get();
+
+    return snap.docs
+      .map((d) => d.data())
+      .filter((p) => p.uid && p.uid !== myUid)
+      .map((p) => ({
+        uid: p.uid,
+        nickname: p.nickname || 'Comandante'
+      }));
+  }
+
+  async function sendPrivateMessage(uniId, targetUid, targetName, text) {
+    const auth = getAuth();
+    const db = getDB();
+    const user = auth.currentUser;
+    if (!user) throw new Error('Devi accedere per inviare messaggi privati.');
+
+    const cleanText = String(text || '').trim().slice(0, 300);
+    if (!cleanText) throw new Error('Il messaggio non può essere vuoto.');
+    if (!targetUid || targetUid === user.uid) throw new Error('Destinatario non valido.');
+
+    const myUid = user.uid;
+    const myName = user.displayName || user.email.split('@')[0];
+    const safeTargetName = sanitizeNickname(targetName) || 'Comandante';
+    const chatId = this._getPrivateChatId(myUid, targetUid);
+    const now = Date.now();
+
+    const chatDocRef = db.collection('online_universes').doc(uniId)
+      .collection('private_chats').doc(chatId);
+    const messagesColRef = chatDocRef.collection('messages');
+
+    // 1. Aggiunge il nuovo messaggio nella sottoraccolta
+    await messagesColRef.add({
+      senderUid: myUid,
+      senderName: myName,
+      text: cleanText,
+      timestamp: now
+    });
+
+    // 2. Aggiorna i metadati della stanza padre
+    await chatDocRef.set({
+      participants: [myUid, targetUid],
+      participantNames: {
+        [myUid]: myName,
+        [targetUid]: safeTargetName
+      },
+      lastMessage: cleanText,
+      lastTimestamp: now,
+      unreadFor: targetUid
+    }, { merge: true });
+
+    // 3. Pulizia in background dei messaggi oltre il 15° più recente
+    messagesColRef.orderBy('timestamp', 'desc').get().then((snap) => {
+      if (snap.size > 15) {
+        const batch = db.batch();
+        snap.docs.slice(15).forEach((oldDoc) => batch.delete(oldDoc.ref));
+        return batch.commit();
+      }
+    }).catch(() => {});
+  }
+
+  function listenPrivateConversations(uniId, callback) {
+    const auth = getAuth();
+    const db = getDB();
+    const myUid = auth.currentUser?.uid;
+    if (!myUid) return () => {};
+
+    return db.collection('online_universes').doc(uniId).collection('private_chats')
+      .where('participants', 'array-contains', myUid)
+      .orderBy('lastTimestamp', 'desc')
+      .onSnapshot((snap) => {
+        let unreadCount = 0;
+        const conversations = snap.docs.map((doc) => {
+          const data = doc.data();
+          if (data.unreadFor === myUid) unreadCount++;
+          const otherUid = (data.participants || []).find((id) => id !== myUid) || '';
+          const otherName = (data.participantNames && data.participantNames[otherUid]) || 'Comandante';
+          return {
+            chatId: doc.id,
+            otherUid,
+            otherName,
+            lastMessage: data.lastMessage || '',
+            lastTimestamp: data.lastTimestamp || 0,
+            isUnread: data.unreadFor === myUid
+          };
+        });
+        callback(conversations, unreadCount);
+      }, (err) => {
+        console.warn('[MP Private] Errore listener conversazioni private:', err);
+      });
+  }
+
+  function listenPrivateMessages(uniId, otherUid, callback) {
+    const auth = getAuth();
+    const db = getDB();
+    const myUid = auth.currentUser?.uid;
+    if (!myUid || !otherUid) return () => {};
+
+    const chatId = this._getPrivateChatId(myUid, otherUid);
+    const chatDocRef = db.collection('online_universes').doc(uniId)
+      .collection('private_chats').doc(chatId);
+
+    return chatDocRef.collection('messages')
+      .orderBy('timestamp', 'desc')
+      .limit(15)
+      .onSnapshot(async (snap) => {
+        // Azzera il flag unreadFor se la chat era non letta dall'utente corrente
+        chatDocRef.get().then((roomSnap) => {
+          if (roomSnap.exists && roomSnap.data().unreadFor === myUid) {
+            chatDocRef.update({ unreadFor: null }).catch(() => {});
+          }
+        }).catch(() => {});
+
+        const messages = snap.docs
+          .map((d) => Object.assign({ id: d.id }, d.data()))
+          .reverse();
+        callback(messages);
+      }, (err) => {
+        console.warn('[MP Private] Errore listener messaggi privati:', err);
+      });
+  }
+
   window.UniversumMP = {
     registerOrLogin,
-    logout,
-    getCurrentUser,
     getOnlineUniverses,
     createOnlineUniverse,
     joinOnlineUniverse,
     calculateLiveResources,
-    syncPlanetState,
+    syncPlayerState,
     renameOnlinePlanet,
     renameOnlineMoon,
     getOnlineSystem,
     launchOnlineFleet,
+    listenIncomingFleets,
     resolveArrivedOnlineFleets,
-    listenIncomingRadar,
-    stopListeners,
     getLeaderboard,
     sendChatMessage,
-    listenChat
+    listenChat,
+    _getPrivateChatId,
+    getUniversePlayers,
+    sendPrivateMessage,
+    listenPrivateConversations,
+    listenPrivateMessages
   };
 })();
-
