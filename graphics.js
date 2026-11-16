@@ -1,0 +1,1100 @@
+/**
+ * UNIVERSUM — Motore Grafico Procedurale Sci-Fi (HTML5 Canvas 128x128)
+ * Parte 1: Core Engine, Cache, Helper Metallici/Neon, 14 Navi, 10 Difese
+ */
+(function () {
+  'use strict';
+
+  const SIZE = 128;
+  const cache = {};
+
+  // Canvas offscreen riutilizzato per tutte le renderizzazioni
+  const offscreenCanvas = document.createElement('canvas');
+  offscreenCanvas.width = SIZE;
+  offscreenCanvas.height = SIZE;
+  const ctx = offscreenCanvas.getContext('2d');
+
+  // =========================================================
+  // HELPER DI RENDERING SCI-FI
+  // =========================================================
+
+  function _drawCardBg(c, accentColor = '#00d2ff') {
+    c.save();
+    c.clearRect(0, 0, SIZE, SIZE);
+
+    // Sfondo base spazio profondo
+    c.fillStyle = '#050814';
+    c.fillRect(0, 0, SIZE, SIZE);
+
+    // Nebulosa radiale soffusa
+    const neb = c.createRadialGradient(SIZE * 0.5, SIZE * 0.5, 6, SIZE * 0.5, SIZE * 0.5, SIZE * 0.65);
+    neb.addColorStop(0, _hexToRgba(accentColor, 0.24));
+    neb.addColorStop(0.6, _hexToRgba(accentColor, 0.06));
+    neb.addColorStop(1, 'rgba(5, 8, 20, 0)');
+    c.fillStyle = neb;
+    c.fillRect(0, 0, SIZE, SIZE);
+
+    // Micro-stelle deterministiche
+    c.fillStyle = '#ffffff';
+    const stars = [
+      [14, 18, 0.7, 0.5], [110, 22, 0.9, 0.7], [24, 106, 0.8, 0.4],
+      [104, 98, 0.6, 0.6], [64, 12, 0.7, 0.35], [18, 62, 0.5, 0.45],
+      [114, 58, 0.7, 0.5], [48, 114, 0.6, 0.4], [88, 16, 0.5, 0.5]
+    ];
+    for (const [sx, sy, sr, sa] of stars) {
+      c.globalAlpha = sa;
+      c.beginPath();
+      c.arc(sx, sy, sr, 0, Math.PI * 2);
+      c.fill();
+    }
+    c.globalAlpha = 1;
+
+    // Reticolo tattico sottile
+    c.strokeStyle = _hexToRgba(accentColor, 0.12);
+    c.lineWidth = 0.75;
+    c.beginPath();
+    c.moveTo(0, 32); c.lineTo(SIZE, 32);
+    c.moveTo(0, 96); c.lineTo(SIZE, 96);
+    c.moveTo(32, 0); c.lineTo(32, SIZE);
+    c.moveTo(96, 0); c.lineTo(96, SIZE);
+    c.stroke();
+
+    // Mirino angolare HUD
+    c.strokeStyle = _hexToRgba(accentColor, 0.42);
+    c.lineWidth = 1.2;
+    const m = 6;
+    const len = 10;
+    c.beginPath();
+    // Top-Left
+    c.moveTo(m, m + len); c.lineTo(m, m); c.lineTo(m + len, m);
+    // Top-Right
+    c.moveTo(SIZE - m - len, m); c.lineTo(SIZE - m, m); c.lineTo(SIZE - m, m + len);
+    // Bottom-Left
+    c.moveTo(m, SIZE - m - len); c.lineTo(m, SIZE - m); c.lineTo(m + len, SIZE - m);
+    // Bottom-Right
+    c.moveTo(SIZE - m - len, SIZE - m); c.lineTo(SIZE - m, SIZE - m); c.lineTo(SIZE - m, SIZE - m - len);
+    c.stroke();
+
+    c.restore();
+  }
+
+  function _drawMetallicHull(c, pathFn, baseColor = '#37474f', lightColor = '#cfd8dc', strokeColor = '#00d2ff') {
+    c.save();
+    c.beginPath();
+    pathFn(c);
+    c.closePath();
+
+    // Gradiente metallico direzionale (luce dall'alto a sinistra)
+    const grad = c.createLinearGradient(20, 18, 108, 110);
+    grad.addColorStop(0, lightColor);
+    grad.addColorStop(0.45, baseColor);
+    grad.addColorStop(1, '#0d1322');
+
+    c.fillStyle = grad;
+    c.fill();
+
+    // Riflesso speculare interno
+    c.lineWidth = 1.4;
+    c.strokeStyle = strokeColor;
+    c.stroke();
+    c.restore();
+  }
+
+  function _drawEngineGlow(c, x, y, radius, color = '#00d2ff', trailAngle = null, trailLength = 0) {
+    c.save();
+    if (trailAngle !== null && trailLength > 0) {
+      c.translate(x, y);
+      c.rotate(trailAngle);
+      const tGrad = c.createLinearGradient(0, 0, trailLength, 0);
+      tGrad.addColorStop(0, '#ffffff');
+      tGrad.addColorStop(0.25, color);
+      tGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      c.fillStyle = tGrad;
+      c.beginPath();
+      c.moveTo(0, -radius * 0.7);
+      c.lineTo(trailLength, 0);
+      c.lineTo(0, radius * 0.7);
+      c.closePath();
+      c.fill();
+      c.setTransform(1, 0, 0, 1, 0, 0);
+    }
+
+    const glow = c.createRadialGradient(x, y, 0.5, x, y, radius);
+    glow.addColorStop(0, '#ffffff');
+    glow.addColorStop(0.35, color);
+    glow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    c.fillStyle = glow;
+    c.beginPath();
+    c.arc(x, y, radius, 0, Math.PI * 2);
+    c.fill();
+    c.restore();
+  }
+
+  function _drawPanelLines(c, lines, color = 'rgba(255,255,255,0.18)') {
+    c.save();
+    c.strokeStyle = color;
+    c.lineWidth = 1;
+    c.beginPath();
+    for (const [x1, y1, x2, y2] of lines) {
+      c.moveTo(x1, y1);
+      c.lineTo(x2, y2);
+    }
+    c.stroke();
+    c.restore();
+  }
+
+  function _hexToRgba(hex, alpha) {
+    if (!hex || !hex.startsWith('#')) return `rgba(0, 210, 255, ${alpha})`;
+    const clean = hex.replace('#', '');
+    const full = clean.length === 3
+      ? clean.split('').map((ch) => ch + ch).join('')
+      : clean;
+    const num = parseInt(full, 16);
+    const r = (num >> 16) & 255;
+    const g = (num >> 8) & 255;
+    const b = num & 255;
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
+
+  // =========================================================
+  // RENDERERS: 14 NAVI
+  // =========================================================
+  const SHIP_RENDERERS = {
+    // 1. Cargo Leggero: navetta agile con stiva anteriore compatta e due propulsori azzurri
+    smallCargo(c) {
+      _drawCardBg(c, '#00d2ff');
+      // Scia e propulsori posteriori (sinistra)
+      _drawEngineGlow(c, 26, 52, 11, '#00d2ff', Math.PI, 20);
+      _drawEngineGlow(c, 26, 76, 11, '#00d2ff', Math.PI, 20);
+
+      // Alette stabilizzatrici
+      _drawMetallicHull(c, (p) => {
+        p.moveTo(32, 48); p.lineTo(22, 34); p.lineTo(48, 44);
+        p.moveTo(32, 80); p.lineTo(22, 94); p.lineTo(48, 84);
+      }, '#263238', '#78909c', '#00d2ff');
+
+      // Scafo centrale e stiva anteriore compatta
+      _drawMetallicHull(c, (p) => {
+        p.moveTo(30, 46);
+        p.lineTo(66, 42);
+        p.lineTo(98, 48);
+        p.lineTo(106, 64);
+        p.lineTo(98, 80);
+        p.lineTo(66, 86);
+        p.lineTo(30, 82);
+        p.lineTo(26, 64);
+      }, '#455a64', '#eceff1', '#00d2ff');
+
+      // Container stiva anteriore
+      c.fillStyle = 'rgba(0, 210, 255, 0.22)';
+      c.strokeStyle = '#00d2ff';
+      c.lineWidth = 1.2;
+      c.fillRect(64, 48, 28, 32);
+      c.strokeRect(64, 48, 28, 32);
+
+      // Cabina di pilotaggio
+      c.fillStyle = '#00e5ff';
+      c.beginPath();
+      c.moveTo(94, 56); c.lineTo(103, 64); c.lineTo(94, 72);
+      c.closePath();
+      c.fill();
+
+      _drawPanelLines(c, [[46, 45, 46, 83], [78, 48, 78, 80]]);
+    },
+
+    // 2. Cargo Pesante: grande cargo corazzato con container modulari e 4 motori arancioni
+    largeCargo(c) {
+      _drawCardBg(c, '#ff9100');
+      // 4 propulsori arancioni posteriori
+      [42, 56, 72, 86].forEach((ey) => {
+        _drawEngineGlow(c, 20, ey, 9, '#ff9100', Math.PI, 16);
+      });
+
+      // Telaio strutturale pesante
+      _drawMetallicHull(c, (p) => {
+        p.moveTo(22, 38);
+        p.lineTo(94, 38);
+        p.lineTo(112, 52);
+        p.lineTo(112, 76);
+        p.lineTo(94, 90);
+        p.lineTo(22, 90);
+      }, '#37474f', '#b0bec5', '#ff9100');
+
+      // 4 Container modulari corazzati (2x2)
+      const boxes = [
+        [32, 43, 26, 18], [62, 43, 26, 18],
+        [32, 67, 26, 18], [62, 67, 26, 18]
+      ];
+      for (const [bx, by, bw, bh] of boxes) {
+        c.fillStyle = '#1c2638';
+        c.strokeStyle = '#ffab40';
+        c.lineWidth = 1.2;
+        c.fillRect(bx, by, bw, bh);
+        c.strokeRect(bx, by, bw, bh);
+        _drawPanelLines(c, [[bx + 6, by, bx + 6, by + bh], [bx + 19, by, bx + 19, by + bh]], 'rgba(255,145,0,0.4)');
+      }
+
+      // Ponte corazzato anteriore
+      c.fillStyle = '#ff9100';
+      c.fillRect(98, 54, 8, 20);
+    },
+
+    // 3. Caccia Leggero: intercettore affilato ad ali a delta con propulsore blu neon
+    lightFighter(c) {
+      _drawCardBg(c, '#00d2ff');
+      _drawEngineGlow(c, 28, 64, 15, '#00d2ff', Math.PI, 24);
+
+      // Ali a delta affilate
+      _drawMetallicHull(c, (p) => {
+        p.moveTo(32, 64);
+        p.lineTo(24, 22);
+        p.lineTo(68, 52);
+        p.lineTo(112, 64);
+        p.lineTo(68, 76);
+        p.lineTo(24, 106);
+      }, '#2c3e50', '#e0f7fa', '#00d2ff');
+
+      // Fusoliera centrale + muso a ago
+      _drawMetallicHull(c, (p) => {
+        p.moveTo(30, 56);
+        p.lineTo(114, 64);
+        p.lineTo(30, 72);
+      }, '#455a64', '#ffffff', '#00e5ff');
+
+      // Cockpit blu neon
+      c.fillStyle = '#00e5ff';
+      c.beginPath();
+      c.ellipse(66, 64, 12, 4, 0, 0, Math.PI * 2);
+      c.fill();
+
+      // Cannoni laser alari
+      _drawPanelLines(c, [[44, 36, 78, 36], [44, 92, 78, 92]], '#00d2ff');
+    },
+
+    // 4. Caccia Pesante: doppia fusoliera e cannoni alari rossi
+    heavyFighter(c) {
+      _drawCardBg(c, '#ff1744');
+      _drawEngineGlow(c, 26, 46, 12, '#ff1744', Math.PI, 20);
+      _drawEngineGlow(c, 26, 82, 12, '#ff1744', Math.PI, 20);
+
+      // Ali angolate rinforzate
+      _drawMetallicHull(c, (p) => {
+        p.moveTo(34, 30);
+        p.lineTo(58, 22);
+        p.lineTo(84, 46);
+        p.lineTo(84, 82);
+        p.lineTo(58, 106);
+        p.lineTo(34, 98);
+      }, '#263238', '#90a4ae', '#ff5252');
+
+      // Doppia fusoliera d'assalto
+      _drawMetallicHull(c, (p) => {
+        p.moveTo(26, 40); p.lineTo(104, 48); p.lineTo(96, 56); p.lineTo(26, 54);
+        p.moveTo(26, 74); p.lineTo(96, 72); p.lineTo(104, 80); p.lineTo(26, 88);
+      }, '#37474f', '#eceff1', '#ff1744');
+
+      // Ponte centrale e cockpit rosso
+      _drawMetallicHull(c, (p) => {
+        p.moveTo(42, 52); p.lineTo(82, 58); p.lineTo(82, 70); p.lineTo(42, 76);
+      }, '#1c2536', '#cfd8dc', '#ff1744');
+
+      c.fillStyle = '#ff1744';
+      c.fillRect(62, 60, 14, 8);
+
+      // Bocche di fuoco rosse sulle punte
+      _drawEngineGlow(c, 105, 48, 5, '#ff1744');
+      _drawEngineGlow(c, 105, 80, 5, '#ff1744');
+    },
+
+    // 5. Incrociatore: lungo e slanciato con torrette dorsali e scia ionica
+    cruiser(c) {
+      _drawCardBg(c, '#00e5ff');
+      _drawEngineGlow(c, 18, 56, 12, '#00e5ff', Math.PI, 16);
+      _drawEngineGlow(c, 18, 72, 12, '#00e5ff', Math.PI, 16);
+
+      // Scafo lungo e slanciato
+      _drawMetallicHull(c, (p) => {
+        p.moveTo(18, 50);
+        p.lineTo(54, 42);
+        p.lineTo(116, 58);
+        p.lineTo(116, 70);
+        p.lineTo(54, 86);
+        p.lineTo(18, 78);
+      }, '#2c3e50', '#cfd8dc', '#00e5ff');
+
+      // Alette laterali a freccia
+      _drawMetallicHull(c, (p) => {
+        p.moveTo(32, 46); p.lineTo(22, 30); p.lineTo(62, 44);
+        p.moveTo(32, 82); p.lineTo(22, 98); p.lineTo(62, 84);
+      }, '#1c2833', '#90a4ae', '#00d2ff');
+
+      // Torrette dorsali binate
+      [54, 74, 92].forEach((tx) => {
+        c.fillStyle = '#eceff1';
+        c.beginPath();
+        c.arc(tx, 64, 4.2, 0, Math.PI * 2);
+        c.fill();
+        c.strokeStyle = '#00e5ff';
+        c.lineWidth = 1.4;
+        c.beginPath();
+        c.moveTo(tx + 2, 62.5); c.lineTo(tx + 10, 62.5);
+        c.moveTo(tx + 2, 65.5); c.lineTo(tx + 10, 65.5);
+        c.stroke();
+      });
+    },
+
+    // 6. Nave da Battaglia: corazzata pesante con ponte centrale e batterie laterali
+    battleship(c) {
+      _drawCardBg(c, '#2979ff');
+      [46, 64, 82].forEach((ey) => {
+        _drawEngineGlow(c, 18, ey, 11, '#2979ff', Math.PI, 16);
+      });
+
+      // Corpo principale massiccio
+      _drawMetallicHull(c, (p) => {
+        p.moveTo(20, 40);
+        p.lineTo(74, 34);
+        p.lineTo(112, 50);
+        p.lineTo(112, 78);
+        p.lineTo(74, 94);
+        p.lineTo(20, 88);
+      }, '#263238', '#b0bec5', '#448aff');
+
+      // Batterie laterali sporgenti
+      _drawMetallicHull(c, (p) => {
+        p.moveTo(42, 36); p.lineTo(48, 24); p.lineTo(82, 28); p.lineTo(86, 38);
+        p.moveTo(42, 92); p.lineTo(48, 104); p.lineTo(82, 100); p.lineTo(86, 90);
+      }, '#37474f', '#eceff1', '#00d2ff');
+
+      // Ponte di comando centrale corazzato
+      c.fillStyle = '#102027';
+      c.strokeStyle = '#448aff';
+      c.lineWidth = 1.5;
+      c.fillRect(46, 52, 26, 24);
+      c.strokeRect(46, 52, 26, 24);
+
+      c.fillStyle = '#00e5ff';
+      c.fillRect(66, 56, 4, 16);
+
+      _drawPanelLines(c, [[84, 42, 84, 86], [98, 48, 98, 80]]);
+    },
+
+    // 7. Bombardiere: doppio scafo curvo largo con vani bombe al plasma luminosi
+    bomber(c) {
+      _drawCardBg(c, '#d500f9');
+      _drawEngineGlow(c, 24, 44, 11, '#d500f9', Math.PI, 16);
+      _drawEngineGlow(c, 24, 84, 11, '#d500f9', Math.PI, 16);
+
+      // Doppio scafo curvo a mezzaluna
+      _drawMetallicHull(c, (p) => {
+        p.moveTo(26, 36);
+        p.quadraticCurveTo(75, 16, 108, 48);
+        p.lineTo(94, 56);
+        p.lineTo(94, 72);
+        p.lineTo(108, 80);
+        p.quadraticCurveTo(75, 112, 26, 92);
+        p.quadraticCurveTo(44, 64, 26, 36);
+      }, '#2c1e4a', '#cfd8dc', '#e040fb');
+
+      // Vani bombe al plasma luminosi
+      [50, 64, 78].forEach((by) => {
+        _drawEngineGlow(c, 74, by, 7, '#ff4081');
+        c.fillStyle = '#ffffff';
+        c.beginPath();
+        c.arc(74, by, 2.2, 0, Math.PI * 2);
+        c.fill();
+      });
+    },
+
+    // 8. Incrociatore da Battaglia: design a punta di lancia, finiture oro/blu e reattori multipli
+    battlecruiser(c) {
+      _drawCardBg(c, '#ffd700');
+      [48, 59, 69, 80].forEach((ey) => {
+        _drawEngineGlow(c, 18, ey, 9, '#00e5ff', Math.PI, 18);
+      });
+
+      // Scafo d'élite a punta di lancia
+      _drawMetallicHull(c, (p) => {
+        p.moveTo(20, 44);
+        p.lineTo(56, 26);
+        p.lineTo(116, 64);
+        p.lineTo(56, 102);
+        p.lineTo(20, 84);
+        p.lineTo(30, 64);
+      }, '#1a237e', '#eceff1', '#ffd700');
+
+      // Finiture dorate interne a freccia
+      c.strokeStyle = '#ffd700';
+      c.lineWidth = 2;
+      c.beginPath();
+      c.moveTo(36, 48); c.lineTo(96, 64); c.lineTo(36, 80);
+      c.stroke();
+
+      // Nucleo energetico blu/oro
+      _drawEngineGlow(c, 64, 64, 9, '#00e5ff');
+      c.fillStyle = '#ffd700';
+      c.beginPath();
+      c.arc(64, 64, 3.5, 0, Math.PI * 2);
+      c.fill();
+    },
+
+    // 9. Colonizzatrice: enorme vascello con cupola biosfera illuminata verde/azzurro al centro
+    colonyShip(c) {
+      _drawCardBg(c, '#00e676');
+      _drawEngineGlow(c, 18, 52, 12, '#00e676', Math.PI, 16);
+      _drawEngineGlow(c, 18, 76, 12, '#00e676', Math.PI, 16);
+
+      // Struttura anello/vascello coloniale
+      _drawMetallicHull(c, (p) => {
+        p.moveTo(20, 44);
+        p.lineTo(44, 34);
+        p.lineTo(94, 38);
+        p.lineTo(112, 64);
+        p.lineTo(94, 90);
+        p.lineTo(44, 94);
+        p.lineTo(20, 84);
+      }, '#263238', '#cfd8dc', '#00e676');
+
+      // Grande cupola biosfera centrale
+      const bioGrad = c.createRadialGradient(62, 58, 4, 66, 64, 24);
+      bioGrad.addColorStop(0, '#b9f6ca');
+      bioGrad.addColorStop(0.5, '#00e676');
+      bioGrad.addColorStop(0.85, '#0091ea');
+      bioGrad.addColorStop(1, '#004d40');
+      c.fillStyle = bioGrad;
+      c.beginPath();
+      c.arc(66, 64, 23, 0, Math.PI * 2);
+      c.fill();
+
+      c.strokeStyle = '#a7ffeb';
+      c.lineWidth = 1.6;
+      c.stroke();
+
+      // Nervature strutturali sulla cupola
+      c.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+      c.lineWidth = 1;
+      c.beginPath();
+      c.ellipse(66, 64, 23, 9, 0, 0, Math.PI * 2);
+      c.stroke();
+    },
+
+    // 10. Riciclatrice: nave industriale con chele/mandibole anteriori e raggio traente verde
+    recycler(c) {
+      _drawCardBg(c, '#00e676');
+      _drawEngineGlow(c, 20, 54, 10, '#ff9100', Math.PI, 14);
+      _drawEngineGlow(c, 20, 74, 10, '#ff9100', Math.PI, 14);
+
+      // Corpo industriale + chele anteriori
+      _drawMetallicHull(c, (p) => {
+        p.moveTo(22, 44);
+        p.lineTo(74, 40);
+        p.lineTo(108, 34);
+        p.lineTo(114, 46);
+        p.lineTo(84, 52);
+        p.lineTo(84, 76);
+        p.lineTo(114, 82);
+        p.lineTo(108, 94);
+        p.lineTo(74, 88);
+        p.lineTo(22, 84);
+      }, '#37474f', '#b0bec5', '#00e676');
+
+      // Raggio traente verde tra le mandibole
+      const beam = c.createLinearGradient(84, 64, 116, 64);
+      beam.addColorStop(0, 'rgba(0, 230, 118, 0.85)');
+      beam.addColorStop(1, 'rgba(0, 230, 118, 0.05)');
+      c.fillStyle = beam;
+      c.beginPath();
+      c.moveTo(84, 54);
+      c.lineTo(116, 46);
+      c.lineTo(116, 82);
+      c.lineTo(84, 74);
+      c.closePath();
+      c.fill();
+
+      // Frammenti detriti catturati
+      c.fillStyle = '#cfd8dc';
+      c.fillRect(98, 58, 5, 4);
+      c.fillRect(105, 67, 4, 5);
+    },
+
+    // 11. Sonda Spia: piccolo drone esagonale nero con lente sensore rossa luminosa
+    espionageProbe(c) {
+      _drawCardBg(c, '#ff1744');
+      _drawEngineGlow(c, 26, 64, 10, '#00d2ff', Math.PI, 16);
+
+      // Antenne telemetriche sottili
+      c.strokeStyle = '#90a4ae';
+      c.lineWidth = 1.5;
+      c.beginPath();
+      c.moveTo(64, 42); c.lineTo(94, 24);
+      c.moveTo(64, 86); c.lineTo(94, 104);
+      c.moveTo(84, 64); c.lineTo(114, 64);
+      c.stroke();
+
+      // Corpo drone esagonale stealth scuro
+      _drawMetallicHull(c, (p) => {
+        const cx = 64, cy = 64, r = 24;
+        for (let i = 0; i < 6; i++) {
+          const ang = (Math.PI / 3) * i;
+          const x = cx + Math.cos(ang) * r;
+          const y = cy + Math.sin(ang) * r;
+          if (i === 0) p.moveTo(x, y);
+          else p.lineTo(x, y);
+        }
+      }, '#10141f', '#455a64', '#ff1744');
+
+      // Lente sensore ottico rosso luminoso
+      _drawEngineGlow(c, 68, 64, 13, '#ff1744');
+      c.fillStyle = '#ff5252';
+      c.beginPath();
+      c.arc(68, 64, 6, 0, Math.PI * 2);
+      c.fill();
+      c.fillStyle = '#ffffff';
+      c.beginPath();
+      c.arc(66, 62, 2, 0, Math.PI * 2);
+      c.fill();
+    },
+
+    // 12. Satellite Solare: nucleo centrale con due grandi pannelli fotovoltaici blu riflettenti
+    solarSatellite(c) {
+      _drawCardBg(c, '#ffea00');
+
+      // Pannello fotovoltaico sinistro e destro
+      const drawSolarWing = (x, y, w, h) => {
+        const pGrad = c.createLinearGradient(x, y, x + w, y + h);
+        pGrad.addColorStop(0, '#0288d1');
+        pGrad.addColorStop(0.5, '#01579b');
+        pGrad.addColorStop(1, '#002f6c');
+        c.fillStyle = pGrad;
+        c.strokeStyle = '#40c4ff';
+        c.lineWidth = 1.3;
+        c.fillRect(x, y, w, h);
+        c.strokeRect(x, y, w, h);
+
+        // Griglia celle fotovoltaiche
+        _drawPanelLines(c, [
+          [x + w * 0.33, y, x + w * 0.33, y + h],
+          [x + w * 0.66, y, x + w * 0.66, y + h],
+          [x, y + h * 0.5, x + w, y + h * 0.5]
+        ], 'rgba(128, 216, 255, 0.45)');
+      };
+
+      drawSolarWing(12, 46, 38, 36);
+      drawSolarWing(78, 46, 38, 36);
+
+      // Bracci di collegamento
+      c.fillStyle = '#90a4ae';
+      c.fillRect(50, 61, 28, 6);
+
+      // Nucleo sferico energetico centrale
+      _drawMetallicHull(c, (p) => {
+        p.arc(64, 64, 14, 0, Math.PI * 2);
+      }, '#37474f', '#eceff1', '#ffea00');
+
+      _drawEngineGlow(c, 64, 64, 9, '#ffea00');
+    },
+
+    // 13. Nave Madre: colossale portaerei spaziale con hangar centrale aperto e luci di atterraggio
+    mothership(c) {
+      _drawCardBg(c, '#ffd700');
+      [38, 52, 76, 90].forEach((ey) => {
+        _drawEngineGlow(c, 14, ey, 11, '#00d2ff', Math.PI, 14);
+      });
+
+      // Scafo colossale portaerei
+      _drawMetallicHull(c, (p) => {
+        p.moveTo(16, 32);
+        p.lineTo(68, 22);
+        p.lineTo(114, 42);
+        p.lineTo(114, 86);
+        p.lineTo(68, 106);
+        p.lineTo(16, 96);
+      }, '#263238', '#cfd8dc', '#ffd700');
+
+      // Hangar centrale aperto con ponte di volo illuminato
+      c.fillStyle = '#050914';
+      c.strokeStyle = '#00e5ff';
+      c.lineWidth = 1.5;
+      c.fillRect(42, 52, 72, 24);
+      c.strokeRect(42, 52, 72, 24);
+
+      // Luci pista di atterraggio
+      [50, 64, 78, 92, 104].forEach((lx) => {
+        c.fillStyle = '#ffd700';
+        c.fillRect(lx, 55, 4, 2.5);
+        c.fillRect(lx, 70.5, 4, 2.5);
+      });
+
+      _drawEngineGlow(c, 46, 64, 10, '#00e5ff');
+    },
+
+    // 14. Morte Nera: grande sfera corazzata con trincea equatoriale, paraboloide e superlaser
+    deathStar(c) {
+      _drawCardBg(c, '#00e676');
+      const cx = 56, cy = 66, r = 42;
+
+      // Sfera corazzata 3D
+      const dsGrad = c.createRadialGradient(cx - 15, cy - 15, 4, cx, cy, r);
+      dsGrad.addColorStop(0, '#cfd8dc');
+      dsGrad.addColorStop(0.55, '#546e7a');
+      dsGrad.addColorStop(1, '#101820');
+
+      c.fillStyle = dsGrad;
+      c.beginPath();
+      c.arc(cx, cy, r, 0, Math.PI * 2);
+      c.fill();
+      c.strokeStyle = '#78909c';
+      c.lineWidth = 1.5;
+      c.stroke();
+
+      // Trincea equatoriale
+      c.strokeStyle = '#0b1016';
+      c.lineWidth = 4;
+      c.beginPath();
+      c.moveTo(cx - r, cy + 4);
+      c.lineTo(cx + r, cy + 4);
+      c.stroke();
+
+      // Paraboloide concavo superlaser
+      const dishX = cx + 14, dishY = cy - 16;
+      c.fillStyle = '#263238';
+      c.strokeStyle = '#00e676';
+      c.lineWidth = 1.2;
+      c.beginPath();
+      c.arc(dishX, dishY, 13, 0, Math.PI * 2);
+      c.fill();
+      c.stroke();
+
+      // Raggio superlaser verde/rosso
+      c.save();
+      c.shadowColor = '#00e676';
+      c.shadowBlur = 12;
+      c.strokeStyle = '#00e676';
+      c.lineWidth = 3.5;
+      c.beginPath();
+      c.moveTo(dishX, dishY);
+      c.lineTo(122, 16);
+      c.stroke();
+
+      c.strokeStyle = '#ffffff';
+      c.lineWidth = 1.3;
+      c.beginPath();
+      c.moveTo(dishX, dishY);
+      c.lineTo(122, 16);
+      c.stroke();
+      c.restore();
+    }
+  };
+
+  // =========================================================
+  // RENDERERS: 10 DIFESE
+  // =========================================================
+  const DEFENSE_RENDERERS = {
+    // 1. Lanciamissili: batteria lanciamissili multipla su base corazzata
+    rocketLauncher(c) {
+      _drawCardBg(c, '#ff9100');
+      // Base corazzata planetaria
+      _drawMetallicHull(c, (p) => {
+        p.moveTo(24, 106); p.lineTo(36, 86); p.lineTo(92, 86); p.lineTo(104, 106);
+      }, '#263238', '#90a4ae', '#ff9100');
+
+      // Pod lanciamissili inclinato
+      c.save();
+      c.translate(64, 62);
+      c.rotate(-0.45);
+      _drawMetallicHull(c, (p) => {
+        p.rect(-24, -18, 48, 36);
+      }, '#37474f', '#cfd8dc', '#ff9100');
+
+      // Tubi di lancio e testate
+      [-12, 0, 12].forEach((ty) => {
+        c.fillStyle = '#101622';
+        c.fillRect(-18, ty - 4, 36, 8);
+        c.fillStyle = '#ff3d00';
+        c.beginPath();
+        c.arc(18, ty, 3.5, 0, Math.PI * 2);
+        c.fill();
+      });
+      c.restore();
+    },
+
+    // 2. Laser Leggero: torretta snella con singolo emettitore laser azzurro
+    lightLaser(c) {
+      _drawCardBg(c, '#00d2ff');
+      // Piedistallo snello
+      _drawMetallicHull(c, (p) => {
+        p.moveTo(34, 106); p.lineTo(48, 76); p.lineTo(80, 76); p.lineTo(94, 106);
+      }, '#263238', '#90a4ae', '#00d2ff');
+
+      // Cupola torretta
+      _drawMetallicHull(c, (p) => {
+        p.arc(64, 68, 18, Math.PI, 0);
+        p.lineTo(82, 76); p.lineTo(46, 76);
+      }, '#37474f', '#eceff1', '#00d2ff');
+
+      // Singola canna emitter
+      c.strokeStyle = '#cfd8dc';
+      c.lineWidth = 5;
+      c.beginPath();
+      c.moveTo(72, 60); c.lineTo(108, 42);
+      c.stroke();
+
+      _drawEngineGlow(c, 109, 41, 8, '#00e5ff');
+    },
+
+    // 3. Laser Pesante: torretta rinforzata a doppia canna con condensatore luminoso
+    heavyLaser(c) {
+      _drawCardBg(c, '#00e5ff');
+      // Base pesante
+      _drawMetallicHull(c, (p) => {
+        p.moveTo(26, 106); p.lineTo(38, 76); p.lineTo(90, 76); p.lineTo(102, 106);
+      }, '#263238', '#90a4ae', '#00e5ff');
+
+      // Torretta corazzata
+      _drawMetallicHull(c, (p) => {
+        p.moveTo(38, 76); p.lineTo(44, 52); p.lineTo(82, 52); p.lineTo(88, 76);
+      }, '#37474f', '#eceff1', '#00e5ff');
+
+      // Doppia canna rinforzata
+      c.strokeStyle = '#eceff1';
+      c.lineWidth = 4.5;
+      c.beginPath();
+      c.moveTo(76, 56); c.lineTo(112, 38);
+      c.moveTo(80, 65); c.lineTo(115, 48);
+      c.stroke();
+
+      // Condensatore energetico centrale
+      _drawEngineGlow(c, 60, 64, 9, '#00e5ff');
+    },
+
+    // 4. Cannone Gauss: lungo cannone elettromagnetico a rotaia con bobine blu elettrico
+    gaussCannon(c) {
+      _drawCardBg(c, '#2979ff');
+      // Base torretta pesante
+      _drawMetallicHull(c, (p) => {
+        p.moveTo(22, 106); p.lineTo(34, 78); p.lineTo(88, 78); p.lineTo(98, 106);
+      }, '#1c2636', '#78909c', '#448aff');
+
+      // Rotaie parallele del railgun
+      c.save();
+      c.translate(52, 68);
+      c.rotate(-0.36);
+      _drawMetallicHull(c, (p) => {
+        p.rect(-14, -12, 78, 8);
+        p.rect(-14, 4, 78, 8);
+      }, '#37474f', '#eceff1', '#448aff');
+
+      // Bobine elettromagnetiche blu elettrico lungo le rotaie
+      [6, 22, 38, 54].forEach((bx) => {
+        c.fillStyle = '#00e5ff';
+        c.fillRect(bx, -14, 5, 28);
+      });
+      _drawEngineGlow(c, 66, 0, 10, '#00e5ff');
+      c.restore();
+    },
+
+    // 5. Cannone Ionico: torretta sferica con anelli magnetici e sfera di energia ciano
+    ionCannon(c) {
+      _drawCardBg(c, '#00e5ff');
+      // Base
+      _drawMetallicHull(c, (p) => {
+        p.moveTo(32, 106); p.lineTo(44, 82); p.lineTo(84, 82); p.lineTo(96, 106);
+      }, '#263238', '#90a4ae', '#00e5ff');
+
+      // Anelli magnetici inclinati
+      c.save();
+      c.translate(64, 56);
+      c.rotate(-0.4);
+      c.strokeStyle = '#cfd8dc';
+      c.lineWidth = 3;
+      c.beginPath();
+      c.ellipse(0, 0, 32, 12, 0, 0, Math.PI * 2);
+      c.stroke();
+
+      c.rotate(0.8);
+      c.strokeStyle = '#00e5ff';
+      c.lineWidth = 2.2;
+      c.beginPath();
+      c.ellipse(0, 0, 32, 12, 0, 0, Math.PI * 2);
+      c.stroke();
+      c.restore();
+
+      // Sfera di plasma ionico ciano al centro
+      _drawEngineGlow(c, 64, 56, 20, '#00e5ff');
+      c.fillStyle = '#ffffff';
+      c.beginPath();
+      c.arc(64, 56, 7, 0, Math.PI * 2);
+      c.fill();
+    },
+
+    // 6. Torretta al Plasma: pesante torretta con nucleo al plasma viola/arancio incandescente
+    plasmaTurret(c) {
+      _drawCardBg(c, '#d500f9');
+      // Base d'artiglieria massiccia
+      _drawMetallicHull(c, (p) => {
+        p.moveTo(20, 106); p.lineTo(32, 74); p.lineTo(96, 74); p.lineTo(108, 106);
+      }, '#211738', '#90a4ae', '#e040fb');
+
+      // Bocca da fuoco pesante
+      _drawMetallicHull(c, (p) => {
+        p.moveTo(46, 62); p.lineTo(98, 30); p.lineTo(108, 44); p.lineTo(58, 76);
+      }, '#37474f', '#eceff1', '#ff9100');
+
+      // Nucleo incandescente viola / arancio
+      _drawEngineGlow(c, 58, 64, 18, '#d500f9');
+      _drawEngineGlow(c, 104, 36, 12, '#ff9100');
+    },
+
+    // 7. Cupola Scudo Piccola: cupola semisferica traslucida azzurra su base planetaria
+    smallShieldDome(c) {
+      _drawCardBg(c, '#00d2ff');
+      // Base planetaria
+      _drawMetallicHull(c, (p) => {
+        p.moveTo(16, 98); p.lineTo(28, 86); p.lineTo(100, 86); p.lineTo(112, 98);
+      }, '#263238', '#90a4ae', '#00d2ff');
+
+      // Generatore centrale
+      _drawEngineGlow(c, 64, 82, 12, '#00e5ff');
+
+      // Cupola semisferica traslucida azzurra
+      const domeGrad = c.createRadialGradient(64, 62, 8, 64, 86, 48);
+      domeGrad.addColorStop(0, 'rgba(0, 210, 255, 0.08)');
+      domeGrad.addColorStop(0.75, 'rgba(0, 210, 255, 0.28)');
+      domeGrad.addColorStop(1, 'rgba(0, 229, 255, 0.75)');
+
+      c.fillStyle = domeGrad;
+      c.strokeStyle = '#00e5ff';
+      c.lineWidth = 2;
+      c.beginPath();
+      c.arc(64, 86, 44, Math.PI, 0);
+      c.closePath();
+      c.fill();
+      c.stroke();
+    },
+
+    // 8. Cupola Scudo Grande: doppia cupola di forza rinforzata con esagoni energetici dorati/azzurri
+    largeShieldDome(c) {
+      _drawCardBg(c, '#ffd700');
+      // Base corazzata
+      _drawMetallicHull(c, (p) => {
+        p.moveTo(12, 100); p.lineTo(24, 86); p.lineTo(104, 86); p.lineTo(116, 100);
+      }, '#263238', '#cfd8dc', '#ffd700');
+
+      // Cupola interna azzurra
+      c.fillStyle = 'rgba(0, 210, 255, 0.22)';
+      c.strokeStyle = '#00e5ff';
+      c.lineWidth = 1.6;
+      c.beginPath();
+      c.arc(64, 86, 36, Math.PI, 0);
+      c.closePath();
+      c.fill();
+      c.stroke();
+
+      // Cupola esterna dorata rinforzata
+      const outerGrad = c.createRadialGradient(64, 58, 10, 64, 86, 50);
+      outerGrad.addColorStop(0, 'rgba(255, 215, 0, 0.05)');
+      outerGrad.addColorStop(0.8, 'rgba(255, 215, 0, 0.26)');
+      outerGrad.addColorStop(1, 'rgba(255, 215, 0, 0.8)');
+
+      c.fillStyle = outerGrad;
+      c.strokeStyle = '#ffd700';
+      c.lineWidth = 2.2;
+      c.beginPath();
+      c.arc(64, 86, 48, Math.PI, 0);
+      c.closePath();
+      c.fill();
+      c.stroke();
+
+      // Esagoni energetici sulla cupola
+      const hexCenters = [[64, 52], [44, 66], [84, 66]];
+      c.strokeStyle = 'rgba(255, 215, 0, 0.65)';
+      c.lineWidth = 1.1;
+      for (const [hx, hy] of hexCenters) {
+        c.beginPath();
+        for (let i = 0; i < 6; i++) {
+          const a = (Math.PI / 3) * i;
+          const px = hx + Math.cos(a) * 8;
+          const py = hy + Math.sin(a) * 8;
+          if (i === 0) c.moveTo(px, py);
+          else c.lineTo(px, py);
+        }
+        c.closePath();
+        c.stroke();
+      }
+    },
+
+    // 9. Missile Anti-Balistico: silo sotterraneo aperto con missile intercettore pronto al lancio
+    antiBallisticMissile(c) {
+      _drawCardBg(c, '#00e676');
+      // Portelli del silo sotterraneo aperti
+      _drawMetallicHull(c, (p) => {
+        p.moveTo(16, 96); p.lineTo(44, 96); p.lineTo(34, 80); p.lineTo(16, 86);
+        p.moveTo(112, 96); p.lineTo(84, 96); p.lineTo(94, 80); p.lineTo(112, 86);
+      }, '#263238', '#90a4ae', '#00e676');
+
+      // Bagliore accensione nel pozzo del silo
+      _drawEngineGlow(c, 64, 94, 16, '#ff9100');
+
+      // Missile intercettore verticale
+      _drawMetallicHull(c, (p) => {
+        p.moveTo(56, 88);
+        p.lineTo(56, 42);
+        p.lineTo(64, 22);
+        p.lineTo(72, 42);
+        p.lineTo(72, 88);
+      }, '#37474f', '#ffffff', '#00e676');
+
+      // Ogiva rossa/verde e alette
+      c.fillStyle = '#00e676';
+      c.beginPath();
+      c.moveTo(56, 42); c.lineTo(64, 22); c.lineTo(72, 42);
+      c.closePath();
+      c.fill();
+
+      _drawMetallicHull(c, (p) => {
+        p.moveTo(56, 74); p.lineTo(46, 88); p.lineTo(56, 86);
+        p.moveTo(72, 74); p.lineTo(82, 88); p.lineTo(72, 86);
+      }, '#263238', '#cfd8dc', '#00e676');
+    },
+
+    // 10. Trappola Spaziale: mina spaziale galleggiante con aculei e nucleo pulsante rosso
+    spaceTrap(c) {
+      _drawCardBg(c, '#ff1744');
+      const cx = 64, cy = 64;
+
+      // 8 Aculei radiali metallici
+      c.strokeStyle = '#cfd8dc';
+      c.lineWidth = 3.2;
+      for (let i = 0; i < 8; i++) {
+        const ang = (Math.PI / 4) * i;
+        c.beginPath();
+        c.moveTo(cx + Math.cos(ang) * 20, cy + Math.sin(ang) * 20);
+        c.lineTo(cx + Math.cos(ang) * 42, cy + Math.sin(ang) * 42);
+        c.stroke();
+
+        // Punta sensore rossa sull'aculeo
+        c.fillStyle = '#ff1744';
+        c.beginPath();
+        c.arc(cx + Math.cos(ang) * 43, cy + Math.sin(ang) * 43, 2.5, 0, Math.PI * 2);
+        c.fill();
+      }
+
+      // Sfera centrale corazzata
+      _drawMetallicHull(c, (p) => {
+        p.arc(cx, cy, 24, 0, Math.PI * 2);
+      }, '#1c2230', '#78909c', '#ff1744');
+
+      // Nucleo pulsante rosso
+      _drawEngineGlow(c, cx, cy, 14, '#ff1744');
+      c.fillStyle = '#ff5252';
+      c.beginPath();
+      c.arc(cx, cy, 6, 0, Math.PI * 2);
+      c.fill();
+    }
+  };
+
+  // =========================================================
+  // RENDERERS: EDIFICI, LUNE, RICERCHE E RISORSE (STEP 2)
+  // =========================================================
+  const BUILDING_RENDERERS = {
+    // [STEP 2: Qui inseriremo i 15 Edifici Planetari e le 4 Strutture Lunari]
+  };
+
+  const RESEARCH_RENDERERS = {
+    // [STEP 2: Qui inseriremo le 13 Tecnologie / Ricerche]
+  };
+
+  const RESOURCE_AND_UI_RENDERERS = {
+    // [STEP 2: Qui inseriremo Metallo, Cristallo, Deuterio, Energia, Pianeti e Icone HUD]
+  };
+
+  // =========================================================
+  // FALLBACK GENERICO (solo per ID non ancora definiti in Step 2)
+  // =========================================================
+  function _renderFallbackEmblem(c, id) {
+    _drawCardBg(c, '#00d2ff');
+    _drawMetallicHull(c, (p) => {
+      const cx = 64, cy = 64, r = 34;
+      for (let i = 0; i < 6; i++) {
+        const a = (Math.PI / 3) * i - Math.PI / 6;
+        const x = cx + Math.cos(a) * r;
+        const y = cy + Math.sin(a) * r;
+        if (i === 0) p.moveTo(x, y);
+        else p.lineTo(x, y);
+      }
+    }, '#1c283d', '#90a4ae', '#00d2ff');
+    _drawEngineGlow(c, 64, 64, 14, '#00d2ff');
+  }
+
+  // =========================================================
+  // API PUBBLICA: window.UniversumGraphics
+  // =========================================================
+  const ALL_RENDERERS = Object.assign(
+    {},
+    SHIP_RENDERERS,
+    DEFENSE_RENDERERS,
+    BUILDING_RENDERERS,
+    RESEARCH_RENDERERS,
+    RESOURCE_AND_UI_RENDERERS
+  );
+
+  window.UniversumGraphics = {
+    /**
+     * Registra nuovi renderer modulari (usato nello Step 2)
+     */
+    registerRenderers(map) {
+      Object.assign(ALL_RENDERERS, map);
+    },
+
+    /**
+     * Espone gli helper interni per lo Step 2
+     */
+    helpers: {
+      drawCardBg: _drawCardBg,
+      drawMetallicHull: _drawMetallicHull,
+      drawEngineGlow: _drawEngineGlow,
+      drawPanelLines: _drawPanelLines
+    },
+
+    /**
+     * Restituisce il DataURL PNG 128x128 (con cache istantanea in memoria)
+     */
+    getIconDataURL(id) {
+      if (cache[id]) {
+        return cache[id];
+      }
+
+      const renderer = ALL_RENDERERS[id];
+      if (typeof renderer === 'function') {
+        renderer(ctx);
+      } else {
+        _renderFallbackEmblem(ctx, id);
+      }
+
+      const dataURL = offscreenCanvas.toDataURL('image/png');
+      cache[id] = dataURL;
+      return dataURL;
+    },
+
+    /**
+     * Restituisce il tag <img> pronto da inserire nell'HTML
+     */
+    getImgTag(id, alt = '', cssClass = 'unit-art') {
+      const safeAlt = String(alt || id)
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+      return `<img src="${this.getIconDataURL(id)}" alt="${safeAlt}" class="${cssClass}" loading="lazy">`;
+    },
+
+    /**
+     * Svuota la cache (utile solo in fase di sviluppo)
+     */
+    clearCache() {
+      for (const key of Object.keys(cache)) {
+        delete cache[key];
+      }
+    }
+  };
+})();
