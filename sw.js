@@ -1,4 +1,4 @@
-const CACHE_NAME = 'universum-v1';
+const CACHE_NAME = 'universum-v2';
 const STATIC_ASSETS = [
   './',
   './index.html',
@@ -7,6 +7,8 @@ const STATIC_ASSETS = [
   './data.js',
   './engine.js',
   './galaxy.js',
+  './firebase-config.js',
+  './multiplayer.js',
   './ui.js',
   './manifest.json'
 ];
@@ -16,7 +18,7 @@ self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
       return cache.addAll(STATIC_ASSETS).catch((err) => {
-        console.warn('[SW] Pre-cache parziale (alcuni moduli verranno cachati al volo):', err);
+        console.warn('[SW] Pre-cache parziale:', err);
       });
     })
   );
@@ -40,6 +42,15 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   if (!event.request.url.startsWith('http')) return;
+
+  // Non cachare chiamate API dinamiche di Firebase/Firestore
+  if (
+    event.request.url.includes('firestore.googleapis.com') ||
+    event.request.url.includes('identitytoolkit.googleapis.com') ||
+    event.request.url.includes('securetoken.googleapis.com')
+  ) {
+    return;
+  }
 
   event.respondWith(
     fetch(event.request)
