@@ -37,27 +37,110 @@
   </div>
 
   <!-- =========================================================
-       SCHERMATA 1: LE MIE PARTITE (LOBBY)
+       SCHERMATA 1: LE MIE PARTITE (LOBBY OFFLINE + ONLINE)
        ========================================================= -->
   <section id="screen-lobby">
     <header class="lobby-header glass-panel">
       <h1 class="lobby-title">UNIVERSUM</h1>
-      <p class="lobby-subtitle">COMANDO STRATEGICO GALATTICO • SINGLE-PLAYER VS BOT</p>
+      <p class="lobby-subtitle">COMANDO STRATEGICO GALATTICO • OFFLINE &amp; ONLINE PvP</p>
       <div class="lobby-actions-top">
-        <button type="button" id="btn-open-create" class="btn btn-green">+ CREA NUOVO UNIVERSO</button>
-        <button type="button" id="btn-import-json" class="btn btn-blue">⬆ IMPORTA UNIVERSO (JSON)</button>
         <button type="button" id="btn-install-pwa" class="btn btn-ghost">📲 INSTALLA APP</button>
-        <input type="file" id="input-import-file" accept=".json,application/json" class="hidden">
       </div>
     </header>
 
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; padding:0 4px;">
-      <h2 style="font-size:1rem; color:var(--res-crystal);">LE MIE PARTITE SALVATE</h2>
-      <span id="universe-count-badge" class="badge badge-blue">0 / 10</span>
+    <!-- SELETTORE MODALITÀ OFFLINE VS ONLINE -->
+    <div class="mp-mode-tabs" id="mp-mode-tabs">
+      <button type="button" class="mp-mode-btn active" data-lobby-mode="offline">
+        🕹️ PARTITE OFFLINE<br><small>Single-Player / Creativa</small>
+      </button>
+      <button type="button" class="mp-mode-btn" data-lobby-mode="online">
+        🌐 UNIVERSO ONLINE<br><small>Multiplayer PvP Reale</small>
+      </button>
     </div>
 
-    <div id="universe-list" class="universe-list">
-      <!-- Popolato dinamicamente da db.js / ui.js -->
+    <!-- SEZIONE OFFLINE (SINGLE-PLAYER / CREATIVA) -->
+    <div id="mp-offline-section">
+      <div class="lobby-actions-top" style="margin-bottom:14px;">
+        <button type="button" id="btn-open-create" class="btn btn-green">+ CREA NUOVO UNIVERSO</button>
+        <button type="button" id="btn-import-json" class="btn btn-blue">⬆ IMPORTA UNIVERSO (JSON)</button>
+        <input type="file" id="input-import-file" accept=".json,application/json" class="hidden">
+      </div>
+
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; padding:0 4px;">
+        <h2 style="font-size:1rem; color:var(--res-crystal);">LE MIE PARTITE SALVATE</h2>
+        <span id="universe-count-badge" class="badge badge-blue">0 / 10</span>
+      </div>
+
+      <div id="universe-list" class="universe-list">
+        <!-- Popolato dinamicamente da db.js / ui.js -->
+      </div>
+    </div>
+
+    <!-- SEZIONE ONLINE (MULTIPLAYER PvP FIREBASE) -->
+    <div id="mp-online-section" style="display:none;">
+      <!-- Box Login / Registrazione -->
+      <div id="mp-auth-box" class="mp-card">
+        <h3 class="mp-title">ACCESSO RETE GALATTICA</h3>
+        <p class="mp-sub">Entra con il tuo Nickname Imperatore (nessuna email richiesta).</p>
+        <div class="mp-form-grid">
+          <input type="text" id="mp-nick-input" placeholder="Nickname (es. ComandanteX)" maxlength="20" class="mp-input">
+          <input type="password" id="mp-pass-input" placeholder="Password (min. 6 caratteri)" class="mp-input">
+        </div>
+        <div class="mp-btn-row">
+          <button type="button" id="mp-btn-login" class="mp-btn mp-btn-blue">ACCEDI</button>
+          <button type="button" id="mp-btn-register" class="mp-btn mp-btn-green">REGISTRATI</button>
+        </div>
+      </div>
+
+      <!-- Box Universi Online (visibile dopo il login) -->
+      <div id="mp-servers-box" style="display:none;">
+        <div class="mp-card mp-user-bar">
+          <div>
+            <span class="mp-sub">IMPERATORE CONNESSO:</span><br>
+            <strong id="mp-logged-nick" style="color:#00e676; font-family:'Orbitron',sans-serif;">---</strong>
+          </div>
+          <button type="button" id="mp-btn-logout" class="mp-btn mp-btn-red" style="width:auto; padding:0 16px;">ESCI</button>
+        </div>
+
+        <div class="mp-card">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
+            <h3 class="mp-title" style="margin:0;">UNIVERSI ONLINE ATTIVI</h3>
+            <button type="button" id="mp-btn-refresh" class="mp-btn mp-btn-blue" style="width:auto; padding:0 14px;">↻ AGGIORNA</button>
+          </div>
+          <div id="mp-universes-list">Caricamento universi...</div>
+        </div>
+
+        <div class="mp-card">
+          <h3 class="mp-title">+ CREA NUOVO UNIVERSO ONLINE</h3>
+          <div class="mp-form-grid">
+            <input type="text" id="mp-new-name" placeholder="Nome Universo (es. Omega PvP)" maxlength="28" class="mp-input">
+            <select id="mp-new-speed" class="mp-input">
+              <option value="1">Velocità 1x (Classica)</option>
+              <option value="5">Velocità 5x</option>
+              <option value="10" selected>Velocità 10x (Consigliata)</option>
+              <option value="50">Velocità 50x</option>
+              <option value="100">Velocità 100x (Blitz)</option>
+              <option value="500">Velocità 500x (Ultra)</option>
+            </select>
+            <select id="mp-new-galaxies" class="mp-input">
+              <option value="1">1 Galassia (Scontri ravvicinati)</option>
+              <option value="3" selected>3 Galassie</option>
+              <option value="5">5 Galassie</option>
+            </select>
+            <select id="mp-new-systems" class="mp-input">
+              <option value="50">50 Sistemi per Galassia</option>
+              <option value="100" selected>100 Sistemi per Galassia</option>
+              <option value="250">250 Sistemi per Galassia</option>
+            </select>
+            <select id="mp-new-npc" class="mp-input">
+              <option value="none" selected>Presenza PNG: Nessun BOT (100% PvP)</option>
+              <option value="limited">Presenza PNG: Max 10 Avamposti Neutrali</option>
+            </select>
+            <input type="text" id="mp-new-pass" placeholder="Codice Stanza (opzionale, vuoto = pubblico)" class="mp-input">
+          </div>
+          <button type="button" id="mp-btn-create" class="mp-btn mp-btn-green" style="margin-top:12px;">CREA E AVVIA UNIVERSO ONLINE</button>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -104,17 +187,20 @@
       <!-- SIDEBAR DESKTOP (>= 900px) -->
       <aside class="desktop-sidebar" id="desktop-sidebar">
         <button type="button" class="sidebar-btn active" data-view="overview">🛰️ Panoramica</button>
-        <button type="button" class="sidebar-btn" data-view="buildings">🏗️ Edifici & Risorse</button>
+        <button type="button" class="sidebar-btn" data-view="buildings">🏗️ Edifici &amp; Risorse</button>
         <button type="button" class="sidebar-btn" data-view="research">🔬 Ricerche</button>
         <button type="button" class="sidebar-btn" data-view="shipyard">🚀 Cantiere Navale</button>
         <button type="button" class="sidebar-btn" data-view="defense">🛡️ Difesa Planetaria</button>
-        <button type="button" class="sidebar-btn" data-view="fleet">🛸 Flotta & Missioni</button>
+        <button type="button" class="sidebar-btn" data-view="fleet">🛸 Flotta &amp; Missioni</button>
         <button type="button" class="sidebar-btn" data-view="galaxy">🌌 Galassia</button>
-        <button type="button" class="sidebar-btn" data-view="espionage">👁️ Spionaggio & Report</button>
-        <button type="button" class="sidebar-btn" data-view="diplomacy">🤝 Commercio & BOT</button>
-        <button type="button" class="sidebar-btn" data-view="moon">🌑 Luna & Falange</button>
-        <button type="button" class="sidebar-btn" data-view="empire">👑 Imperiale & Quest</button>
+        <button type="button" class="sidebar-btn" data-view="espionage">👁️ Spionaggio &amp; Report</button>
+        <button type="button" class="sidebar-btn" data-view="diplomacy">🤝 Commercio &amp; BOT</button>
+        <button type="button" class="sidebar-btn" data-view="moon">🌑 Luna &amp; Falange</button>
+        <button type="button" class="sidebar-btn" data-view="empire">👑 Imperiale &amp; Quest</button>
         <button type="button" class="sidebar-btn" data-view="highscore">🏆 Classifica</button>
+        <button type="button" class="sidebar-btn mp-only-nav hidden" data-view="chat">
+          💬 Chat Galattica <span class="mp-unread-badge" id="mp-chat-badge-pc" style="display:none;">0</span>
+        </button>
       </aside>
 
       <!-- VIEWPORT PRINCIPALE -->
@@ -165,6 +251,9 @@
           <button type="button" class="drawer-item" data-view="moon"><span class="icon">🌑</span>Luna</button>
           <button type="button" class="drawer-item" data-view="empire"><span class="icon">👑</span>Imperiale</button>
           <button type="button" class="drawer-item" data-view="highscore"><span class="icon">🏆</span>Classifica</button>
+          <button type="button" class="drawer-item mp-only-nav hidden" data-view="chat">
+            <span class="icon">💬</span>Chat <span class="mp-unread-badge" id="mp-chat-badge-mob" style="display:none;">0</span>
+          </button>
           <button type="button" class="drawer-item" id="drawer-btn-lobby"><span class="icon">🏠</span>Partite</button>
         </div>
       </div>
@@ -181,6 +270,13 @@
       });
     }
   </script>
+
+  <!-- FIREBASE SDK v10 COMPAT + MULTIPLAYER -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="./firebase-config.js"></script>
+  <script src="./multiplayer.js"></script>
 
   <!-- MODULI APPLICAZIONE IN ORDINE OBBLIGATORIO -->
   <script src="./db.js"></script>
