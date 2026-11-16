@@ -42,19 +42,24 @@
   <section id="screen-lobby">
     <header class="lobby-header glass-panel">
       <h1 class="lobby-title">UNIVERSUM</h1>
-      <p class="lobby-subtitle">COMANDO STRATEGICO GALATTICO • OFFLINE & MULTIPLAYER PvP</p>
+      <p class="lobby-subtitle">COMANDO STRATEGICO GALATTICO • OFFLINE &amp; MULTIPLAYER PvP</p>
       <div style="margin-top:4px;">
-        <button type="button" id="btn-install-pwa" class="btn btn-ghost btn-sm">📲 INSTALLA APP</button>
+        <button type="button" id="btn-install-pwa" class="btn btn-ghost btn-sm">
+          <svg class="nav-svg" viewBox="0 0 24 24"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+          INSTALLA APP
+        </button>
       </div>
     </header>
 
     <!-- SELETTORE MODALITÀ PRINCIPALE -->
     <div class="mode-switcher" role="tablist">
       <button type="button" id="tab-mode-offline" class="mode-tab-btn active" role="tab" aria-selected="true">
-        🕹️ PARTITE OFFLINE (Single-Player / Creativa)
+        <svg class="nav-svg" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="3"/><path d="M6 12h4M8 10v4M15 11h.01M18 13h.01"/></svg>
+        PARTITE OFFLINE (Single-Player / Creativa)
       </button>
       <button type="button" id="tab-mode-online" class="mode-tab-btn" role="tab" aria-selected="false">
-        🌐 UNIVERSO ONLINE (Multiplayer PvP)
+        <svg class="nav-svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>
+        UNIVERSO ONLINE (Multiplayer PvP)
       </button>
     </div>
 
@@ -62,7 +67,7 @@
     <div id="lobby-panel-offline">
       <div class="lobby-actions-top" style="margin-bottom:18px;">
         <button type="button" id="btn-open-create" class="btn btn-green">+ CREA NUOVO UNIVERSO</button>
-        <button type="button" id="btn-import-json" class="btn btn-blue">⬆ IMPORTA UNIVERSO (JSON)</button>
+        <button type="button" id="btn-import-json" class="btn btn-blue">↑ IMPORTA UNIVERSO (JSON)</button>
         <input type="file" id="input-import-file" accept=".json,application/json" class="hidden">
       </div>
 
@@ -90,8 +95,14 @@
             <input type="password" id="mp-password" class="form-control" placeholder="••••••" minlength="6" required>
           </div>
           <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:16px;">
-            <button type="submit" data-auth-mode="login" class="btn btn-blue">🔑 ACCEDI</button>
-            <button type="submit" data-auth-mode="register" class="btn btn-green">✨ REGISTRATI</button>
+            <button type="submit" data-auth-mode="login" class="btn btn-blue">
+              <svg class="nav-svg" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+              ACCEDI
+            </button>
+            <button type="submit" data-auth-mode="register" class="btn btn-green">
+              <svg class="nav-svg" viewBox="0 0 24 24"><path d="M12 3v18M3 12h18"/></svg>
+              REGISTRATI
+            </button>
           </div>
         </form>
       </div>
@@ -122,26 +133,34 @@
     <header class="game-topbar">
       <div class="topbar-row-1">
         <select id="active-planet-select" class="planet-selector" aria-label="Seleziona Pianeta"></select>
-        <span id="mp-live-badge" class="badge badge-red hidden">🌐 PvP LIVE</span>
-        <button type="button" id="btn-turbo-toggle" class="btn btn-blue btn-turbo">⚡ TURBO</button>
-        <button type="button" id="btn-back-lobby" class="btn btn-ghost btn-sm" title="Torna alle partite">🏠</button>
+        <span id="mp-live-badge" class="badge badge-red hidden">
+          <svg class="nav-svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="9" stroke-dasharray="3 3"/></svg>
+          PvP LIVE
+        </span>
+        <button type="button" id="btn-turbo-toggle" class="btn btn-blue btn-turbo">
+          <svg class="nav-svg" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          TURBO
+        </button>
+        <button type="button" id="btn-back-lobby" class="btn btn-ghost btn-sm" title="Torna alle partite" aria-label="Torna alle partite">
+          <svg class="nav-svg" style="margin-right:0;" viewBox="0 0 24 24"><path d="M3 10.5L12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9.5z"/></svg>
+        </button>
       </div>
 
       <div class="resources-bar">
         <div class="res-pill">
-          <span class="res-label text-metal">Metallo</span>
+          <span id="res-metal-label" class="res-label text-metal">Metallo</span>
           <span id="res-metal-val" class="res-val text-metal">0</span>
         </div>
         <div class="res-pill">
-          <span class="res-label text-crystal">Cristallo</span>
+          <span id="res-crystal-label" class="res-label text-crystal">Cristallo</span>
           <span id="res-crystal-val" class="res-val text-crystal">0</span>
         </div>
         <div class="res-pill">
-          <span class="res-label text-deuterium">Deuterio</span>
+          <span id="res-deuterium-label" class="res-label text-deuterium">Deuterio</span>
           <span id="res-deuterium-val" class="res-val text-deuterium">0</span>
         </div>
         <div class="res-pill">
-          <span class="res-label text-energy">Energia</span>
+          <span id="res-energy-label" class="res-label text-energy">Energia</span>
           <span id="res-energy-val" class="res-val text-energy">0 / 0</span>
         </div>
       </div>
@@ -158,20 +177,59 @@
     <div class="game-shell">
       <!-- SIDEBAR DESKTOP (>= 900px) -->
       <aside class="desktop-sidebar" id="desktop-sidebar">
-        <button type="button" class="sidebar-btn active" data-view="overview">🛰️ Panoramica</button>
-        <button type="button" class="sidebar-btn" data-view="buildings">🏗️ Edifici & Risorse</button>
-        <button type="button" class="sidebar-btn" data-view="research">🔬 Ricerche</button>
-        <button type="button" class="sidebar-btn" data-view="shipyard">🚀 Cantiere Navale</button>
-        <button type="button" class="sidebar-btn" data-view="defense">🛡️ Difesa Planetaria</button>
-        <button type="button" class="sidebar-btn" data-view="fleet">🛸 Flotta & Missioni</button>
-        <button type="button" class="sidebar-btn" data-view="galaxy">🌌 Galassia</button>
-        <button type="button" class="sidebar-btn" data-view="espionage">👁️ Spionaggio & Report</button>
-        <button type="button" class="sidebar-btn" data-view="diplomacy">🤝 Commercio & BOT</button>
-        <button type="button" class="sidebar-btn" data-view="moon">🌑 Luna & Falange</button>
-        <button type="button" class="sidebar-btn" data-view="empire">👑 Imperiale & Quest</button>
-        <button type="button" class="sidebar-btn" data-view="highscore">🏆 Classifica</button>
+        <button type="button" class="sidebar-btn active" data-view="overview">
+          <svg class="nav-svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><ellipse cx="12" cy="12" rx="11" ry="4" transform="rotate(-20 12 12)"/></svg>
+          Panoramica
+        </button>
+        <button type="button" class="sidebar-btn" data-view="buildings">
+          <svg class="nav-svg" viewBox="0 0 24 24"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6"/></svg>
+          Edifici &amp; Risorse
+        </button>
+        <button type="button" class="sidebar-btn" data-view="research">
+          <svg class="nav-svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2"/><ellipse cx="12" cy="12" rx="10" ry="4"/><ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(60 12 12)"/><ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(-60 12 12)"/></svg>
+          Ricerche
+        </button>
+        <button type="button" class="sidebar-btn" data-view="shipyard">
+          <svg class="nav-svg" viewBox="0 0 24 24"><path d="M12 2L4 20l8-4 8 4L12 2z"/></svg>
+          Cantiere Navale
+        </button>
+        <button type="button" class="sidebar-btn" data-view="defense">
+          <svg class="nav-svg" viewBox="0 0 24 24"><path d="M12 2l8 4v6c0 5.5-3.8 10.7-8 12-4.2-1.3-8-6.5-8-12V6l8-4z"/></svg>
+          Difesa Planetaria
+        </button>
+        <button type="button" class="sidebar-btn" data-view="fleet">
+          <svg class="nav-svg" viewBox="0 0 24 24"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+          Flotta &amp; Missioni
+        </button>
+        <button type="button" class="sidebar-btn" data-view="galaxy">
+          <svg class="nav-svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9" stroke-dasharray="3 3"/></svg>
+          Galassia
+        </button>
+        <button type="button" class="sidebar-btn" data-view="espionage">
+          <svg class="nav-svg" viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
+          Spionaggio &amp; Report
+        </button>
+        <button type="button" class="sidebar-btn" data-view="diplomacy">
+          <svg class="nav-svg" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          Commercio &amp; BOT
+        </button>
+        <button type="button" class="sidebar-btn" data-view="moon">
+          <svg class="nav-svg" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+          Luna &amp; Falange
+        </button>
+        <button type="button" class="sidebar-btn" data-view="empire">
+          <svg class="nav-svg" viewBox="0 0 24 24"><path d="M3 18h18M4 15l3-9 5 5 5-5 3 9H4z"/></svg>
+          Imperiale &amp; Quest
+        </button>
+        <button type="button" class="sidebar-btn" data-view="highscore">
+          <svg class="nav-svg" viewBox="0 0 24 24"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
+          Classifica
+        </button>
         <button type="button" class="sidebar-btn mp-only-nav hidden" data-view="chat" style="justify-content:space-between;">
-          <span>💬 Chat Galattica</span>
+          <span style="display:inline-flex; align-items:center;">
+            <svg class="nav-svg" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            Chat Galattica
+          </span>
           <span id="sidebar-chat-badge" class="badge badge-red hidden">0</span>
         </button>
       </aside>
@@ -183,19 +241,19 @@
     <!-- BOTTOM NAVIGATION BAR MOBILE -->
     <nav class="mobile-bottom-nav" aria-label="Navigazione principale">
       <button type="button" class="nav-tab-btn active" data-view="overview">
-        <span class="nav-icon">🛰️</span>
+        <span class="nav-icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><ellipse cx="12" cy="12" rx="11" ry="4" transform="rotate(-20 12 12)"/></svg></span>
         <span>Panoramica</span>
       </button>
       <button type="button" class="nav-tab-btn" data-view="buildings">
-        <span class="nav-icon">🏗️</span>
+        <span class="nav-icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6"/></svg></span>
         <span>Edifici</span>
       </button>
       <button type="button" class="nav-tab-btn" data-view="fleet">
-        <span class="nav-icon">🛸</span>
+        <span class="nav-icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg></span>
         <span>Flotta</span>
       </button>
       <button type="button" class="nav-tab-btn" data-view="galaxy">
-        <span class="nav-icon">🌌</span>
+        <span class="nav-icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9" stroke-dasharray="3 3"/></svg></span>
         <span>Galassia</span>
       </button>
       <button type="button" class="nav-tab-btn" id="btn-mobile-menu" style="position:relative;">
@@ -213,24 +271,24 @@
           <button type="button" id="btn-close-drawer" class="btn btn-ghost btn-sm">✕</button>
         </div>
         <div class="drawer-grid">
-          <button type="button" class="drawer-item" data-view="overview"><span class="icon">🛰️</span>Panoramica</button>
-          <button type="button" class="drawer-item" data-view="buildings"><span class="icon">🏗️</span>Edifici</button>
-          <button type="button" class="drawer-item" data-view="research"><span class="icon">🔬</span>Ricerche</button>
-          <button type="button" class="drawer-item" data-view="shipyard"><span class="icon">🚀</span>Cantiere</button>
-          <button type="button" class="drawer-item" data-view="defense"><span class="icon">🛡️</span>Difesa</button>
-          <button type="button" class="drawer-item" data-view="fleet"><span class="icon">🛸</span>Flotta</button>
-          <button type="button" class="drawer-item" data-view="galaxy"><span class="icon">🌌</span>Galassia</button>
-          <button type="button" class="drawer-item" data-view="espionage"><span class="icon">👁️</span>Spionaggio</button>
-          <button type="button" class="drawer-item" data-view="diplomacy"><span class="icon">🤝</span>Commercio</button>
-          <button type="button" class="drawer-item" data-view="moon"><span class="icon">🌑</span>Luna</button>
-          <button type="button" class="drawer-item" data-view="empire"><span class="icon">👑</span>Imperiale</button>
-          <button type="button" class="drawer-item" data-view="highscore"><span class="icon">🏆</span>Classifica</button>
+          <button type="button" class="drawer-item" data-view="overview"><span class="icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><ellipse cx="12" cy="12" rx="11" ry="4" transform="rotate(-20 12 12)"/></svg></span>Panoramica</button>
+          <button type="button" class="drawer-item" data-view="buildings"><span class="icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6"/></svg></span>Edifici</button>
+          <button type="button" class="drawer-item" data-view="research"><span class="icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2"/><ellipse cx="12" cy="12" rx="10" ry="4"/><ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(60 12 12)"/><ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(-60 12 12)"/></svg></span>Ricerche</button>
+          <button type="button" class="drawer-item" data-view="shipyard"><span class="icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><path d="M12 2L4 20l8-4 8 4L12 2z"/></svg></span>Cantiere</button>
+          <button type="button" class="drawer-item" data-view="defense"><span class="icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><path d="M12 2l8 4v6c0 5.5-3.8 10.7-8 12-4.2-1.3-8-6.5-8-12V6l8-4z"/></svg></span>Difesa</button>
+          <button type="button" class="drawer-item" data-view="fleet"><span class="icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg></span>Flotta</button>
+          <button type="button" class="drawer-item" data-view="galaxy"><span class="icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9" stroke-dasharray="3 3"/></svg></span>Galassia</button>
+          <button type="button" class="drawer-item" data-view="espionage"><span class="icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg></span>Spionaggio</button>
+          <button type="button" class="drawer-item" data-view="diplomacy"><span class="icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>Commercio</button>
+          <button type="button" class="drawer-item" data-view="moon"><span class="icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></span>Luna</button>
+          <button type="button" class="drawer-item" data-view="empire"><span class="icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><path d="M3 18h18M4 15l3-9 5 5 5-5 3 9H4z"/></svg></span>Imperiale</button>
+          <button type="button" class="drawer-item" data-view="highscore"><span class="icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><path d="M18 20V10M12 20V4M6 20v-6"/></svg></span>Classifica</button>
           <button type="button" class="drawer-item mp-only-nav hidden" data-view="chat" style="position:relative;">
-            <span class="icon">💬</span>
+            <span class="icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>
             <span>Chat Galattica</span>
             <span id="drawer-chat-badge" class="badge badge-red hidden" style="position:absolute; top:6px; right:6px;">0</span>
           </button>
-          <button type="button" class="drawer-item" id="drawer-btn-lobby"><span class="icon">🏠</span>Partite</button>
+          <button type="button" class="drawer-item" id="drawer-btn-lobby"><span class="icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><path d="M3 10.5L12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9.5z"/></svg></span>Partite</button>
         </div>
       </div>
     </div>
@@ -255,6 +313,7 @@
   <!-- MODULI APPLICAZIONE -->
   <script src="./db.js"></script>
   <script src="./data.js"></script>
+  <script src="./graphics.js"></script>
   <script src="./engine.js"></script>
   <script src="./galaxy.js"></script>
   <script src="./firebase-config.js"></script>
