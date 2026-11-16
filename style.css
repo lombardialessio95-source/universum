@@ -260,8 +260,8 @@ h1, h2, h3, .font-display {
   border: 1px solid rgba(255, 234, 0, 0.45);
 }
 
-/* =========================================
-   SCHERMATA 1: LOBBY & SELETTORE OFFLINE/ONLINE
+/* =========================================================
+   SCHERMATA 1: LOBBY & SELETTORE OFFLINE/ONLINE (.mode-switcher)
    ========================================================= */
 #screen-lobby {
   max-width: 960px;
@@ -302,7 +302,7 @@ h1, h2, h3, .font-display {
   margin-top: 4px;
 }
 
-.lobby-mode-tabs {
+.mode-switcher {
   display: grid;
   grid-template-columns: 1fr;
   gap: 10px;
@@ -310,15 +310,15 @@ h1, h2, h3, .font-display {
 }
 
 @media (min-width: 640px) {
-  .lobby-mode-tabs {
+  .mode-switcher {
     grid-template-columns: 1fr 1fr;
   }
 }
 
-.lobby-mode-btn {
+.mode-tab-btn {
   min-height: 56px;
   padding: 12px 14px;
-  background: rgba(10, 14, 32, 0.85);
+  background: rgba(10, 14, 32, 0.88);
   border: 1px solid var(--border-neon);
   border-radius: 12px;
   color: var(--text-muted);
@@ -330,11 +330,11 @@ h1, h2, h3, .font-display {
   transition: all 0.2s ease;
 }
 
-.lobby-mode-btn.active {
-  background: linear-gradient(135deg, rgba(0, 210, 255, 0.2), rgba(0, 230, 118, 0.14));
+.mode-tab-btn.active {
+  background: linear-gradient(135deg, rgba(0, 210, 255, 0.22), rgba(0, 230, 118, 0.14));
   border-color: var(--btn-blue);
   color: #ffffff;
-  box-shadow: 0 0 18px rgba(0, 210, 255, 0.3);
+  box-shadow: 0 0 18px rgba(0, 210, 255, 0.35);
 }
 
 .universe-list {
@@ -528,7 +528,6 @@ h1, h2, h3, .font-display {
   color: var(--text-main);
 }
 
-/* LISTA CONVERSAZIONI PRIVATE */
 .private-conv-list {
   display: flex;
   flex-direction: column;
@@ -563,7 +562,7 @@ h1, h2, h3, .font-display {
   background: rgba(0, 230, 118, 0.1);
 }
 
-.unread-dot {
+.unread-dot-inline {
   width: 10px;
   height: 10px;
   border-radius: 50%;
@@ -571,12 +570,22 @@ h1, h2, h3, .font-display {
   flex-shrink: 0;
 }
 
-.unread-dot.active {
+.unread-dot-inline.active {
   background: var(--btn-green);
   box-shadow: 0 0 8px var(--btn-green);
 }
 
-/* FUMETTI CHAT PRIVATA (DESTRA BLU NEON vs SINISTRA GRIGIO/VIOLA SCURO) */
+.unread-dot {
+  position: absolute;
+  top: 6px;
+  right: 12px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--btn-red);
+  box-shadow: 0 0 8px var(--btn-red);
+}
+
 .pm-bubble-row {
   display: flex;
   width: 100%;
