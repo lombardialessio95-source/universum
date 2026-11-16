@@ -37,27 +37,81 @@
   </div>
 
   <!-- =========================================================
-       SCHERMATA 1: LE MIE PARTITE (LOBBY)
+       SCHERMATA 1: LE MIE PARTITE & MULTIPLAYER LOBBY
        ========================================================= -->
   <section id="screen-lobby">
     <header class="lobby-header glass-panel">
       <h1 class="lobby-title">UNIVERSUM</h1>
-      <p class="lobby-subtitle">COMANDO STRATEGICO GALATTICO • SINGLE-PLAYER VS BOT</p>
-      <div class="lobby-actions-top">
-        <button type="button" id="btn-open-create" class="btn btn-green">+ CREA NUOVO UNIVERSO</button>
-        <button type="button" id="btn-import-json" class="btn btn-blue">⬆ IMPORTA UNIVERSO (JSON)</button>
-        <button type="button" id="btn-install-pwa" class="btn btn-ghost">📲 INSTALLA APP</button>
-        <input type="file" id="input-import-file" accept=".json,application/json" class="hidden">
+      <p class="lobby-subtitle">COMANDO STRATEGICO GALATTICO • OFFLINE & MULTIPLAYER PvP</p>
+      <div style="margin-top:4px;">
+        <button type="button" id="btn-install-pwa" class="btn btn-ghost btn-sm">📲 INSTALLA APP</button>
       </div>
     </header>
 
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; padding:0 4px;">
-      <h2 style="font-size:1rem; color:var(--res-crystal);">LE MIE PARTITE SALVATE</h2>
-      <span id="universe-count-badge" class="badge badge-blue">0 / 10</span>
+    <!-- SELETTORE MODALITÀ PRINCIPALE -->
+    <div class="mode-switcher" role="tablist">
+      <button type="button" id="tab-mode-offline" class="mode-tab-btn active" role="tab" aria-selected="true">
+        🕹️ PARTITE OFFLINE (Single-Player / Creativa)
+      </button>
+      <button type="button" id="tab-mode-online" class="mode-tab-btn" role="tab" aria-selected="false">
+        🌐 UNIVERSO ONLINE (Multiplayer PvP)
+      </button>
     </div>
 
-    <div id="universe-list" class="universe-list">
-      <!-- Popolato dinamicamente da db.js / ui.js -->
+    <!-- PANNELLO 1: OFFLINE (INDEXEDDB) -->
+    <div id="lobby-panel-offline">
+      <div class="lobby-actions-top" style="margin-bottom:18px;">
+        <button type="button" id="btn-open-create" class="btn btn-green">+ CREA NUOVO UNIVERSO</button>
+        <button type="button" id="btn-import-json" class="btn btn-blue">⬆ IMPORTA UNIVERSO (JSON)</button>
+        <input type="file" id="input-import-file" accept=".json,application/json" class="hidden">
+      </div>
+
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; padding:0 4px;">
+        <h2 style="font-size:1rem; color:var(--res-crystal);">LE MIE PARTITE SALVATE</h2>
+        <span id="universe-count-badge" class="badge badge-blue">0 / 10</span>
+      </div>
+
+      <div id="universe-list" class="universe-list"></div>
+    </div>
+
+    <!-- PANNELLO 2: ONLINE PvP (FIREBASE) -->
+    <div id="lobby-panel-online" class="hidden">
+      <!-- FORM LOGIN / REGISTRAZIONE -->
+      <div id="mp-auth-box" class="glass-panel" style="padding:20px; max-width:520px; margin:0 auto;">
+        <h2 style="font-size:1.1rem; color:var(--res-crystal); margin-bottom:6px; text-align:center;">ACCESSO RETE GALATTICA PvP</h2>
+        <p class="text-muted" style="text-align:center; font-size:0.92rem; margin-bottom:16px;">Nessuna email richiesta: scegli un Nickname comandante e una password.</p>
+        <form id="form-mp-auth">
+          <div class="form-group">
+            <label for="mp-nickname">Nickname Imperatore</label>
+            <input type="text" id="mp-nickname" class="form-control" placeholder="Es. LordValkor" maxlength="24" required>
+          </div>
+          <div class="form-group">
+            <label for="mp-password">Password (min. 6 caratteri)</label>
+            <input type="password" id="mp-password" class="form-control" placeholder="••••••" minlength="6" required>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:16px;">
+            <button type="submit" data-auth-mode="login" class="btn btn-blue">🔑 ACCEDI</button>
+            <button type="submit" data-auth-mode="register" class="btn btn-green">✨ REGISTRATI</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- LISTA SERVER ONLINE (VISIBILE DOPO LOGIN) -->
+      <div id="mp-servers-box" class="hidden">
+        <div class="glass-panel" style="padding:14px; margin-bottom:14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+          <div>
+            <span class="text-muted" style="font-size:0.88rem;">Connesso come:</span>
+            <strong id="mp-logged-user" class="font-display text-metal" style="margin-left:6px;">Comandante</strong>
+          </div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button type="button" id="btn-mp-create-uni" class="btn btn-green btn-sm">+ CREA UNIVERSO ONLINE</button>
+            <button type="button" id="btn-mp-refresh" class="btn btn-blue btn-sm">↻ AGGIORNA</button>
+            <button type="button" id="btn-mp-logout" class="btn btn-ghost btn-sm">ESCI</button>
+          </div>
+        </div>
+
+        <div id="mp-universe-list" class="universe-list"></div>
+      </div>
     </div>
   </section>
 
@@ -68,6 +122,7 @@
     <header class="game-topbar">
       <div class="topbar-row-1">
         <select id="active-planet-select" class="planet-selector" aria-label="Seleziona Pianeta"></select>
+        <span id="mp-live-badge" class="badge badge-red hidden">🌐 PvP LIVE</span>
         <button type="button" id="btn-turbo-toggle" class="btn btn-blue btn-turbo">⚡ TURBO</button>
         <button type="button" id="btn-back-lobby" class="btn btn-ghost btn-sm" title="Torna alle partite">🏠</button>
       </div>
@@ -115,6 +170,10 @@
         <button type="button" class="sidebar-btn" data-view="moon">🌑 Luna & Falange</button>
         <button type="button" class="sidebar-btn" data-view="empire">👑 Imperiale & Quest</button>
         <button type="button" class="sidebar-btn" data-view="highscore">🏆 Classifica</button>
+        <button type="button" class="sidebar-btn mp-only-nav hidden" data-view="chat" style="justify-content:space-between;">
+          <span>💬 Chat Galattica</span>
+          <span id="sidebar-chat-badge" class="badge badge-red hidden">0</span>
+        </button>
       </aside>
 
       <!-- VIEWPORT PRINCIPALE -->
@@ -139,9 +198,10 @@
         <span class="nav-icon">🌌</span>
         <span>Galassia</span>
       </button>
-      <button type="button" class="nav-tab-btn" id="btn-mobile-menu">
+      <button type="button" class="nav-tab-btn" id="btn-mobile-menu" style="position:relative;">
         <span class="nav-icon">☰</span>
         <span>Menu</span>
+        <span id="mobile-menu-unread-dot" class="unread-dot hidden"></span>
       </button>
     </nav>
 
@@ -165,6 +225,11 @@
           <button type="button" class="drawer-item" data-view="moon"><span class="icon">🌑</span>Luna</button>
           <button type="button" class="drawer-item" data-view="empire"><span class="icon">👑</span>Imperiale</button>
           <button type="button" class="drawer-item" data-view="highscore"><span class="icon">🏆</span>Classifica</button>
+          <button type="button" class="drawer-item mp-only-nav hidden" data-view="chat" style="position:relative;">
+            <span class="icon">💬</span>
+            <span>Chat Galattica</span>
+            <span id="drawer-chat-badge" class="badge badge-red hidden" style="position:absolute; top:6px; right:6px;">0</span>
+          </button>
           <button type="button" class="drawer-item" id="drawer-btn-lobby"><span class="icon">🏠</span>Partite</button>
         </div>
       </div>
@@ -182,11 +247,18 @@
     }
   </script>
 
-  <!-- MODULI APPLICAZIONE IN ORDINE OBBLIGATORIO -->
+  <!-- FIREBASE v10 COMPAT SDK -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+
+  <!-- MODULI APPLICAZIONE -->
   <script src="./db.js"></script>
   <script src="./data.js"></script>
   <script src="./engine.js"></script>
   <script src="./galaxy.js"></script>
+  <script src="./firebase-config.js"></script>
+  <script src="./multiplayer.js"></script>
   <script src="./ui.js"></script>
 </body>
 </html>
