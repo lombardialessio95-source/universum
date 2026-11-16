@@ -1,0 +1,1596 @@
+(function () {
+  'use strict';
+
+  const BOT_PREFIXES = [
+    'Impero', 'Egemonia', 'Legione', 'Dominio', 'Collettivo', 'Sovranità',
+    'Flotta', 'Ordine', 'Confederazione', 'Dinastia', 'Alleanza', 'Avanguardia'
+  ];
+  const BOT_NAMES = [
+    'Krell', 'Valkor', 'Zorak', 'Aethel', 'Nexis', 'Kryon', 'Vanguard', 'Drakon',
+    'Hyperion', 'Orion', 'Xylar', 'Centauri', 'Andromeda', 'Sirius', 'Titan', 'Nova',
+    'Omega', 'Tartarus', 'Erebus', 'Chronos', 'Helios', 'Vortex', 'Zenith', 'Spectre'
+  ];
+  const PLANET_NAMES = [
+    'Prime', 'Secundus', 'Outpost', 'Bastion', 'Citadel', 'Forge', 'Sanctum',
+    'Aegis', 'Nexus', 'Haven', 'Terminus', 'Vanguard', 'Apex', 'Oblivion', 'Horizon'
+  ];
+
+  // =========================================================
+  // GENERATORE PSEUDO-CASUALE DETERMINISTICO (MULBERRY32)
+  // =========================================================
+  function hashString(str) {
+    let h = 2166136261 >>> 0;
+    for (let i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return h >>> 0;
+  }
+
+  function mulberry32(seed) {
+    let a = seed >>> 0;
+    return function () {
+      let t = (a += 0x6d2b79f5);
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function coordKey(g, s, p) {
+    return `${g}:${s}:${p}`;
+  }
+
+  function parseCoordKey(key) {
+    const parts = String(key).split(':').map(Number);
+    return { g: parts[0] || 1, s: parts[1] || 1, p: parts[2] || 1 };
+  }
+
+  function calculatePlanetTemperature(position, rngVal) {
+    // Slot 1-3 caldi (+40..+100°C), 4-11 temperati (-10..+50°C), 12-15 freddi (-100..-20°C)
+    let maxTemp;
+    if (position <= 3) {
+      maxTemp = Math.floor(55 + rngVal * 45);
+    } else if (position <= 11) {
+      maxTemp = Math.floor(-5 + rngVal * 55);
+    } else {
+      maxTemp = Math.floor(-95 + rngVal * 65);
+    }
+    return { maxTemp, minTemp: maxTemp - 40 };
+  }
+
+  function calculateSlotMaxFields(position, rngVal) {
+    // Posizioni centrali (6-10) più grandi
+    const centerBonus = Math.max(0, 5 - Math.abs(8 - position)) * 18;
+    return Math.floor(130 + centerBonus + rngVal * 95);
+  }
+
+  // =========================================================
+  // 1. UNIVERSO PROCEDURALE DETERMINISTICO + DELTA
+  // =========================================================
+  function generateProceduralSlot(universe, g, s, p) {
+    const key = coordKey(g, s, p);
+    const seed = hashString(`${universe.seed}:${g}:${s}:${p}`);
+    const rng = mulberry32(seed);
+
+    const temps = calculatePlanetTemperature(p, rng());
+    const maxFields = calculateSlotMaxFields(p, rng());
+
+    // Verifica se il giocatore possiede già questo slot tra i suoi pianeti
+    const playerPlanet = (universe.planets || []).find(
+      (pl) => pl.coords && pl.coords.g === g && pl.coords.s === s && pl.coords.p === p
+    );
+
+    const delta = (universe.galaxyDeltas && universe.galaxyDeltas[key]) || null;
+
+    // Se distrutto dalla Morte Nera e non ancora ricolonizzato
+    if (delta && delta.destroyed && !playerPlanet) {
+      return {
+        coords: { g, s, p },
+        key,
+        type: 'empty',
+        ownerType: 'none',
+        name: 'Spazio Profondo (Pianeta Distrutto)',
+        emperor: null,
+        maxTemp: temps.maxTemp,
+        minTemp: temps.minTemp,
+        fieldsMax: maxFields,
+        moon: null,
+        debris: delta.debris || { metal: 0, crystal: 0 },
+        destroyed: true
+      };
+    }
+
+    // Se il pianeta appartiene al giocatore
+    if (playerPlanet || (delta && (delta.owner === 'player' || delta.ownerType === 'player'))) {
+      const pName = playerPlanet ? playerPlanet.name : (delta.planetName || 'Colonia');
+      const hasMoon = Boolean((playerPlanet && playerPlanet.moon) || (delta && delta.hasMoon));
+      const moonName = (playerPlanet && playerPlanet.moon && playerPlanet.moon.name) || (delta && delta.moonName) || 'Luna';
+      return {
+        coords: { g, s, p },
+        key,
+        type: 'planet',
+        ownerType: 'player',
+        planetId: playerPlanet ? playerPlanet.id : delta.planetId,
+        name: pName,
+        emperor: universe.emperor,
+        maxTemp: playerPlanet ? playerPlanet.maxTemp : temps.maxTemp,
+        minTemp: playerPlanet ? playerPlanet.minTemp : temps.minTemp,
+        fieldsMax: playerPlanet ? playerPlanet.fieldsMax : maxFields,
+        moon: hasMoon ? { name: moonName, diameter: 8000 } : null,
+        debris: (delta && delta.debris) || { metal: 0, crystal: 0 }
+      };
+    }
+
+    // Sistema di partenza del giocatore: NESSUN BOT
+    const homePlanet = (universe.planets && universe.planets[0]) || { coords: { g: 1, s: 1, p: 4 } };
+    const isHomeSystem = (g === homePlanet.coords.g && s === homePlanet.coords.s);
+    if (isHomeSystem) {
+      return {
+        coords: { g, s, p },
+        key,
+        type: 'empty',
+        ownerType: 'none',
+        name: 'Slot Colonizzabile',
+        emperor: null,
+        maxTemp: temps.maxTemp,
+        minTemp: temps.minTemp,
+        fieldsMax: maxFields,
+        moon: null,
+        debris: (delta && delta.debris) || { metal: 0, crystal: 0 }
+      };
+    }
+
+    // Probabilità presenza BOT negli altri sistemi (~42%)
+    const presenceRoll = rng();
+    if (presenceRoll > 0.42) {
+      return {
+        coords: { g, s, p },
+        key,
+        type: 'empty',
+        ownerType: 'none',
+        name: 'Slot Colonizzabile',
+        emperor: null,
+        maxTemp: temps.maxTemp,
+        minTemp: temps.minTemp,
+        fieldsMax: maxFields,
+        moon: null,
+        debris: (delta && delta.debris) || { metal: 0, crystal: 0 }
+      };
+    }
+
+    // Generazione BOT procedurale
+    const prefix = BOT_PREFIXES[Math.floor(rng() * BOT_PREFIXES.length)];
+    const bName = BOT_NAMES[Math.floor(rng() * BOT_NAMES.length)];
+    const pSuffix = PLANET_NAMES[Math.floor(rng() * PLANET_NAMES.length)];
+    const emperorName = `${prefix} ${bName}`;
+    const planetName = `${bName} ${pSuffix}`;
+
+    const personalities = ['Pacifico', 'Commerciante', 'Guerriero'];
+    const personality = universe.botMode === 'peaceful'
+      ? (rng() < 0.5 ? 'Pacifico' : 'Commerciante')
+      : personalities[Math.floor(rng() * personalities.length)];
+
+    // Tier del BOT influenzato da botLevel e distanza galattica
+    const tierRoll = rng() + ((universe.botLevel || 2) - 1) * 0.12;
+    let tier = 'Debole';
+    let powerMult = 1;
+    if (tierRoll > 1.05) {
+      tier = 'Elite';
+      powerMult = 18;
+    } else if (tierRoll > 0.75) {
+      tier = 'Forte';
+      powerMult = 7;
+    } else if (tierRoll > 0.42) {
+      tier = 'Medio';
+      powerMult = 2.8;
+    }
+
+    // Calcolo risorse dinamiche BOT in base all'età dell'universo e al delta saccheggi
+    const hoursElapsed = Math.min(72, Math.max(0.5, (Date.now() - (universe.createdAt || Date.now())) / 3600000));
+    const growthFactor = (1 + hoursElapsed * 0.25) * Math.min(20, Math.sqrt(universe.speed || 10));
+    const lootPenalty = (delta && delta.lootedAt && (Date.now() - delta.lootedAt < 3600000)) ? 0.25 : 1;
+
+    const baseRes = Math.floor(15000 * powerMult * growthFactor * lootPenalty);
+    const resources = (delta && delta.resourcesOverride) || {
+      metal: Math.floor(baseRes * (0.9 + rng() * 0.4)),
+      crystal: Math.floor(baseRes * 0.65 * (0.9 + rng() * 0.4)),
+      deuterium: Math.floor(baseRes * 0.35 * (0.9 + rng() * 0.4))
+    };
+
+    const techLv = Math.max(1, Math.floor(powerMult * 1.1 + rng() * 3));
+    const tech = {
+      weaponsTech: techLv,
+      shieldingTech: techLv,
+      armourTech: techLv,
+      espionageTech: Math.max(1, techLv - 1)
+    };
+
+    // Edifici BOT (conservati se conquistato)
+    const mineBase = Math.min(32, Math.max(3, Math.floor(4 + Math.log2(powerMult + 1) * 4.2)));
+    const buildings = {
+      metalMine: mineBase + Math.floor(rng() * 3),
+      crystalMine: Math.max(2, mineBase - 1 + Math.floor(rng() * 3)),
+      deuteriumSynth: Math.max(1, mineBase - 2 + Math.floor(rng() * 2)),
+      solarPlant: mineBase + 2,
+      fusionReactor: powerMult >= 7 ? Math.floor(mineBase / 2) : 0,
+      roboticsFactory: Math.min(15, Math.max(2, Math.floor(mineBase / 2))),
+      shipyard: Math.min(14, Math.max(2, Math.floor(mineBase / 2))),
+      researchLab: Math.min(14, Math.max(2, Math.floor(mineBase / 2))),
+      naniteFactory: powerMult >= 7 ? Math.min(5, Math.floor(powerMult / 4)) : 0,
+      metalStorage: Math.max(2, Math.floor(mineBase / 3)),
+      crystalStorage: Math.max(2, Math.floor(mineBase / 3)),
+      deuteriumTank: Math.max(2, Math.floor(mineBase / 3)),
+      terraformer: powerMult >= 18 ? 2 : 0,
+      hiddenBunker: personality === 'Commerciante' ? 3 : 1
+    };
+
+    // Flotta e difese BOT (aggiornate dai delta se già colpite)
+    const fleet = (delta && delta.fleetOverride) ? Object.assign({}, delta.fleetOverride) : {
+      smallCargo: Math.floor((4 + rng() * 8) * powerMult),
+      largeCargo: Math.floor((2 + rng() * 5) * powerMult),
+      lightFighter: Math.floor((12 + rng() * 25) * powerMult),
+      heavyFighter: Math.floor((4 + rng() * 10) * powerMult),
+      cruiser: powerMult >= 2 ? Math.floor((2 + rng() * 6) * powerMult) : 0,
+      battleship: powerMult >= 5 ? Math.floor((1 + rng() * 4) * (powerMult / 2)) : 0,
+      battlecruiser: powerMult >= 10 ? Math.floor((1 + rng() * 3) * (powerMult / 4)) : 0,
+      espionageProbe: Math.floor((5 + rng() * 15) * powerMult),
+      deathStar: (tier === 'Elite' && (universe.botLevel || 2) >= 3 && rng() < 0.35) ? 1 : 0
+    };
+
+    const defenses = (delta && delta.defensesOverride) ? Object.assign({}, delta.defensesOverride) : {
+      rocketLauncher: Math.floor((15 + rng() * 30) * powerMult),
+      lightLaser: Math.floor((10 + rng() * 20) * powerMult),
+      heavyLaser: powerMult >= 2 ? Math.floor((4 + rng() * 8) * powerMult) : 0,
+      gaussCannon: powerMult >= 5 ? Math.floor((2 + rng() * 4) * (powerMult / 2)) : 0,
+      ionCannon: powerMult >= 3 ? Math.floor((2 + rng() * 5) * (powerMult / 2)) : 0,
+      plasmaTurret: powerMult >= 12 ? Math.floor(1 + rng() * 3) : 0,
+      smallShieldDome: powerMult >= 2 ? 1 : 0,
+      largeShieldDome: powerMult >= 8 ? 1 : 0,
+      spaceTrap: personality === 'Guerriero' ? Math.floor(2 * powerMult) : 0
+    };
+
+    // Tasso di scambio commerciale BOT (Metallo : Cristallo : Deuterio)
+    const tradeRates = personality === 'Commerciante'
+      ? { metal: 2.5, crystal: 1.5, deuterium: 1.0 }
+      : { metal: 3.0, crystal: 2.0, deuterium: 1.0 };
+
+    const hasBotMoon = (delta && delta.hasMoon !== undefined)
+      ? delta.hasMoon
+      : (powerMult >= 7 && rng() < 0.35);
+
+    return {
+      coords: { g, s, p },
+      key,
+      type: 'bot',
+      ownerType: 'bot',
+      name: planetName,
+      emperor: emperorName,
+      tier,
+      personality,
+      powerMult,
+      maxTemp: temps.maxTemp,
+      minTemp: temps.minTemp,
+      fieldsMax: maxFields,
+      resources,
+      buildings,
+      fleet,
+      defenses,
+      tech,
+      tradeRates,
+      moon: hasBotMoon ? { name: (delta && delta.moonName) || `Luna di ${bName}`, diameter: 7500 } : null,
+      debris: (delta && delta.debris) || { metal: 0, crystal: 0 }
+    };
+  }
+
+  function getSystemData(universe, galaxy, system) {
+    const g = Math.min(universe.galaxies || 3, Math.max(1, Number(galaxy) || 1));
+    const s = Math.min(universe.systemsPerGalaxy || 250, Math.max(1, Number(system) || 1));
+    const slots = [];
+    for (let p = 1; p <= 15; p++) {
+      slots.push(generateProceduralSlot(universe, g, s, p));
+    }
+    return {
+      galaxy: g,
+      system: s,
+      slots,
+      expeditionSlot: {
+        coords: { g, s, p: 16 },
+        key: coordKey(g, s, 16),
+        name: 'Spazio Profondo / Buco Nero (Pos. 16)'
+      }
+    };
+  }
+
+  // =========================================================
+  // 2. CREAZIONE LUNA, PORTALE IPERSPAZIALE E FALANGE
+  // =========================================================
+  function getMoonCreationCost(universe) {
+    if (universe.creativeMode) return { metal: 0, crystal: 0, deuterium: 0 };
+    if (universe.startTier === 'rich' || universe.startTier === 'millionaire') {
+      return { metal: 20000, crystal: 20000, deuterium: 10000 };
+    }
+    return { metal: 100000, crystal: 100000, deuterium: 50000 };
+  }
+
+  function createMoon(universe, planetIndex) {
+    const planet = universe.planets[planetIndex];
+    if (!planet) throw new Error('Pianeta non trovato.');
+    if (planet.moon) throw new Error('Questo pianeta possiede già una Luna.');
+
+    const lunarTechLv = Number(universe.researches?.lunarTech || 0);
+    if (!universe.creativeMode && lunarTechLv < 1) {
+      throw new Error('Richiede Ingegneria Lunare Livello 1.');
+    }
+
+    const cost = getMoonCreationCost(universe);
+    if (!universe.creativeMode) {
+      if (
+        planet.resources.metal < cost.metal ||
+        planet.resources.crystal < cost.crystal ||
+        planet.resources.deuterium < cost.deuterium
+      ) {
+        throw new Error(`Risorse insufficienti (${cost.metal.toLocaleString()} M, ${cost.crystal.toLocaleString()} C, ${cost.deuterium.toLocaleString()} D).`);
+      }
+      planet.resources.metal -= cost.metal;
+      planet.resources.crystal -= cost.crystal;
+      planet.resources.deuterium -= cost.deuterium;
+    }
+
+    planet.moon = {
+      name: 'Luna',
+      diameter: 8000,
+      fieldsMax: 1,
+      resources: { metal: 0, crystal: 0, deuterium: 0 },
+      buildings: {
+        lunarBase: 0,
+        lunarStorage: 0,
+        lunarShield: 0,
+        secretShipyard: 0,
+        sensorPhalanx: 0,
+        jumpGate: 0
+      },
+      buildQueue: [],
+      jumpGateCooldownUntil: 0
+    };
+
+    const key = coordKey(planet.coords.g, planet.coords.s, planet.coords.p);
+    if (!universe.galaxyDeltas) universe.galaxyDeltas = {};
+    universe.galaxyDeltas[key] = Object.assign({}, universe.galaxyDeltas[key], {
+      hasMoon: true,
+      moonName: 'Luna'
+    });
+
+    return planet.moon;
+  }
+
+  function useJumpGate(universe, fromPlanetIndex, toPlanetIndex, fleetSelection) {
+    const fromP = universe.planets[fromPlanetIndex];
+    const toP = universe.planets[toPlanetIndex];
+    if (!fromP || !toP || fromP.id === toP.id) {
+      throw new Error('Seleziona due pianeti diversi dotati di Luna.');
+    }
+    if (!fromP.moon || !toP.moon) {
+      throw new Error('Entrambi i pianeti devono possedere una Luna.');
+    }
+    if (!universe.creativeMode) {
+      if ((fromP.moon.buildings?.jumpGate || 0) < 1 || (toP.moon.buildings?.jumpGate || 0) < 1) {
+        throw new Error('Entrambe le Lune devono avere un Portale Iperspaziale operativo.');
+      }
+      const now = Date.now();
+      if ((fromP.moon.jumpGateCooldownUntil || 0) > now) {
+        const remSec = Math.ceil((fromP.moon.jumpGateCooldownUntil - now) / 1000);
+        throw new Error(`Portale in ricarica: attendi ${remSec} secondi.`);
+      }
+      if (fromP.resources.deuterium < 10000) {
+        throw new Error('Servono 10.000 Deuterio per alimentare il Portale Iperspaziale.');
+      }
+    }
+
+    let movedCount = 0;
+    for (const [shipId, qtyRaw] of Object.entries(fleetSelection || {})) {
+      const qty = Math.max(0, Math.floor(Number(qtyRaw) || 0));
+      if (qty <= 0 || shipId === 'solarSatellite') continue;
+      const avail = Number(fromP.fleet?.[shipId] || 0);
+      if (qty > avail) {
+        throw new Error(`Navi insufficienti per il salto (${shipId}).`);
+      }
+      fromP.fleet[shipId] = avail - qty;
+      toP.fleet[shipId] = (toP.fleet[shipId] || 0) + qty;
+      movedCount += qty;
+    }
+
+    if (movedCount === 0) {
+      throw new Error('Seleziona almeno una nave da teletrasportare.');
+    }
+
+    if (!universe.creativeMode) {
+      fromP.resources.deuterium -= 10000;
+      const speed = universe.speed || 1;
+      const cooldownSec = speed >= 100 ? 0 : Math.floor((30 * 60) / speed);
+      fromP.moon.jumpGateCooldownUntil = Date.now() + cooldownSec * 1000;
+    }
+
+    return { movedCount };
+  }
+
+  function scanWithPhalanx(universe, moonPlanetIndex, targetGalaxy, targetSystem) {
+    const originP = universe.planets[moonPlanetIndex];
+    if (!originP || !originP.moon) {
+      throw new Error('Il pianeta selezionato non ha una Luna.');
+    }
+    const phalanxLv = Number(originP.moon.buildings?.sensorPhalanx || 0);
+    if (!universe.creativeMode && phalanxLv < 1) {
+      throw new Error('Costruisci prima la Falange di Sensori sulla Luna.');
+    }
+    if (Number(targetGalaxy) !== originP.coords.g) {
+      throw new Error('La Falange di Sensori opera solo nella stessa Galassia.');
+    }
+    const maxRange = universe.creativeMode ? 999 : phalanxLv * 2;
+    const dist = Math.abs(Number(targetSystem) - originP.coords.s);
+    if (dist > maxRange) {
+      throw new Error(`Fuori portata! Portata attuale Falange: ±${maxRange} sistemi.`);
+    }
+
+    if (!universe.creativeMode) {
+      if (originP.resources.deuterium < 5000) {
+        throw new Error('Servono 5.000 Deuterio per alimentare la scansione della Falange.');
+      }
+      originP.resources.deuterium -= 5000;
+    }
+
+    const sysData = getSystemData(universe, targetGalaxy, targetSystem);
+    const movements = (universe.incomingAttacks || []).filter(
+      (atk) => atk.targetCoords && atk.targetCoords.g === Number(targetGalaxy) && atk.targetCoords.s === Number(targetSystem)
+    );
+
+    return { system: sysData, movements };
+  }
+
+  // =========================================================
+  // 3. MOTORE DI BATTAGLIA A 6 ROUND + CONQUISTA + MORTE NERA
+  // =========================================================
+  function expandUnitPool(unitMap, tech, isDefenseMap = false) {
+    const Data = window.UniversumData;
+    const pool = [];
+    const wMult = 1 + (Number(tech?.weaponsTech || 0) * 0.1);
+    const sMult = 1 + (Number(tech?.shieldingTech || 0) * 0.1);
+    const aMult = 1 + (Number(tech?.armourTech || 0) * 0.1);
+
+    for (const [id, countRaw] of Object.entries(unitMap || {})) {
+      const count = Math.max(0, Math.floor(Number(countRaw) || 0));
+      if (count <= 0) continue;
+      const spec = isDefenseMap ? Data.DEFENSES[id] : (Data.SHIPS[id] || Data.DEFENSES[id]);
+      if (!spec) continue;
+
+      const maxHull = Math.floor(spec.hull * aMult);
+      const maxShield = Math.floor(spec.shield * sMult);
+      const attack = Math.floor(spec.attack * wMult);
+
+      for (let i = 0; i < count; i++) {
+        pool.push({
+          id,
+          isDefense: Boolean(Data.DEFENSES[id]),
+          maxHull,
+          hull: maxHull,
+          maxShield,
+          shield: maxShield,
+          attack,
+          rapidFire: spec.rapidFire || {},
+          cost: spec.cost
+        });
+      }
+    }
+    return pool;
+  }
+
+  function summarizePool(pool) {
+    const counts = {};
+    for (const u of pool) {
+      if (u.hull > 0) {
+        counts[u.id] = (counts[u.id] || 0) + 1;
+      }
+    }
+    return counts;
+  }
+
+  function resolveCombat(attackerFleet, attackerTech, defenderData) {
+    const Data = window.UniversumData;
+    let attackers = expandUnitPool(attackerFleet, attackerTech, false);
+    const defFleetUnits = expandUnitPool(defenderData.fleet || {}, defenderData.tech || {}, false);
+
+    // Separa Trappole Spaziali dalle altre difese
+    const defClean = Object.assign({}, defenderData.defenses || {});
+    const trapCount = Math.max(0, Math.floor(Number(defClean.spaceTrap || 0)));
+    delete defClean.spaceTrap;
+
+    const defDefenseUnits = expandUnitPool(defClean, defenderData.tech || {}, true);
+    let defenders = defFleetUnits.concat(defDefenseUnits);
+
+    const log = [];
+
+    // Pre-Round: detonazione Trappole Spaziali
+    if (trapCount > 0 && attackers.length > 0) {
+      const trapSpec = Data.DEFENSES.spaceTrap;
+      const wMult = 1 + (Number(defenderData.tech?.weaponsTech || 0) * 0.1);
+      const totalTrapDamage = Math.floor(trapCount * trapSpec.attack * wMult);
+      let remainingDmg = totalTrapDamage;
+      let destroyedByTraps = 0;
+
+      for (let i = 0; i < attackers.length && remainingDmg > 0; i++) {
+        const target = attackers[i];
+        if (target.hull <= 0) continue;
+        const dmg = Math.min(target.hull, remainingDmg);
+        target.hull -= dmg;
+        remainingDmg -= dmg;
+        if (target.hull <= 0) destroyedByTraps++;
+      }
+      attackers = attackers.filter((u) => u.hull > 0);
+      log.push(`💥 ${trapCount} Trappole Spaziali detonate prima del contatto: ${totalTrapDamage.toLocaleString()} danni inflitti (${destroyedByTraps} navi attaccanti distrutte).`);
+    }
+
+    let roundsPlayed = 0;
+    for (let round = 1; round <= 6; round++) {
+      if (attackers.length === 0 || defenders.length === 0) break;
+      roundsPlayed = round;
+
+      // Ricarica scudi ad ogni round
+      for (const u of attackers) u.shield = u.maxShield;
+      for (const u of defenders) u.shield = u.maxShield;
+
+      // Fuoco Attaccanti -> Difensori
+      for (let i = 0; i < attackers.length; i++) {
+        const shooter = attackers[i];
+        if (shooter.attack <= 0) continue;
+        let keepFiring = true;
+        let safetyShots = 0;
+
+        while (keepFiring && safetyShots < 40) {
+          keepFiring = false;
+          safetyShots++;
+          const targetIdx = Math.floor(Math.random() * defenders.length);
+          const target = defenders[targetIdx];
+          if (!target || target.hull <= 0) continue;
+
+          // Rimbalzo se colpo < 1% dello scudo attivo
+          if (target.shield > 0 && shooter.attack < target.shield * 0.01) {
+            // Nessun danno
+          } else if (shooter.attack <= target.shield) {
+            target.shield -= shooter.attack;
+          } else {
+            const hullDmg = shooter.attack - target.shield;
+            target.shield = 0;
+            target.hull -= hullDmg;
+          }
+
+          // Esplosione rapida se scafo < 70%
+          if (target.hull > 0 && target.hull < target.maxHull * 0.7) {
+            const explodeProb = 1 - (target.hull / target.maxHull);
+            if (Math.random() < explodeProb) {
+              target.hull = 0;
+            }
+          }
+
+          // Fuoco Rapido
+          const rf = shooter.rapidFire[target.id];
+          if (rf && rf > 1) {
+            if (Math.random() < (rf - 1) / rf) {
+              keepFiring = true;
+            }
+          }
+        }
+      }
+
+      // Fuoco Difensori -> Attaccanti
+      for (let i = 0; i < defenders.length; i++) {
+        const shooter = defenders[i];
+        if (shooter.attack <= 0) continue;
+        let keepFiring = true;
+        let safetyShots = 0;
+
+        while (keepFiring && safetyShots < 40) {
+          keepFiring = false;
+          safetyShots++;
+          const targetIdx = Math.floor(Math.random() * attackers.length);
+          const target = attackers[targetIdx];
+          if (!target || target.hull <= 0) continue;
+
+          if (target.shield > 0 && shooter.attack < target.shield * 0.01) {
+            // Rimbalza
+          } else if (shooter.attack <= target.shield) {
+            target.shield -= shooter.attack;
+          } else {
+            const hullDmg = shooter.attack - target.shield;
+            target.shield = 0;
+            target.hull -= hullDmg;
+          }
+
+          if (target.hull > 0 && target.hull < target.maxHull * 0.7) {
+            const explodeProb = 1 - (target.hull / target.maxHull);
+            if (Math.random() < explodeProb) {
+              target.hull = 0;
+            }
+          }
+
+          const rf = shooter.rapidFire[target.id];
+          if (rf && rf > 1) {
+            if (Math.random() < (rf - 1) / rf) {
+              keepFiring = true;
+            }
+          }
+        }
+      }
+
+      // Rimuovi unità esplose a fine round
+      attackers = attackers.filter((u) => u.hull > 0);
+      defenders = defenders.filter((u) => u.hull > 0);
+    }
+
+    const attackerSurvivors = summarizePool(attackers);
+    const defenderAllSurvivors = summarizePool(defenders);
+
+    // Separa navi sopravvissute e difese sopravvissute del difensore
+    const defenderFleetSurvivors = {};
+    const defenderDefenseSurvivors = {};
+    for (const [id, cnt] of Object.entries(defenderAllSurvivors)) {
+      if (Data.DEFENSES[id]) defenderDefenseSurvivors[id] = cnt;
+      else defenderFleetSurvivors[id] = cnt;
+    }
+
+    // Calcolo perdite e campo detriti (30% costo M+C delle navi distrutte)
+    let debrisMetal = 0;
+    let debrisCrystal = 0;
+    const attackerLosses = {};
+    const defenderLosses = {};
+
+    for (const [id, initCnt] of Object.entries(attackerFleet || {})) {
+      const surv = attackerSurvivors[id] || 0;
+      const lost = Math.max(0, initCnt - surv);
+      if (lost > 0) {
+        attackerLosses[id] = lost;
+        const spec = Data.SHIPS[id];
+        if (spec) {
+          debrisMetal += Math.floor(spec.cost.metal * lost * 0.3);
+          debrisCrystal += Math.floor(spec.cost.crystal * lost * 0.3);
+        }
+      }
+    }
+
+    for (const [id, initCnt] of Object.entries(defenderData.fleet || {})) {
+      const surv = defenderFleetSurvivors[id] || 0;
+      const lost = Math.max(0, initCnt - surv);
+      if (lost > 0) {
+        defenderLosses[id] = lost;
+        const spec = Data.SHIPS[id];
+        if (spec) {
+          debrisMetal += Math.floor(spec.cost.metal * lost * 0.3);
+          debrisCrystal += Math.floor(spec.cost.crystal * lost * 0.3);
+        }
+      }
+    }
+
+    // Riparazione difese al 70% (tranne trappole spaziali già detonate)
+    const repairedDefenses = Object.assign({}, defenderDefenseSurvivors);
+    for (const [id, initCnt] of Object.entries(defClean)) {
+      const surv = defenderDefenseSurvivors[id] || 0;
+      const lost = Math.max(0, initCnt - surv);
+      if (lost > 0) {
+        defenderLosses[id] = lost;
+        const recovered = Math.floor(lost * 0.7);
+        if (recovered > 0) {
+          repairedDefenses[id] = (repairedDefenses[id] || 0) + recovered;
+        }
+      }
+    }
+    if (trapCount > 0) defenderLosses.spaceTrap = trapCount;
+
+    let result = 'draw';
+    if (attackers.length > 0 && defenders.length === 0) result = 'attacker_win';
+    else if (attackers.length === 0 && defenders.length > 0) result = 'defender_win';
+
+    // Saccheggio se vince l'attaccante
+    const loot = { metal: 0, crystal: 0, deuterium: 0 };
+    if (result === 'attacker_win') {
+      const bunkerLv = Math.min(9, Number(defenderData.buildings?.hiddenBunker || 0));
+      const unprotectedRatio = Math.max(0.1, 1 - bunkerLv * 0.1);
+      const maxLootM = Math.floor((defenderData.resources?.metal || 0) * unprotectedRatio * 0.5);
+      const maxLootC = Math.floor((defenderData.resources?.crystal || 0) * unprotectedRatio * 0.5);
+      const maxLootD = Math.floor((defenderData.resources?.deuterium || 0) * unprotectedRatio * 0.5);
+
+      let totalCargoCap = 0;
+      for (const [id, cnt] of Object.entries(attackerSurvivors)) {
+        const spec = Data.SHIPS[id];
+        if (spec) totalCargoCap += (spec.cargo || 0) * cnt;
+      }
+
+      const desiredTotal = maxLootM + maxLootC + maxLootD;
+      if (desiredTotal > 0 && totalCargoCap > 0) {
+        const ratio = Math.min(1, totalCargoCap / desiredTotal);
+        loot.metal = Math.floor(maxLootM * ratio);
+        loot.crystal = Math.floor(maxLootC * ratio);
+        loot.deuterium = Math.floor(maxLootD * ratio);
+      }
+    }
+
+    // Effetto Morte Nera (per OGNI Morte Nera sopravvissuta)
+    let moonDestroyed = false;
+    let planetDestroyed = false;
+    const survivingDeathStars = attackerSurvivors.deathStar || 0;
+
+    if (survivingDeathStars > 0) {
+      for (let i = 0; i < survivingDeathStars; i++) {
+        if (defenderData.moon && !moonDestroyed && Math.random() < 0.10) {
+          moonDestroyed = true;
+          log.push('🌑💥 UNA MORTE NERA HA POLVERIZZATO LA LUNA NEMICA CON TUTTI I SUOI EDIFICI!');
+        }
+        if (!planetDestroyed && Math.random() < 0.01) {
+          planetDestroyed = true;
+          moonDestroyed = true;
+          log.push('☄️☠️ EVENTO EPICO! IL SUPERLASER DELLA MORTE NERA HA DISINTEGRATO L’INTERO PIANETA!');
+        }
+      }
+    }
+
+    return {
+      result,
+      roundsPlayed,
+      attackerSurvivors,
+      defenderFleetSurvivors,
+      repairedDefenses,
+      attackerLosses,
+      defenderLosses,
+      loot,
+      debris: { metal: debrisMetal, crystal: debrisCrystal },
+      moonDestroyed,
+      planetDestroyed,
+      log
+    };
+  }
+
+  // =========================================================
+  // 4. SIMULATORE / CALCOLATORE DI BATTAGLIA VELOCE (MONTE CARLO)
+  // =========================================================
+  function simulateBattle(attackerFleet, attackerTech, targetCoords, universe, iterations = 30) {
+    const Data = window.UniversumData;
+    const targetSlot = generateProceduralSlot(universe, targetCoords.g, targetCoords.s, targetCoords.p);
+    if (targetSlot.ownerType !== 'bot') {
+      throw new Error('Seleziona un pianeta BOT valido come bersaglio di simulazione.');
+    }
+
+    // Conta quanti rapporti spia il giocatore ha effettuato su queste coordinate
+    const reportsForTarget = (universe.spyReports || []).filter(
+      (r) => r.coords && r.coords.g === targetCoords.g && r.coords.s === targetCoords.s && r.coords.p === targetCoords.p
+    );
+    const spyCount = reportsForTarget.length;
+
+    let uncertainty = 0.25;
+    if (spyCount >= 3) uncertainty = 0.05;
+    else if (spyCount === 2) uncertainty = 0.10;
+    else if (spyCount === 1) uncertainty = 0.20;
+
+    let wins = 0;
+    let draws = 0;
+    let losses = 0;
+    let sumAttackerLossCost = 0;
+    let worstAttackerLossCost = 0;
+    let sumLoot = 0;
+    let sumDebris = 0;
+
+    for (let it = 0; it < iterations; it++) {
+      // Variazione casuale entro il margine di incertezza spionaggio
+      const scaleMap = (map) => {
+        const out = {};
+        for (const [k, v] of Object.entries(map || {})) {
+          const jitter = 1 + ((Math.random() * 2 - 1) * uncertainty);
+          out[k] = Math.max(0, Math.round(v * jitter));
+        }
+        return out;
+      };
+
+      const simDef = {
+        fleet: scaleMap(targetSlot.fleet),
+        defenses: scaleMap(targetSlot.defenses),
+        tech: targetSlot.tech,
+        resources: targetSlot.resources,
+        buildings: targetSlot.buildings,
+        moon: targetSlot.moon
+      };
+
+      const res = resolveCombat(attackerFleet, attackerTech, simDef);
+      if (res.result === 'attacker_win') wins++;
+      else if (res.result === 'draw') draws++;
+      else losses++;
+
+      let iterLossCost = 0;
+      for (const [id, lostCnt] of Object.entries(res.attackerLosses)) {
+        const spec = Data.SHIPS[id];
+        if (spec) iterLossCost += (spec.cost.metal + spec.cost.crystal + spec.cost.deuterium) * lostCnt;
+      }
+
+      sumAttackerLossCost += iterLossCost;
+      if (iterLossCost > worstAttackerLossCost) worstAttackerLossCost = iterLossCost;
+      sumLoot += res.loot.metal + res.loot.crystal + res.loot.deuterium;
+      sumDebris += res.debris.metal + res.debris.crystal;
+    }
+
+    const winPct = Math.round((wins / iterations) * 100);
+    const drawPct = Math.round((draws / iterations) * 100);
+    const losePct = Math.max(0, 100 - winPct - drawPct);
+    const dsCount = Math.max(0, Math.floor(Number(attackerFleet?.deathStar || 0)));
+
+    const moonDestroyChance = targetSlot.moon
+      ? Math.round((1 - Math.pow(0.90, dsCount)) * 1000) / 10
+      : 0;
+    const planetDestroyChance = Math.round((1 - Math.pow(0.99, dsCount)) * 1000) / 10;
+
+    let advice = 'ATTACCO RISCHIOSO';
+    if (winPct >= 80 && losePct <= 5) advice = 'ATTACCO CONSIGLIATO';
+    else if (winPct < 45 || losePct >= 35) advice = 'NON ATTACCARE - SEI TROPPO DEBOLE';
+
+    return {
+      iterations,
+      spyCount,
+      uncertaintyPct: Math.round(uncertainty * 100),
+      winPct,
+      drawPct,
+      losePct,
+      avgLosses: Math.floor(sumAttackerLossCost / iterations),
+      worstLosses: worstAttackerLossCost,
+      estimatedLoot: Math.floor(sumLoot / iterations),
+      debrisCreated: Math.floor(sumDebris / iterations),
+      moonDestroyChance,
+      planetDestroyChance,
+      advice
+    };
+  }
+
+  // =========================================================
+  // 5. LANCI FLOTTE, SPIONAGGIO, SPEDIZIONI, COMMERCIO E IA BOT
+  // =========================================================
+  function calculateDistance(c1, c2) {
+    if (c1.g !== c2.g) return Math.abs(c1.g - c2.g) * 20000;
+    if (c1.s !== c2.s) return Math.abs(c1.s - c2.s) * 95 + 2700;
+    if (c1.p !== c2.p) return Math.abs(c1.p - c2.p) * 5 + 1000;
+    return 5;
+  }
+
+  function getFleetSpeedAndFuel(universe, fleet, distance) {
+    const Data = window.UniversumData;
+    let minSpeed = Infinity;
+    let totalFuelPerDist = 0;
+
+    for (const [shipId, cntRaw] of Object.entries(fleet || {})) {
+      const cnt = Math.max(0, Math.floor(Number(cntRaw) || 0));
+      if (cnt <= 0 || shipId === 'solarSatellite') continue;
+      const spec = Data.SHIPS[shipId];
+      if (!spec) continue;
+
+      const driveLv = Number(universe.researches?.[spec.driveType] || 0);
+      let bonusPerLv = 0.1;
+      if (spec.driveType === 'impulseDrive') bonusPerLv = 0.2;
+      else if (spec.driveType === 'hyperspaceDrive') bonusPerLv = 0.3;
+
+      const effectiveShipSpeed = spec.speed * (1 + driveLv * bonusPerLv);
+      if (effectiveShipSpeed < minSpeed) minSpeed = effectiveShipSpeed;
+      totalFuelPerDist += (spec.fuelConsumption || 10) * cnt;
+    }
+
+    if (!isFinite(minSpeed) || minSpeed <= 0) minSpeed = 5000;
+    const speedMult = window.UniversumEngine
+      ? window.UniversumEngine.getEffectiveSpeed(universe)
+      : (universe.speed || 10);
+
+    const durationSec = universe.creativeMode
+      ? 3
+      : Math.max(5, Math.floor((10 + (35000 / Math.sqrt(speedMult)) * Math.sqrt((distance * 10) / minSpeed))));
+
+    const fuelCost = universe.creativeMode
+      ? 0
+      : Math.max(1, Math.floor(1 + (totalFuelPerDist * distance) / 35000));
+
+    return { minSpeed, durationSec, fuelCost };
+  }
+
+  function launchFleet(universe, originPlanetIndex, targetCoords, mission, fleetSelection, cargo = { metal: 0, crystal: 0, deuterium: 0 }, options = {}) {
+    const originP = universe.planets[originPlanetIndex];
+    if (!originP) throw new Error('Pianeta di partenza non valido.');
+
+    const maxSlots = universe.creativeMode ? 999 : (1 + Number(universe.researches?.computerTech || 0));
+    if ((universe.fleetsInFlight || []).length >= maxSlots) {
+      throw new Error(`Slot flotta esauriti (${maxSlots} max). Potenzia Tecnologia Informatica.`);
+    }
+
+    const cleanFleet = {};
+    let totalShips = 0;
+    let totalCargoCap = 0;
+    const Data = window.UniversumData;
+
+    for (const [id, rawQty] of Object.entries(fleetSelection || {})) {
+      const qty = Math.max(0, Math.floor(Number(rawQty) || 0));
+      if (qty <= 0 || id === 'solarSatellite') continue;
+      const avail = Number(originP.fleet?.[id] || 0);
+      if (qty > avail) {
+        throw new Error(`Navi insufficienti su ${originP.name}: ${Data.SHIPS[id]?.name || id}.`);
+      }
+      cleanFleet[id] = qty;
+      totalShips += qty;
+      totalCargoCap += (Data.SHIPS[id]?.cargo || 0) * qty;
+    }
+
+    if (totalShips === 0) throw new Error('Seleziona almeno una nave per la missione.');
+
+    // Validazioni specifiche missione
+    if (mission === 'spy' && !cleanFleet.espionageProbe) {
+      throw new Error('Devi inviare almeno una Sonda Spia per la missione Spionaggio.');
+    }
+    if (mission === 'colonize' && !cleanFleet.colonyShip) {
+      throw new Error('Devi includere almeno una Colonizzatrice.');
+    }
+    if (mission === 'recycle' && !cleanFleet.recycler) {
+      throw new Error('Devi includere almeno una Riciclatrice.');
+    }
+    if (mission === 'destroyMoon' && !cleanFleet.deathStar) {
+      throw new Error('Serve almeno una Morte Nera per tentare la distruzione di una Luna.');
+    }
+
+    const distance = calculateDistance(originP.coords, targetCoords);
+    const { durationSec, fuelCost } = getFleetSpeedAndFuel(universe, cleanFleet, distance);
+
+    const loadM = Math.max(0, Math.floor(Number(cargo.metal) || 0));
+    const loadC = Math.max(0, Math.floor(Number(cargo.crystal) || 0));
+    const loadD = Math.max(0, Math.floor(Number(cargo.deuterium) || 0));
+
+    // Spedizione Segreta nel Buco Nero (50k Deuterio extra)
+    const blackHoleFee = (!universe.creativeMode && mission === 'explore' && options.blackHole) ? 50000 : 0;
+
+    if (loadM + loadC + loadD + fuelCost > totalCargoCap && !universe.creativeMode) {
+      throw new Error('Capacità di carico delle navi insufficiente per risorse + carburante.');
+    }
+
+    if (!universe.creativeMode) {
+      if (
+        originP.resources.metal < loadM ||
+        originP.resources.crystal < loadC ||
+        originP.resources.deuterium < (loadD + fuelCost + blackHoleFee)
+      ) {
+        throw new Error(`Risorse o carburante insufficienti (Carburante richiesto: ${fuelCost.toLocaleString()} D).`);
+      }
+
+      originP.resources.metal -= loadM;
+      originP.resources.crystal -= loadC;
+      originP.resources.deuterium -= (loadD + fuelCost + blackHoleFee);
+    }
+
+    // Sottrai navi dal pianeta di origine
+    for (const [id, qty] of Object.entries(cleanFleet)) {
+      originP.fleet[id] -= qty;
+    }
+
+    const now = Date.now();
+    const missionObj = {
+      id: 'flt_' + now + '_' + Math.random().toString(36).substring(2, 6),
+      mission,
+      originPlanetId: originP.id,
+      originCoords: Object.assign({}, originP.coords),
+      targetCoords: Object.assign({}, targetCoords),
+      fleet: cleanFleet,
+      cargo: { metal: loadM, crystal: loadC, deuterium: loadD },
+      options,
+      status: 'outbound', // 'outbound' | 'returning'
+      startTime: now,
+      arrivalTime: now + durationSec * 1000,
+      returnTime: now + durationSec * 2000,
+      durationSec
+    };
+
+    if (!Array.isArray(universe.fleetsInFlight)) universe.fleetsInFlight = [];
+    universe.fleetsInFlight.push(missionObj);
+    return missionObj;
+  }
+
+  function addMessage(universe, type, title, body) {
+    if (!Array.isArray(universe.messages)) universe.messages = [];
+    universe.messages.unshift({
+      id: 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+      time: Date.now(),
+      type,
+      title,
+      body
+    });
+    if (universe.messages.length > 80) {
+      universe.messages.length = 80;
+    }
+  }
+
+  function handleMissionArrival(universe, flt) {
+    const now = Date.now();
+    const key = coordKey(flt.targetCoords.g, flt.targetCoords.s, flt.targetCoords.p);
+    if (!universe.galaxyDeltas) universe.galaxyDeltas = {};
+
+    // 1. SPIONAGGIO
+    if (flt.mission === 'spy') {
+      const slot = generateProceduralSlot(universe, flt.targetCoords.g, flt.targetCoords.s, flt.targetCoords.p);
+      if (slot.ownerType !== 'bot') {
+        addMessage(universe, 'spy', `Spionaggio [${key}]`, 'Nessuna civiltà rilevata alle coordinate indicate.');
+      } else {
+        const probes = flt.fleet.espionageProbe || 1;
+        const myEsp = Number(universe.researches?.espionageTech || 0);
+        const defEsp = Number(slot.tech?.espionageTech || 0);
+        const defProbes = Number(slot.fleet?.espionageProbe || 0);
+
+        const diff = (myEsp - defEsp) + Math.floor(Math.sqrt(probes));
+        const catchChance = Math.min(0.85, Math.max(0.02, (defProbes / (probes * 8)) * 0.25 - diff * 0.03));
+        const probesLost = Math.random() < catchChance ? Math.min(probes, Math.ceil(probes * 0.5)) : 0;
+        flt.fleet.espionageProbe = Math.max(0, probes - probesLost);
+
+        if (!Array.isArray(universe.spyReports)) universe.spyReports = [];
+        const prevScans = universe.spyReports.filter((r) => r.key === key).length;
+
+        const report = {
+          id: 'spy_' + now + '_' + Math.random().toString(36).substring(2, 5),
+          time: now,
+          key,
+          coords: Object.assign({}, flt.targetCoords),
+          targetName: slot.name,
+          emperor: slot.emperor,
+          tier: slot.tier,
+          personality: slot.personality,
+          scanCount: prevScans + 1,
+          resources: Object.assign({}, slot.resources),
+          fleet: diff >= 0 ? Object.assign({}, slot.fleet) : null,
+          defenses: diff >= 1 ? Object.assign({}, slot.defenses) : null,
+          buildings: diff >= 2 ? Object.assign({}, slot.buildings) : null,
+          tech: diff >= 3 ? Object.assign({}, slot.tech) : null,
+          hasMoon: Boolean(slot.moon)
+        };
+        universe.spyReports.unshift(report);
+        if (universe.spyReports.length > 50) universe.spyReports.length = 50;
+
+        addMessage(
+          universe,
+          'spy',
+          `Rapporto Spia: ${slot.name} [${key}]`,
+          `Scansione #${report.scanCount} completata su ${slot.emperor} (${slot.tier}). Risorse: ${slot.resources.metal.toLocaleString()} M, ${slot.resources.crystal.toLocaleString()} C, ${slot.resources.deuterium.toLocaleString()} D. Sonde perse: ${probesLost}.`
+        );
+      }
+      flt.status = 'returning';
+      return;
+    }
+
+    // 2. COLONIZZAZIONE
+    if (flt.mission === 'colonize') {
+      const slot = generateProceduralSlot(universe, flt.targetCoords.g, flt.targetCoords.s, flt.targetCoords.p);
+      if (slot.ownerType !== 'empty') {
+        addMessage(universe, 'fleet', `Colonizzazione Fallita [${key}]`, 'Lo slot non è vuoto. La flotta torna alla base.');
+        flt.status = 'returning';
+        return;
+      }
+
+      // Consuma 1 Colonizzatrice
+      flt.fleet.colonyShip = Math.max(0, (flt.fleet.colonyShip || 1) - 1);
+      const colNum = universe.planets.length + 1;
+      const colName = `Colonia ${colNum}`;
+      const newPlanet = {
+        id: 'planet_' + now + '_' + Math.random().toString(36).substring(2, 6),
+        name: colName,
+        coords: Object.assign({}, flt.targetCoords),
+        minTemp: slot.minTemp,
+        maxTemp: slot.maxTemp,
+        fieldsMax: slot.fieldsMax,
+        resources: {
+          metal: 1000 + flt.cargo.metal,
+          crystal: 1000 + flt.cargo.crystal,
+          deuterium: 500 + flt.cargo.deuterium
+        },
+        buildings: {
+          metalMine: 0, crystalMine: 0, deuteriumSynth: 0, solarPlant: 0, fusionReactor: 0,
+          roboticsFactory: 0, naniteFactory: 0, shipyard: 0, metalStorage: 0, crystalStorage: 0,
+          deuteriumTank: 0, researchLab: 0, terraformer: 0, hiddenBunker: 0
+        },
+        defenses: {},
+        fleet: {},
+        buildQueue: [],
+        shipyardQueue: [],
+        defenseQueue: [],
+        moon: null
+      };
+
+      universe.planets.push(newPlanet);
+      universe.galaxyDeltas[key] = Object.assign({}, universe.galaxyDeltas[key], {
+        destroyed: false,
+        owner: 'player',
+        ownerType: 'player',
+        emperor: universe.emperor,
+        planetName: colName,
+        planetId: newPlanet.id
+      });
+
+      flt.cargo = { metal: 0, crystal: 0, deuterium: 0 };
+      flt.status = 'returning';
+      addMessage(universe, 'fleet', `Nuova Colonia Fondata [${key}]`, `${colName} (${slot.fieldsMax} campi) è ora parte del tuo Impero!`);
+      return;
+    }
+
+    // 3. TRASPORTO E SCHIERAMENTO
+    if (flt.mission === 'transport' || flt.mission === 'deploy') {
+      const destPlanet = universe.planets.find(
+        (p) => p.coords.g === flt.targetCoords.g && p.coords.s === flt.targetCoords.s && p.coords.p === flt.targetCoords.p
+      );
+      if (destPlanet) {
+        destPlanet.resources.metal += flt.cargo.metal;
+        destPlanet.resources.crystal += flt.cargo.crystal;
+        destPlanet.resources.deuterium += flt.cargo.deuterium;
+        flt.cargo = { metal: 0, crystal: 0, deuterium: 0 };
+
+        if (flt.mission === 'deploy') {
+          for (const [id, qty] of Object.entries(flt.fleet)) {
+            destPlanet.fleet[id] = (destPlanet.fleet[id] || 0) + qty;
+          }
+          addMessage(universe, 'fleet', `Flotta Schierata su ${destPlanet.name}`, 'Navi e risorse trasferite con successo.');
+          return 'remove'; // Non torna indietro
+        }
+        addMessage(universe, 'fleet', `Trasporto Consegnato su ${destPlanet.name}`, 'Risorse scaricate. La flotta rientra.');
+      }
+      flt.status = 'returning';
+      return;
+    }
+
+    // 4. RICICLAGGIO DETRITI
+    if (flt.mission === 'recycle') {
+      const slot = generateProceduralSlot(universe, flt.targetCoords.g, flt.targetCoords.s, flt.targetCoords.p);
+      const debris = slot.debris || { metal: 0, crystal: 0 };
+      const Data = window.UniversumData;
+      let recCap = 0;
+      for (const [id, qty] of Object.entries(flt.fleet)) {
+        recCap += (Data.SHIPS[id]?.cargo || 0) * qty;
+      }
+      const alreadyLoaded = flt.cargo.metal + flt.cargo.crystal + flt.cargo.deuterium;
+      const freeCap = Math.max(0, recCap - alreadyLoaded);
+
+      const takeM = Math.min(debris.metal, Math.floor(freeCap * 0.6));
+      const takeC = Math.min(debris.crystal, freeCap - takeM);
+
+      flt.cargo.metal += takeM;
+      flt.cargo.crystal += takeC;
+      universe.galaxyDeltas[key] = Object.assign({}, universe.galaxyDeltas[key], {
+        debris: {
+          metal: Math.max(0, debris.metal - takeM),
+          crystal: Math.max(0, debris.crystal - takeC)
+        }
+      });
+
+      addMessage(universe, 'fleet', `Raccolta Detriti [${key}]`, `Riciclati ${takeM.toLocaleString()} Metallo e ${takeC.toLocaleString()} Cristallo.`);
+      flt.status = 'returning';
+      return;
+    }
+
+    // 5. SPEDIZIONE (POSIZIONE 16 / BUCO NERO)
+    if (flt.mission === 'explore') {
+      const roll = Math.random();
+      if (flt.options && flt.options.blackHole) {
+        if (roll < 0.05) {
+          flt.cargo.metal += 500000;
+          flt.cargo.crystal += 300000;
+          flt.cargo.deuterium += 200000;
+          addMessage(universe, 'expedition', `🌌 SINGOLARITÀ SUPERATA [${key}]!`, 'La flotta emerge dall’orizzonte degli eventi con 1.000.000 di risorse esotiche!');
+        } else if (roll < 0.35) {
+          // Perdita 30% flotta per gravità estrema
+          for (const id of Object.keys(flt.fleet)) {
+            flt.fleet[id] = Math.floor(flt.fleet[id] * 0.7);
+          }
+          addMessage(universe, 'expedition', `⚠️ Anomalia Gravitazionale [${key}]`, 'Il Buco Nero ha danneggiato il 30% della flotta esplorativa.');
+        } else {
+          flt.cargo.deuterium += 25000;
+          addMessage(universe, 'expedition', `Spedizione Buco Nero [${key}]`, 'Raccolti 25.000 isotopi di Deuterio puro dalla corona.');
+        }
+      } else {
+        if (roll < 0.35) {
+          const foundM = Math.floor(15000 + Math.random() * 45000);
+          const foundC = Math.floor(10000 + Math.random() * 30000);
+          flt.cargo.metal += foundM;
+          flt.cargo.crystal += foundC;
+          addMessage(universe, 'expedition', `Giacimento Asteroidi [${key}]`, `Trovati ${foundM.toLocaleString()} Metallo e ${foundC.toLocaleString()} Cristallo.`);
+        } else if (roll < 0.55) {
+          flt.fleet.lightFighter = (flt.fleet.lightFighter || 0) + 5;
+          flt.fleet.cruiser = (flt.fleet.cruiser || 0) + 1;
+          addMessage(universe, 'expedition', `Relitto Flotta Abbandonata [${key}]`, 'Recuperati 5 Caccia Leggeri e 1 Incrociatore ancora funzionanti!');
+        } else if (roll < 0.62) {
+          // Relitto Antico con Morte Nera danneggiata riparabile
+          const originP = universe.planets.find((p) => p.id === flt.originPlanetId) || universe.planets[0];
+          if (originP && originP.resources.metal >= 250000 && originP.resources.crystal >= 125000) {
+            originP.resources.metal -= 250000;
+            originP.resources.crystal -= 125000;
+            flt.fleet.deathStar = (flt.fleet.deathStar || 0) + 1;
+            addMessage(universe, 'expedition', `☠️ RELITTO ANTICO RIPARATO [${key}]!`, 'I tuoi ingegneri hanno riparato una Morte Nera antica usando 250k Metallo e 125k Cristallo!');
+          } else {
+            flt.cargo.metal += 80000;
+            addMessage(universe, 'expedition', `Relitto Antico [${key}]`, 'Trovato scafo di Morte Nera irrecuperabile senza 250k M / 125k C: smantellati 80.000 Metallo.');
+          }
+        } else if (roll < 0.80) {
+          // Scontro con Pirati Spaziali
+          const pirateCombat = resolveCombat(flt.fleet, universe.researches, {
+            fleet: { lightFighter: 12, cruiser: 3 },
+            defenses: {},
+            tech: { weaponsTech: 3, shieldingTech: 3, armourTech: 3 },
+            resources: { metal: 12000, crystal: 8000, deuterium: 2000 }
+          });
+          flt.fleet = pirateCombat.attackerSurvivors;
+          flt.cargo.metal += pirateCombat.loot.metal;
+          flt.cargo.crystal += pirateCombat.loot.crystal;
+          addMessage(universe, 'combat', `Imboscata Pirata [${key}]`, `Esito: ${pirateCombat.result}. Bottino recuperato: ${pirateCombat.loot.metal} M / ${pirateCombat.loot.crystal} C.`);
+        } else {
+          addMessage(universe, 'expedition', `Spedizione Tranquilla [${key}]`, 'Nessuna anomalia rilevata nel settore.');
+        }
+      }
+      flt.status = 'returning';
+      return;
+    }
+
+    // 6. ATTACCO / DISTRUZIONE LUNA
+    if (flt.mission === 'attack' || flt.mission === 'destroyMoon') {
+      const slot = generateProceduralSlot(universe, flt.targetCoords.g, flt.targetCoords.s, flt.targetCoords.p);
+      if (slot.ownerType !== 'bot') {
+        addMessage(universe, 'combat', `Missione Annullata [${key}]`, 'Nessun bersaglio ostile alle coordinate.');
+        flt.status = 'returning';
+        return;
+      }
+
+      const combat = resolveCombat(flt.fleet, universe.researches, slot);
+      flt.fleet = combat.attackerSurvivors;
+      flt.cargo.metal += combat.loot.metal;
+      flt.cargo.crystal += combat.loot.crystal;
+      flt.cargo.deuterium += combat.loot.deuterium;
+
+      // Aggiorna detriti in orbita
+      const prevDebris = slot.debris || { metal: 0, crystal: 0 };
+      const newDebris = {
+        metal: prevDebris.metal + combat.debris.metal,
+        crystal: prevDebris.crystal + combat.debris.crystal
+      };
+
+      if (combat.planetDestroyed) {
+        universe.galaxyDeltas[key] = {
+          destroyed: true,
+          owner: 'none',
+          ownerType: 'none',
+          hasMoon: false,
+          debris: newDebris
+        };
+        addMessage(
+          universe,
+          'combat',
+          `☄️ PIANETA DISINTEGRATO [${key}]!`,
+          `La tua Morte Nera ha annientato ${slot.name} (${slot.emperor}). Lo slot è ora vuoto e ricolonizzabile!`
+        );
+      } else {
+        const remResources = {
+          metal: Math.max(0, slot.resources.metal - combat.loot.metal),
+          crystal: Math.max(0, slot.resources.crystal - combat.loot.crystal),
+          deuterium: Math.max(0, slot.resources.deuterium - combat.loot.deuterium)
+        };
+
+        const noDefendersLeft =
+          Object.keys(combat.defenderFleetSurvivors).length === 0 &&
+          Object.keys(combat.repairedDefenses).length === 0;
+        const hasConquestShip = (flt.fleet.colonyShip || 0) >= 1 || (flt.fleet.mothership || 0) >= 1;
+
+        // CONQUISTA PIANETA BOT
+        if (flt.mission === 'attack' && combat.result === 'attacker_win' && noDefendersLeft && hasConquestShip) {
+          if (flt.fleet.colonyShip >= 1) flt.fleet.colonyShip -= 1;
+
+          const conqueredPlanet = {
+            id: 'planet_conq_' + now + '_' + Math.random().toString(36).substring(2, 5),
+            name: slot.name,
+            coords: Object.assign({}, flt.targetCoords),
+            minTemp: slot.minTemp,
+            maxTemp: slot.maxTemp,
+            fieldsMax: slot.fieldsMax,
+            resources: remResources,
+            buildings: Object.assign({}, slot.buildings),
+            defenses: {},
+            fleet: {},
+            buildQueue: [],
+            shipyardQueue: [],
+            defenseQueue: [],
+            moon: (slot.moon && !combat.moonDestroyed) ? {
+              name: slot.moon.name || 'Luna',
+              diameter: slot.moon.diameter || 7500,
+              fieldsMax: 1,
+              resources: { metal: 0, crystal: 0, deuterium: 0 },
+              buildings: { lunarBase: 0, lunarStorage: 0, lunarShield: 0, secretShipyard: 0, sensorPhalanx: 0, jumpGate: 0 },
+              buildQueue: [],
+              jumpGateCooldownUntil: 0
+            } : null
+          };
+
+          universe.planets.push(conqueredPlanet);
+          universe.galaxyDeltas[key] = {
+            destroyed: false,
+            owner: 'player',
+            ownerType: 'player',
+            emperor: universe.emperor,
+            planetName: conqueredPlanet.name,
+            planetId: conqueredPlanet.id,
+            hasMoon: Boolean(conqueredPlanet.moon),
+            moonName: conqueredPlanet.moon ? conqueredPlanet.moon.name : null,
+            debris: newDebris
+          };
+
+          addMessage(
+            universe,
+            'combat',
+            `👑 PIANETA CONQUISTATO: ${slot.name} [${key}]!`,
+            `Hai spazzato via le difese di ${slot.emperor} e annesso ${slot.name} con tutti i suoi edifici al tuo Impero!`
+          );
+        } else {
+          // Salva stato post-battaglia del BOT nei delta
+          universe.galaxyDeltas[key] = Object.assign({}, universe.galaxyDeltas[key], {
+            lootedAt: now,
+            resourcesOverride: remResources,
+            fleetOverride: combat.defenderFleetSurvivors,
+            defensesOverride: combat.repairedDefenses,
+            hasMoon: combat.moonDestroyed ? false : Boolean(slot.moon),
+            debris: newDebris
+          });
+
+          const extraNotes = combat.log.length > 0 ? ' ' + combat.log.join(' ') : '';
+          addMessage(
+            universe,
+            'combat',
+            `Rapporto Battaglia [${key}] — ${combat.result.toUpperCase()}`,
+            `Round: ${combat.roundsPlayed}. Bottino: ${combat.loot.metal.toLocaleString()} M, ${combat.loot.crystal.toLocaleString()} C, ${combat.loot.deuterium.toLocaleString()} D. Detriti: ${(newDebris.metal + newDebris.crystal).toLocaleString()}.${extraNotes}`
+          );
+        }
+      }
+
+      flt.status = 'returning';
+    }
+  }
+
+  function processBotAI(universe) {
+    if (universe.botMode !== 'hostile' || universe.creativeMode) return;
+    if (!Array.isArray(universe.incomingAttacks)) universe.incomingAttacks = [];
+
+    const now = Date.now();
+    const intervalsMs = {
+      1: 3 * 3600 * 1000, // 3 ore
+      2: 1 * 3600 * 1000, // 1 ora
+      3: 20 * 60 * 1000,  // 20 minuti
+      4: 5 * 60 * 1000    // 5 minuti (INFERNO)
+    };
+    const interval = intervalsMs[universe.botLevel || 2] || intervalsMs[2];
+    if (!universe.nextBotRaidAt) {
+      universe.nextBotRaidAt = now + interval;
+      return;
+    }
+
+    // Controlla attacchi in arrivo giunti all'impatto
+    for (let i = universe.incomingAttacks.length - 1; i >= 0; i--) {
+      const atk = universe.incomingAttacks[i];
+      if (now >= atk.arrivalTime) {
+        universe.incomingAttacks.splice(i, 1);
+        const targetPlanet = universe.planets.find((p) => p.id === atk.targetPlanetId) || universe.planets[0];
+        if (!targetPlanet) continue;
+
+        const combat = resolveCombat(atk.fleet, atk.tech, {
+          fleet: targetPlanet.fleet,
+          defenses: targetPlanet.defenses,
+          tech: universe.researches,
+          resources: targetPlanet.resources,
+          buildings: targetPlanet.buildings,
+          moon: targetPlanet.moon
+        });
+
+        targetPlanet.fleet = combat.defenderFleetSurvivors;
+        targetPlanet.defenses = combat.repairedDefenses;
+
+        if (combat.result === 'attacker_win') {
+          targetPlanet.resources.metal = Math.max(0, targetPlanet.resources.metal - combat.loot.metal);
+          targetPlanet.resources.crystal = Math.max(0, targetPlanet.resources.crystal - combat.loot.crystal);
+          targetPlanet.resources.deuterium = Math.max(0, targetPlanet.resources.deuterium - combat.loot.deuterium);
+
+          if (combat.moonDestroyed && targetPlanet.moon) {
+            targetPlanet.moon = null;
+          }
+          // Livello 4 INFERNO: rischio distruzione pianeta se non è l'unico rimasto
+          if (combat.planetDestroyed && universe.planets.length > 1) {
+            const idx = universe.planets.findIndex((p) => p.id === targetPlanet.id);
+            if (idx !== -1) universe.planets.splice(idx, 1);
+          }
+
+          addMessage(
+            universe,
+            'combat',
+            `🚨 ATTACCO BOT SUBITO SU ${targetPlanet.name}!`,
+            `${atk.attackerName} ha sfondato le tue difese! Risorse saccheggiate: ${combat.loot.metal.toLocaleString()} M, ${combat.loot.crystal.toLocaleString()} C.`
+          );
+        } else {
+          addMessage(
+            universe,
+            'combat',
+            `🛡️ ATTACCO BOT RESPINTO SU ${targetPlanet.name}!`,
+            `Le tue difese hanno respinto l'incursione di ${atk.attackerName}!`
+          );
+        }
+      }
+    }
+
+    // Schedula nuovo attacco BOT
+    if (now >= universe.nextBotRaidAt && universe.planets.length > 0) {
+      universe.nextBotRaidAt = now + interval;
+      const targetP = universe.planets[Math.floor(Math.random() * universe.planets.length)];
+      const lv = universe.botLevel || 2;
+      const mult = lv === 4 ? 15 : lv === 3 ? 5 : lv === 2 ? 2 : 1;
+
+      const raidFleet = {
+        lightFighter: 10 * mult,
+        heavyFighter: 4 * mult,
+        cruiser: 2 * mult,
+        battleship: lv >= 2 ? 2 * mult : 0,
+        bomber: lv >= 3 ? 2 * mult : 0,
+        deathStar: lv === 4 ? 1 : 0
+      };
+
+      const warnSec = Math.max(45, Math.floor(300 / Math.sqrt(universe.speed || 10)));
+      universe.incomingAttacks.push({
+        id: 'raid_' + now,
+        attackerName: `Flotta Predoni Lv.${lv}`,
+        originCoords: { g: targetP.coords.g, s: Math.max(1, targetP.coords.s - 3), p: 7 },
+        targetPlanetId: targetP.id,
+        targetCoords: Object.assign({}, targetP.coords),
+        fleet: raidFleet,
+        tech: { weaponsTech: lv * 2, shieldingTech: lv * 2, armourTech: lv * 2 },
+        arrivalTime: now + warnSec * 1000
+      });
+
+      addMessage(
+        universe,
+        'alert',
+        `⚠️ ALLARME RADAR: Flotta Ostile in Avvicinamento!`,
+        `Una flotta BOT (Lv.${lv}) colpirà ${targetP.name} [${coordKey(targetP.coords.g, targetP.coords.s, targetP.coords.p)}] tra ${warnSec} secondi!`
+      );
+    }
+  }
+
+  function processFleetsAndBots(universe) {
+    if (!universe) return;
+    const now = Date.now();
+    if (!Array.isArray(universe.fleetsInFlight)) universe.fleetsInFlight = [];
+
+    for (let i = universe.fleetsInFlight.length - 1; i >= 0; i--) {
+      const flt = universe.fleetsInFlight[i];
+      if (flt.status === 'outbound' && now >= flt.arrivalTime) {
+        const action = handleMissionArrival(universe, flt);
+        if (action === 'remove') {
+          universe.fleetsInFlight.splice(i, 1);
+          continue;
+        }
+      }
+
+      if (flt.status === 'returning' && now >= flt.returnTime) {
+        const homeP = universe.planets.find((p) => p.id === flt.originPlanetId) || universe.planets[0];
+        if (homeP) {
+          for (const [id, qty] of Object.entries(flt.fleet || {})) {
+            homeP.fleet[id] = (homeP.fleet[id] || 0) + qty;
+          }
+          homeP.resources.metal += flt.cargo.metal || 0;
+          homeP.resources.crystal += flt.cargo.crystal || 0;
+          homeP.resources.deuterium += flt.cargo.deuterium || 0;
+        }
+        universe.fleetsInFlight.splice(i, 1);
+      }
+    }
+
+    processBotAI(universe);
+  }
+
+  // =========================================================
+  // COMMERCIO CON BOT, MERCATO NERO E CONTRATTI
+  // =========================================================
+  function tradeWithBot(universe, planetIndex, botCoords, giveRes, giveAmount, getRes) {
+    const planet = universe.planets[planetIndex];
+    if (!planet) throw new Error('Pianeta non trovato.');
+    if (giveRes === getRes) throw new Error('Seleziona due risorse diverse per lo scambio.');
+
+    const slot = generateProceduralSlot(universe, botCoords.g, botCoords.s, botCoords.p);
+    if (slot.ownerType !== 'bot') throw new Error('Nessun BOT commerciante alle coordinate indicate.');
+
+    const amount = Math.max(100, Math.floor(Number(giveAmount) || 0));
+    if (!universe.creativeMode && (planet.resources[giveRes] || 0) < amount) {
+      throw new Error(`Risorse insufficienti sul pianeta (${giveRes}).`);
+    }
+
+    const rates = slot.tradeRates || { metal: 3.0, crystal: 2.0, deuterium: 1.0 };
+    // Converte giveAmount in valore base (deuterio) e poi nella risorsa richiesta
+    const valueInBase = amount / rates[giveRes];
+    const receivedAmount = Math.floor(valueInBase * rates[getRes]);
+
+    if (receivedAmount <= 0) throw new Error('Quantità troppo bassa per completare lo scambio.');
+
+    if (!universe.creativeMode) {
+      planet.resources[giveRes] -= amount;
+    }
+    planet.resources[getRes] = (planet.resources[getRes] || 0) + receivedAmount;
+
+    addMessage(
+      universe,
+      'trade',
+      `Scambio Commerciale con ${slot.emperor}`,
+      `Ceduti ${amount.toLocaleString()} ${giveRes} per ${receivedAmount.toLocaleString()} ${getRes}.`
+    );
+
+    return { given: amount, received: receivedAmount, botName: slot.emperor };
+  }
+
+  function blackMarketTrade(universe, planetIndex, giveRes, giveAmount, getRes) {
+    const planet = universe.planets[planetIndex];
+    if (!planet) throw new Error('Pianeta non trovato.');
+    if (giveRes === getRes) throw new Error('Seleziona due risorse diverse.');
+
+    const amount = Math.max(500, Math.floor(Number(giveAmount) || 0));
+    if (!universe.creativeMode && (planet.resources[giveRes] || 0) < amount) {
+      throw new Error('Risorse insufficienti per il Mercato Nero.');
+    }
+
+    // Tasso fisso Mercato Nero (3:2:1 con tassa contrabbando 15%)
+    const baseWeights = { metal: 3.0, crystal: 2.0, deuterium: 1.0 };
+    const receivedAmount = Math.floor((amount / baseWeights[giveRes]) * baseWeights[getRes] * 0.85);
+
+    if (!universe.creativeMode) {
+      planet.resources[giveRes] -= amount;
+    }
+    planet.resources[getRes] = (planet.resources[getRes] || 0) + receivedAmount;
+
+    return { given: amount, received: receivedAmount };
+  }
+
+  function signBotContract(universe, planetIndex, botCoords) {
+    const planet = universe.planets[planetIndex];
+    if (!planet) throw new Error('Pianeta non trovato.');
+    const slot = generateProceduralSlot(universe, botCoords.g, botCoords.s, botCoords.p);
+    if (slot.ownerType !== 'bot') throw new Error('Coordinate non valide per un contratto BOT.');
+
+    const key = coordKey(botCoords.g, botCoords.s, botCoords.p);
+    if (!Array.isArray(universe.contracts)) universe.contracts = [];
+    if (universe.contracts.some((c) => c.key === key)) {
+      throw new Error('Hai già un contratto attivo con questo BOT.');
+    }
+
+    if (!universe.creativeMode) {
+      if (planet.resources.metal < 10000) {
+        throw new Error('Servono 10.000 Metallo per siglare il contratto di protezione.');
+      }
+      planet.resources.metal -= 10000;
+    }
+
+    const contract = {
+      id: 'ctr_' + Date.now(),
+      key,
+      coords: Object.assign({}, botCoords),
+      botName: slot.emperor,
+      dailyCostMetal: 10000,
+      signedAt: Date.now()
+    };
+    universe.contracts.push(contract);
+    addMessage(universe, 'trade', `Patto Difensivo Siglato`, `${slot.emperor} [${key}] fornirà supporto difensivo in cambio di 10.000 Metallo/giorno.`);
+    return contract;
+  }
+
+  window.UniversumGalaxy = {
+    getSystemData,
+    generateProceduralSlot,
+    getMoonCreationCost,
+    createMoon,
+    useJumpGate,
+    scanWithPhalanx,
+    resolveCombat,
+    simulateBattle,
+    calculateDistance,
+    getFleetSpeedAndFuel,
+    launchFleet,
+    processFleetsAndBots,
+    tradeWithBot,
+    blackMarketTrade,
+    signBotContract
+  };
+})();
