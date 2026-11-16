@@ -1097,4 +1097,1106 @@
       }
     }
   };
+// =========================================================
+  // STEP 2: 14 EDIFICI PLANETARI, 6 EDIFICI LUNARI, 18 RICERCHE E RISORSE
+  // =========================================================
+  (function extendUniversumGraphicsStep2() {
+    const G = window.UniversumGraphics;
+    if (!G || !G.helpers) return;
+
+    const { drawCardBg, drawMetallicHull, drawEngineGlow, drawPanelLines } = G.helpers;
+
+    // --- Helper specifici Step 2 ---
+
+    function _drawPlanetarySurface(c, groundColor = '#141d2e', horizonColor = '#00d2ff') {
+      c.save();
+      const gGrad = c.createLinearGradient(0, 88, 0, 128);
+      gGrad.addColorStop(0, groundColor);
+      gGrad.addColorStop(1, '#04060d');
+      c.fillStyle = gGrad;
+      c.beginPath();
+      c.moveTo(0, 94);
+      c.quadraticCurveTo(64, 86, 128, 94);
+      c.lineTo(128, 128);
+      c.lineTo(0, 128);
+      c.closePath();
+      c.fill();
+
+      c.strokeStyle = horizonColor;
+      c.globalAlpha = 0.45;
+      c.lineWidth = 1.2;
+      c.beginPath();
+      c.moveTo(0, 94);
+      c.quadraticCurveTo(64, 86, 128, 94);
+      c.stroke();
+      c.restore();
+    }
+
+    function _drawLunarSurface(c, accent = '#b0bec5') {
+      c.save();
+      const lGrad = c.createLinearGradient(0, 86, 0, 128);
+      lGrad.addColorStop(0, '#37474f');
+      lGrad.addColorStop(1, '#10161c');
+      c.fillStyle = lGrad;
+      c.beginPath();
+      c.moveTo(0, 92);
+      c.quadraticCurveTo(64, 84, 128, 92);
+      c.lineTo(128, 128);
+      c.lineTo(0, 128);
+      c.closePath();
+      c.fill();
+
+      // Crateri lunari
+      const craters = [[26, 106, 12, 4], [96, 108, 15, 5], [64, 115, 10, 3]];
+      for (const [cx, cy, rx, ry] of craters) {
+        c.fillStyle = '#182026';
+        c.strokeStyle = 'rgba(207, 216, 220, 0.25)';
+        c.lineWidth = 1;
+        c.beginPath();
+        c.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+        c.fill();
+        c.stroke();
+      }
+
+      c.strokeStyle = accent;
+      c.globalAlpha = 0.4;
+      c.lineWidth = 1.1;
+      c.beginPath();
+      c.moveTo(0, 92);
+      c.quadraticCurveTo(64, 84, 128, 92);
+      c.stroke();
+      c.restore();
+    }
+
+    function _drawBlueprintBg(c, lineColor = '#00d2ff') {
+      c.save();
+      c.clearRect(0, 0, 128, 128);
+
+      // Sfondo blu profondo olografico
+      const bg = c.createRadialGradient(64, 64, 8, 64, 64, 88);
+      bg.addColorStop(0, '#071d3d');
+      bg.addColorStop(1, '#020917');
+      c.fillStyle = bg;
+      c.fillRect(0, 0, 128, 128);
+
+      // Griglia CAD blueprint fitta
+      c.strokeStyle = 'rgba(0, 210, 255, 0.13)';
+      c.lineWidth = 0.7;
+      for (let i = 16; i < 128; i += 16) {
+        c.beginPath();
+        c.moveTo(i, 0); c.lineTo(i, 128);
+        c.moveTo(0, i); c.lineTo(128, i);
+        c.stroke();
+      }
+
+      // Cerchio olografico di riferimento
+      c.strokeStyle = 'rgba(0, 229, 255, 0.28)';
+      c.setLineDash([4, 4]);
+      c.lineWidth = 1;
+      c.beginPath();
+      c.arc(64, 64, 46, 0, Math.PI * 2);
+      c.stroke();
+      c.setLineDash([]);
+
+      // Angolari HUD
+      c.strokeStyle = lineColor;
+      c.lineWidth = 1.4;
+      c.beginPath();
+      c.moveTo(6, 16); c.lineTo(6, 6); c.lineTo(16, 6);
+      c.moveTo(112, 6); c.lineTo(122, 6); c.lineTo(122, 16);
+      c.moveTo(6, 112); c.lineTo(6, 122); c.lineTo(16, 122);
+      c.moveTo(112, 122); c.lineTo(122, 122); c.lineTo(122, 112);
+      c.stroke();
+      c.restore();
+    }
+
+    // =========================================================
+    // 1. TUTTI I 14 EDIFICI PLANETARI
+    // =========================================================
+    const PLANETARY_BUILDINGS = {
+      // 1. Miniera di Metallo: grande trivella industriale con struttura a traliccio e scintille arancioni
+      metalMine(c) {
+        drawCardBg(c, '#00e676');
+        _drawPlanetarySurface(c, '#16241d', '#00e676');
+
+        // Torre a traliccio
+        c.strokeStyle = '#90a4ae';
+        c.lineWidth = 2.2;
+        c.beginPath();
+        c.moveTo(36, 94); c.lineTo(54, 24); c.lineTo(74, 24); c.lineTo(92, 94);
+        c.moveTo(42, 72); c.lineTo(82, 50);
+        c.moveTo(86, 72); c.lineTo(46, 50);
+        c.moveTo(48, 46); c.lineTo(80, 46);
+        c.stroke();
+
+        // Testa motore superiore
+        drawMetallicHull(c, (p) => {
+          p.rect(48, 18, 32, 12);
+        }, '#37474f', '#cfd8dc', '#00e676');
+
+        // Grande punta trivella centrale
+        drawMetallicHull(c, (p) => {
+          p.moveTo(57, 30); p.lineTo(71, 30); p.lineTo(64, 96);
+        }, '#455a64', '#ffffff', '#ff9100');
+
+        // Filettatura trivella + scintille arancioni
+        drawPanelLines(c, [[58, 44, 70, 50], [59, 58, 69, 64], [60, 72, 68, 78]], '#ff9100');
+        drawEngineGlow(c, 64, 95, 13, '#ff9100');
+        c.fillStyle = '#ffea00';
+        [[52, 88], [76, 86], [48, 96], [80, 95]].forEach(([sx, sy]) => {
+          c.fillRect(sx, sy, 2.5, 2.5);
+        });
+      },
+
+      // 2. Miniera di Cristallo: estrattore laser puntato su formazioni cristalline azzurro brillante
+      crystalMine(c) {
+        drawCardBg(c, '#00d2ff');
+        _drawPlanetarySurface(c, '#102030', '#00d2ff');
+
+        // Formazioni cristalline azzurro brillante a destra
+        const drawCrystal = (x, y, w, h, tilt) => {
+          c.save();
+          c.translate(x, y);
+          c.rotate(tilt);
+          const cg = c.createLinearGradient(-w / 2, -h, w / 2, 0);
+          cg.addColorStop(0, '#e0f7fa');
+          cg.addColorStop(0.5, '#00e5ff');
+          cg.addColorStop(1, '#01579b');
+          c.fillStyle = cg;
+          c.strokeStyle = '#84ffff';
+          c.lineWidth = 1.2;
+          c.beginPath();
+          c.moveTo(0, -h);
+          c.lineTo(w * 0.5, -h * 0.35);
+          c.lineTo(w * 0.35, 0);
+          c.lineTo(-w * 0.35, 0);
+          c.lineTo(-w * 0.5, -h * 0.35);
+          c.closePath();
+          c.fill();
+          c.stroke();
+          c.restore();
+        };
+
+        drawCrystal(88, 95, 16, 42, -0.15);
+        drawCrystal(102, 96, 14, 34, 0.2);
+        drawCrystal(76, 96, 12, 26, -0.35);
+
+        // Estrattore laser a sinistra
+        drawMetallicHull(c, (p) => {
+          p.moveTo(18, 94); p.lineTo(24, 48); p.lineTo(48, 48); p.lineTo(54, 94);
+        }, '#263238', '#b0bec5', '#00d2ff');
+
+        // Emettitore laser puntato sui cristalli
+        c.strokeStyle = '#00e5ff';
+        c.lineWidth = 3;
+        c.beginPath();
+        c.moveTo(46, 56);
+        c.lineTo(86, 74);
+        c.stroke();
+        drawEngineGlow(c, 86, 74, 10, '#00e5ff');
+      },
+
+      // 3. Sintetizzatore di Deuterio: complesso di raffinazione con serbatoi cilindrici e condotti arancio neon
+      deuteriumSynth(c) {
+        drawCardBg(c, '#ff9100');
+        _drawPlanetarySurface(c, '#241911', '#ff9100');
+
+        // Due grandi serbatoi cilindrici
+        [34, 62].forEach((tx) => {
+          drawMetallicHull(c, (p) => {
+            p.roundRect(tx, 34, 22, 60, 8);
+          }, '#37474f', '#cfd8dc', '#ff9100');
+          // Finestra livello deuterio
+          c.fillStyle = '#ff9100';
+          c.fillRect(tx + 8, 48, 6, 36);
+        });
+
+        // Torre di frazionamento alta a destra
+        drawMetallicHull(c, (p) => {
+          p.rect(90, 22, 16, 72);
+        }, '#263238', '#90a4ae', '#ff9100');
+
+        // Condotti arancio neon di collegamento
+        c.strokeStyle = '#ff9100';
+        c.lineWidth = 2.6;
+        c.beginPath();
+        c.moveTo(56, 46); c.lineTo(62, 46);
+        c.moveTo(84, 42); c.lineTo(90, 42);
+        c.moveTo(84, 72); c.lineTo(90, 72);
+        c.stroke();
+      },
+
+      // 4. Centrale Solare: schiera di grandi pannelli solari con riflessi dorati
+      solarPlant(c) {
+        drawCardBg(c, '#ffea00');
+        _drawPlanetarySurface(c, '#1c1d12', '#ffea00');
+
+        // Torre centrale
+        drawMetallicHull(c, (p) => {
+          p.moveTo(56, 94); p.lineTo(60, 44); p.lineTo(68, 44); p.lineTo(72, 94);
+        }, '#37474f', '#eceff1', '#ffea00');
+
+        // Due grandi ali fotovoltaiche inclinate con riflessi dorati
+        const drawPanel = (x, y, w, h, skew) => {
+          c.save();
+          c.translate(x, y);
+          c.transform(1, skew, 0, 1, 0, 0);
+          const pg = c.createLinearGradient(0, 0, w, h);
+          pg.addColorStop(0, '#ffd700');
+          pg.addColorStop(0.45, '#ff8f00');
+          pg.addColorStop(1, '#1a237e');
+          c.fillStyle = pg;
+          c.strokeStyle = '#ffea00';
+          c.lineWidth = 1.4;
+          c.fillRect(0, 0, w, h);
+          c.strokeRect(0, 0, w, h);
+          drawPanelLines(c, [[w * 0.5, 0, w * 0.5, h], [0, h * 0.5, w, h * 0.5]], 'rgba(255,255,255,0.45)');
+          c.restore();
+        };
+
+        drawPanel(14, 38, 42, 28, -0.18);
+        drawPanel(72, 31, 42, 28, 0.18);
+        drawEngineGlow(c, 64, 42, 11, '#ffea00');
+      },
+
+      // 5. Reattore a Fusione: reattore toroidale (tokamak) con anello di plasma incandescente al centro
+      fusionReactor(c) {
+        drawCardBg(c, '#00e5ff');
+        _drawPlanetarySurface(c, '#121d2b', '#00e5ff');
+
+        // Struttura esterna tokamak
+        drawMetallicHull(c, (p) => {
+          p.ellipse(64, 58, 44, 28, 0, 0, Math.PI * 2);
+        }, '#263238', '#90a4ae', '#00e5ff');
+
+        // Cavità centrale e anello di plasma incandescente
+        c.fillStyle = '#070b14';
+        c.beginPath();
+        c.ellipse(64, 58, 30, 17, 0, 0, Math.PI * 2);
+        c.fill();
+
+        c.save();
+        c.shadowColor = '#00e5ff';
+        c.shadowBlur = 14;
+        c.strokeStyle = '#84ffff';
+        c.lineWidth = 5;
+        c.beginPath();
+        c.ellipse(64, 58, 23, 12, 0, 0, Math.PI * 2);
+        c.stroke();
+        c.restore();
+
+        // Colonna centrale del tokamak
+        drawMetallicHull(c, (p) => {
+          p.rect(57, 30, 14, 58);
+        }, '#37474f', '#eceff1', '#00e5ff');
+      },
+
+      // 6. Cantiere Navale: grande bacino di costruzione orbitale con gru meccaniche e scafo in assemblaggio
+      shipyard(c) {
+        drawCardBg(c, '#00d2ff');
+        _drawPlanetarySurface(c, '#111827', '#00d2ff');
+
+        // Portale/bacino di assemblaggio ad arco
+        drawMetallicHull(c, (p) => {
+          p.moveTo(20, 94); p.lineTo(20, 30); p.lineTo(108, 30); p.lineTo(108, 94);
+          p.lineTo(94, 94); p.lineTo(94, 42); p.lineTo(34, 42); p.lineTo(34, 94);
+        }, '#263238', '#b0bec5', '#00d2ff');
+
+        // Scafo di nave sospeso in assemblaggio al centro
+        drawMetallicHull(c, (p) => {
+          p.moveTo(42, 68); p.lineTo(66, 56); p.lineTo(88, 68); p.lineTo(66, 78);
+        }, '#455a64', '#eceff1', '#ff9100');
+
+        // Bracci gru e scintille di saldatura
+        c.strokeStyle = '#ff9100';
+        c.lineWidth = 1.6;
+        c.beginPath();
+        c.moveTo(46, 42); c.lineTo(56, 62);
+        c.moveTo(82, 42); c.lineTo(74, 62);
+        c.stroke();
+        drawEngineGlow(c, 56, 62, 7, '#00e5ff');
+        drawEngineGlow(c, 74, 62, 7, '#ff9100');
+      },
+
+      // 7. Fabbrica dei Robot: bracci robotici automatizzati con saldatura laser blu
+      roboticsFactory(c) {
+        drawCardBg(c, '#2979ff');
+        _drawPlanetarySurface(c, '#121929', '#448aff');
+
+        // Base officina
+        drawMetallicHull(c, (p) => {
+          p.rect(24, 82, 80, 14);
+        }, '#263238', '#90a4ae', '#448aff');
+
+        // Due bracci robotici articolati
+        c.strokeStyle = '#cfd8dc';
+        c.lineWidth = 5;
+        c.lineCap = 'round';
+        c.beginPath();
+        c.moveTo(36, 82); c.lineTo(30, 52); c.lineTo(54, 46);
+        c.moveTo(92, 82); c.lineTo(98, 52); c.lineTo(74, 46);
+        c.stroke();
+
+        // Giunti meccanici
+        [[30, 52], [98, 52]].forEach(([jx, jy]) => {
+          c.fillStyle = '#448aff';
+          c.beginPath();
+          c.arc(jx, jy, 4.5, 0, Math.PI * 2);
+          c.fill();
+        });
+
+        // Punto di saldatura laser blu al centro
+        drawEngineGlow(c, 64, 52, 16, '#00e5ff');
+        c.fillStyle = '#ffffff';
+        c.beginPath();
+        c.arc(64, 52, 3.5, 0, Math.PI * 2);
+        c.fill();
+      },
+
+      // 8. Fabbrica di Naniti: sciame di nanobot luminosi che assemblano una struttura molecolare
+      naniteFactory(c) {
+        drawCardBg(c, '#d500f9');
+        _drawPlanetarySurface(c, '#1b1129', '#e040fb');
+
+        // Reticolo molecolare/cubico in costruzione al centro
+        const nodes = [
+          [64, 34], [46, 48], [82, 48], [64, 62],
+          [46, 74], [82, 74], [64, 86]
+        ];
+        c.strokeStyle = 'rgba(224, 64, 251, 0.75)';
+        c.lineWidth = 1.6;
+        const edges = [[0,1],[0,2],[1,3],[2,3],[1,4],[2,5],[3,4],[3,5],[4,6],[5,6]];
+        for (const [a, b] of edges) {
+          c.beginPath();
+          c.moveTo(nodes[a][0], nodes[a][1]);
+          c.lineTo(nodes[b][0], nodes[b][1]);
+          c.stroke();
+        }
+        for (const [nx, ny] of nodes) {
+          drawEngineGlow(c, nx, ny, 7, '#00e5ff');
+        }
+
+        // Sciame di nanobot luminosi attorno
+        const swarm = [[26, 40], [102, 38], [24, 68], [104, 70], [40, 26], [88, 26]];
+        for (const [sx, sy] of swarm) {
+          c.fillStyle = '#ffea00';
+          c.fillRect(sx, sy, 3, 3);
+        }
+      },
+
+      // 9. Laboratorio di Ricerca: cupola scientifica con antenna e ologramma atomico fluttuante
+      researchLab(c) {
+        drawCardBg(c, '#00e5ff');
+        _drawPlanetarySurface(c, '#101d2e', '#00e5ff');
+
+        // Cupola scientifica principale
+        drawMetallicHull(c, (p) => {
+          p.arc(64, 86, 34, Math.PI, 0);
+          p.lineTo(98, 94); p.lineTo(30, 94);
+        }, '#263238', '#eceff1', '#00e5ff');
+
+        // Ologramma atomico fluttuante sopra la cupola
+        const ay = 34;
+        drawEngineGlow(c, 64, ay, 12, '#00e5ff');
+        c.strokeStyle = '#84ffff';
+        c.lineWidth = 1.3;
+        [0, Math.PI / 3, -Math.PI / 3].forEach((rot) => {
+          c.save();
+          c.translate(64, ay);
+          c.rotate(rot);
+          c.beginPath();
+          c.ellipse(0, 0, 22, 7, 0, 0, Math.PI * 2);
+          c.stroke();
+          c.restore();
+        });
+      },
+
+      // 10. Deposito di Metallo: silos cilindrici con barra livello verde #00e676
+      metalStorage(c) {
+        drawCardBg(c, '#00e676');
+        _drawPlanetarySurface(c, '#13211a', '#00e676');
+
+        [28, 68].forEach((sx) => {
+          drawMetallicHull(c, (p) => {
+            p.roundRect(sx, 36, 32, 58, 6);
+          }, '#263238', '#b0bec5', '#00e676');
+          // Barra livello verde neon
+          c.fillStyle = '#09120e';
+          c.fillRect(sx + 12, 44, 8, 42);
+          c.fillStyle = '#00e676';
+          c.fillRect(sx + 13, 54, 6, 31);
+        });
+      },
+
+      // 11. Deposito di Cristallo: serbatoi sfaccettati con barra livello azzurra #00d2ff
+      crystalStorage(c) {
+        drawCardBg(c, '#00d2ff');
+        _drawPlanetarySurface(c, '#101f2e', '#00d2ff');
+
+        [28, 68].forEach((sx) => {
+          drawMetallicHull(c, (p) => {
+            p.moveTo(sx + 8, 34); p.lineTo(sx + 24, 34);
+            p.lineTo(sx + 32, 46); p.lineTo(sx + 32, 94);
+            p.lineTo(sx, 94); p.lineTo(sx, 46);
+          }, '#263238', '#cfd8dc', '#00d2ff');
+          // Barra livello azzurra
+          c.fillStyle = '#07111a';
+          c.fillRect(sx + 12, 44, 8, 42);
+          c.fillStyle = '#00d2ff';
+          c.fillRect(sx + 13, 52, 6, 33);
+        });
+      },
+
+      // 12. Cisterna di Deuterio: serbatoi sferici pressurizzati con barra livello arancione #ff9100
+      deuteriumTank(c) {
+        drawCardBg(c, '#ff9100');
+        _drawPlanetarySurface(c, '#211810', '#ff9100');
+
+        [42, 86].forEach((cx) => {
+          drawMetallicHull(c, (p) => {
+            p.arc(cx, 62, 20, 0, Math.PI * 2);
+          }, '#37474f', '#cfd8dc', '#ff9100');
+          // Supporti + barra livello arancione
+          c.fillStyle = '#ff9100';
+          c.fillRect(cx - 3, 49, 6, 26);
+          c.fillRect(cx - 10, 82, 20, 12);
+        });
+      },
+
+      // 13. Terraformer: macchina atmosferica gigante con torri che generano nubi e terra verde
+      terraformer(c) {
+        drawCardBg(c, '#00e676');
+        _drawPlanetarySurface(c, '#004d40', '#00e676');
+
+        // Vegetazione/terra verde sulla superficie
+        c.fillStyle = '#00e676';
+        c.beginPath();
+        c.ellipse(64, 92, 48, 6, 0, 0, Math.PI * 2);
+        c.fill();
+
+        // Due grandi torri atmosferiche
+        [36, 76].forEach((tx) => {
+          drawMetallicHull(c, (p) => {
+            p.moveTo(tx, 90); p.lineTo(tx + 4, 42); p.lineTo(tx + 12, 42); p.lineTo(tx + 16, 90);
+          }, '#37474f', '#eceff1', '#00e676');
+          drawEngineGlow(c, tx + 8, 36, 12, '#84ffff');
+        });
+
+        // Nubi atmosferiche generate
+        c.fillStyle = 'rgba(132, 255, 255, 0.25)';
+        c.beginPath();
+        c.arc(52, 26, 14, 0, Math.PI * 2);
+        c.arc(68, 24, 16, 0, Math.PI * 2);
+        c.arc(82, 28, 12, 0, Math.PI * 2);
+        c.fill();
+      },
+
+      // 14. Bunker Sotterraneo Nascosto: portellone corazzato con simbolo scudo/lucchetto neon
+      hiddenBunker(c) {
+        drawCardBg(c, '#ffea00');
+        _drawPlanetarySurface(c, '#1a1a22', '#ffea00');
+
+        // Portellone corazzato incassato
+        drawMetallicHull(c, (p) => {
+          p.moveTo(24, 96); p.lineTo(32, 44); p.lineTo(96, 44); p.lineTo(104, 96);
+        }, '#1c222d', '#78909c', '#ffea00');
+
+        // Linea chiusura centrale
+        drawPanelLines(c, [[64, 44, 64, 96]], '#ffea00');
+
+        // Simbolo scudo/lucchetto neon al centro
+        c.strokeStyle = '#ffea00';
+        c.lineWidth = 2;
+        c.beginPath();
+        c.moveTo(64, 54);
+        c.lineTo(76, 60);
+        c.lineTo(74, 76);
+        c.lineTo(64, 84);
+        c.lineTo(54, 76);
+        c.lineTo(52, 60);
+        c.closePath();
+        c.stroke();
+        drawEngineGlow(c, 64, 68, 9, '#ffea00');
+      }
+    };
+
+    // =========================================================
+    // 2. TUTTI I 6 EDIFICI LUNARI (su superficie grigia craterizzata)
+    // =========================================================
+    const MOON_BUILDINGS = {
+      // 1. Base Lunare: cupola pressurizzata multipla su cratere lunare
+      lunarBase(c) {
+        drawCardBg(c, '#00d2ff');
+        _drawLunarSurface(c, '#cfd8dc');
+
+        // Cupola laterale sinistra e destra
+        drawMetallicHull(c, (p) => {
+          p.arc(36, 88, 16, Math.PI, 0);
+        }, '#37474f', '#b0bec5', '#00d2ff');
+        drawMetallicHull(c, (p) => {
+          p.arc(92, 88, 16, Math.PI, 0);
+        }, '#37474f', '#b0bec5', '#00d2ff');
+
+        // Cupola pressurizzata centrale principale
+        drawMetallicHull(c, (p) => {
+          p.arc(64, 88, 28, Math.PI, 0);
+        }, '#455a64', '#eceff1', '#00e5ff');
+
+        // Oblò luminosi
+        [52, 64, 76].forEach((ox) => {
+          c.fillStyle = '#00e5ff';
+          c.fillRect(ox - 2, 74, 4, 4);
+        });
+      },
+
+      // 2. Deposito Lunare: serbatoi blindati a bassa gravità su suolo lunare
+      lunarStorage(c) {
+        drawCardBg(c, '#b0bec5');
+        _drawLunarSurface(c, '#eceff1');
+
+        // Tre moduli blindati sferico-cilindrici
+        [32, 64, 96].forEach((mx, idx) => {
+          drawMetallicHull(c, (p) => {
+            p.roundRect(mx - 12, 52 - (idx === 1 ? 8 : 0), 24, 38 + (idx === 1 ? 8 : 0), 10);
+          }, '#263238', '#cfd8dc', '#00d2ff');
+        });
+      },
+
+      // 3. Generatore Scudo Lunare: generatore di campo di forza lunare viola/azzurro
+      lunarShield(c) {
+        drawCardBg(c, '#d500f9');
+        _drawLunarSurface(c, '#e040fb');
+
+        // Nucleo emettitore
+        drawMetallicHull(c, (p) => {
+          p.moveTo(48, 88); p.lineTo(56, 68); p.lineTo(72, 68); p.lineTo(80, 88);
+        }, '#263238', '#cfd8dc', '#e040fb');
+
+        drawEngineGlow(c, 64, 64, 14, '#d500f9');
+
+        // Cupola energetica viola/azzurro
+        const sGrad = c.createRadialGradient(64, 62, 6, 64, 88, 46);
+        sGrad.addColorStop(0, 'rgba(213, 0, 249, 0.08)');
+        sGrad.addColorStop(0.75, 'rgba(0, 210, 255, 0.25)');
+        sGrad.addColorStop(1, 'rgba(213, 0, 249, 0.78)');
+        c.fillStyle = sGrad;
+        c.strokeStyle = '#e040fb';
+        c.lineWidth = 2;
+        c.beginPath();
+        c.arc(64, 88, 44, Math.PI, 0);
+        c.closePath();
+        c.fill();
+        c.stroke();
+      },
+
+      // 4. Cantiere Segreto Lunare: hangar nascosto dentro un cratere con luci tattiche rosse
+      secretShipyard(c) {
+        drawCardBg(c, '#ff1744');
+        _drawLunarSurface(c, '#ff5252');
+
+        // Bocca hangar corazzata incassata nel cratere
+        drawMetallicHull(c, (p) => {
+          p.moveTo(22, 92); p.lineTo(34, 58); p.lineTo(94, 58); p.lineTo(106, 92);
+        }, '#181e28', '#78909c', '#ff1744');
+
+        c.fillStyle = '#05070d';
+        c.fillRect(40, 68, 48, 22);
+
+        // Luci tattiche rosse di segnalazione
+        [34, 64, 94].forEach((lx) => {
+          drawEngineGlow(c, lx, 62, 6, '#ff1744');
+        });
+      },
+
+      // 5. Portale Iperspaziale: grande anello portale con vortice energetico viola/blu al centro
+      jumpGate(c) {
+        drawCardBg(c, '#d500f9');
+        _drawLunarSurface(c, '#00d2ff');
+
+        const cx = 64, cy = 54, r = 34;
+
+        // Vortice energetico viola/blu interno
+        const vGrad = c.createRadialGradient(cx, cy, 2, cx, cy, r - 4);
+        vGrad.addColorStop(0, '#ffffff');
+        vGrad.addColorStop(0.3, '#00e5ff');
+        vGrad.addColorStop(0.7, '#aa00ff');
+        vGrad.addColorStop(1, 'rgba(10, 14, 32, 0.9)');
+        c.fillStyle = vGrad;
+        c.beginPath();
+        c.arc(cx, cy, r - 4, 0, Math.PI * 2);
+        c.fill();
+
+        // Grande anello metallico del portale
+        c.strokeStyle = '#cfd8dc';
+        c.lineWidth = 6;
+        c.beginPath();
+        c.arc(cx, cy, r, 0, Math.PI * 2);
+        c.stroke();
+
+        c.strokeStyle = '#00e5ff';
+        c.lineWidth = 1.5;
+        c.beginPath();
+        c.arc(cx, cy, r + 3, 0, Math.PI * 2);
+        c.stroke();
+      },
+
+      // 6. Falange Sensoriale: grande radiotelescopio parabolico che emette onde radar verdi
+      sensorPhalanx(c) {
+        drawCardBg(c, '#00e676');
+        _drawLunarSurface(c, '#00e676');
+
+        // Base radiotelescopio
+        drawMetallicHull(c, (p) => {
+          p.moveTo(36, 90); p.lineTo(46, 72); p.lineTo(66, 72); p.lineTo(74, 90);
+        }, '#263238', '#90a4ae', '#00e676');
+
+        // Parabola orientata in alto a destra
+        c.save();
+        c.translate(58, 62);
+        c.rotate(-0.65);
+        c.strokeStyle = '#eceff1';
+        c.lineWidth = 4;
+        c.beginPath();
+        c.arc(0, 0, 26, 0.15 * Math.PI, 0.85 * Math.PI);
+        c.stroke();
+
+        // Ricevitore centrale parabola
+        c.strokeStyle = '#00e676';
+        c.lineWidth = 2;
+        c.beginPath();
+        c.moveTo(0, 26); c.lineTo(0, 4);
+        c.stroke();
+        c.restore();
+
+        // Onde radar verdi emesse
+        c.strokeStyle = '#00e676';
+        c.lineWidth = 1.6;
+        [16, 26, 36].forEach((rad, i) => {
+          c.globalAlpha = 0.85 - i * 0.22;
+          c.beginPath();
+          c.arc(76, 44, rad, -Math.PI * 0.45, Math.PI * 0.05);
+          c.stroke();
+        });
+        c.globalAlpha = 1;
+      }
+    };
+
+    // =========================================================
+    // 3. TUTTE LE 18 RICERCHE (Stile Olografico Blueprint)
+    // =========================================================
+    const RESEARCH_TECHS = {
+      // 1. Tecnologia Energetica: atomo olografico
+      energyTech(c) {
+        _drawBlueprintBg(c, '#ffea00');
+        drawEngineGlow(c, 64, 64, 14, '#ffea00');
+        c.strokeStyle = '#ffea00';
+        c.lineWidth = 2;
+        [0, Math.PI / 3, -Math.PI / 3].forEach((ang) => {
+          c.save();
+          c.translate(64, 64);
+          c.rotate(ang);
+          c.beginPath();
+          c.ellipse(0, 0, 38, 13, 0, 0, Math.PI * 2);
+          c.stroke();
+          c.restore();
+        });
+      },
+
+      // 2. Tecnologia Laser: prisma ottico e fascio laser concentrato
+      laserTech(c) {
+        _drawBlueprintBg(c, '#00e5ff');
+        c.strokeStyle = '#84ffff';
+        c.lineWidth = 2.2;
+        c.beginPath();
+        c.moveTo(30, 84); c.lineTo(54, 42); c.lineTo(78, 84); c.closePath();
+        c.stroke();
+
+        // Fascio laser
+        c.save();
+        c.shadowColor = '#00e5ff';
+        c.shadowBlur = 12;
+        c.strokeStyle = '#00e5ff';
+        c.lineWidth = 3.5;
+        c.beginPath();
+        c.moveTo(14, 64); c.lineTo(114, 64);
+        c.stroke();
+        c.restore();
+      },
+
+      // 3. Tecnologia Ionica: onda sinusoidale ionica ad alta frequenza
+      ionTech(c) {
+        _drawBlueprintBg(c, '#00d2ff');
+        c.strokeStyle = '#00e5ff';
+        c.lineWidth = 2.5;
+        c.beginPath();
+        for (let x = 20; x <= 108; x += 2) {
+          const y = 64 + Math.sin((x - 20) * 0.14) * 22;
+          if (x === 20) c.moveTo(x, y);
+          else c.lineTo(x, y);
+        }
+        c.stroke();
+        drawEngineGlow(c, 64, 64, 12, '#00e5ff');
+      },
+
+      // 4. Tecnologia al Plasma: sfera di plasma contenuta da anelli magnetici
+      plasmaTech(c) {
+        _drawBlueprintBg(c, '#d500f9');
+        drawEngineGlow(c, 64, 64, 24, '#d500f9');
+        c.strokeStyle = '#ff9100';
+        c.lineWidth = 2;
+        c.beginPath();
+        c.arc(64, 64, 28, 0, Math.PI * 2);
+        c.stroke();
+        c.strokeStyle = '#00e5ff';
+        c.beginPath();
+        c.arc(64, 64, 36, 0.2, Math.PI * 1.8);
+        c.stroke();
+      },
+
+      // 5. Tecnologia Iperspaziale: griglia spaziotemporale piegata (wormhole)
+      hyperspaceTech(c) {
+        _drawBlueprintBg(c, '#7c4dff');
+        c.strokeStyle = '#b388ff';
+        c.lineWidth = 1.8;
+        [14, 24, 34, 44].forEach((r) => {
+          c.beginPath();
+          c.ellipse(64, 64, r, r * 0.62, 0.35, 0, Math.PI * 2);
+          c.stroke();
+        });
+        drawEngineGlow(c, 64, 64, 11, '#00e5ff');
+      },
+
+      // 6. Propulsore a Combustione: ugello reattore chimico con fiamma vettrice
+      combustionDrive(c) {
+        _drawBlueprintBg(c, '#ff9100');
+        c.strokeStyle = '#cfd8dc';
+        c.lineWidth = 2.2;
+        c.beginPath();
+        c.moveTo(46, 30); c.lineTo(82, 30);
+        c.lineTo(74, 52); c.lineTo(90, 74);
+        c.lineTo(38, 74); c.lineTo(54, 52);
+        c.closePath();
+        c.stroke();
+        drawEngineGlow(c, 64, 88, 16, '#ff9100');
+      },
+
+      // 7. Propulsore a Impulso: turbina ionica con scia azzurra ad impulsi
+      impulseDrive(c) {
+        _drawBlueprintBg(c, '#00d2ff');
+        c.strokeStyle = '#00e5ff';
+        c.lineWidth = 2.2;
+        c.beginPath();
+        c.arc(64, 54, 22, 0, Math.PI * 2);
+        c.stroke();
+        for (let i = 0; i < 6; i++) {
+          const a = (Math.PI / 3) * i;
+          c.beginPath();
+          c.moveTo(64, 54);
+          c.lineTo(64 + Math.cos(a) * 22, 54 + Math.sin(a) * 22);
+          c.stroke();
+        }
+        drawEngineGlow(c, 64, 88, 14, '#00e5ff');
+      },
+
+      // 8. Propulsore Iperspaziale: vettore stella/iperspazio ad altissima velocità
+      hyperspaceDrive(c) {
+        _drawBlueprintBg(c, '#00e5ff');
+        c.strokeStyle = '#84ffff';
+        c.lineWidth = 2.2;
+        c.beginPath();
+        c.moveTo(64, 22); c.lineTo(88, 78); c.lineTo(64, 66); c.lineTo(40, 78);
+        c.closePath();
+        c.stroke();
+        drawEngineGlow(c, 64, 86, 18, '#d500f9');
+      },
+
+      // 9. Tecnologia delle Armi: mirino balistico di precisione
+      weaponsTech(c) {
+        _drawBlueprintBg(c, '#ff1744');
+        c.strokeStyle = '#ff5252';
+        c.lineWidth = 2.2;
+        c.beginPath();
+        c.arc(64, 64, 30, 0, Math.PI * 2);
+        c.moveTo(64, 24); c.lineTo(64, 104);
+        c.moveTo(24, 64); c.lineTo(104, 64);
+        c.stroke();
+        drawEngineGlow(c, 64, 64, 9, '#ff1744');
+      },
+
+      // 10. Tecnologia degli Scudi: esagono deflettore multistrato
+      shieldingTech(c) {
+        _drawBlueprintBg(c, '#00d2ff');
+        [34, 22].forEach((r, idx) => {
+          c.strokeStyle = idx === 0 ? '#00e5ff' : '#84ffff';
+          c.lineWidth = 2.2;
+          c.beginPath();
+          for (let i = 0; i < 6; i++) {
+            const a = (Math.PI / 3) * i - Math.PI / 6;
+            const x = 64 + Math.cos(a) * r;
+            const y = 64 + Math.sin(a) * r;
+            if (i === 0) c.moveTo(x, y);
+            else c.lineTo(x, y);
+          }
+          c.closePath();
+          c.stroke();
+        });
+      },
+
+      // 11. Tecnologia delle Corazze: piastra corazzata stratificata
+      armourTech(c) {
+        _drawBlueprintBg(c, '#00e676');
+        c.strokeStyle = '#00e676';
+        c.lineWidth = 2.2;
+        c.beginPath();
+        c.moveTo(64, 26); c.lineTo(96, 40); c.lineTo(90, 82); c.lineTo(64, 102);
+        c.lineTo(38, 82); c.lineTo(32, 40);
+        c.closePath();
+        c.stroke();
+        drawPanelLines(c, [[44, 52, 84, 52], [46, 68, 82, 68]], '#00e676');
+      },
+
+      // 12. Tecnologia dello Spionaggio: occhio radar cibernetico
+      espionageTech(c) {
+        _drawBlueprintBg(c, '#ff1744');
+        c.strokeStyle = '#00e5ff';
+        c.lineWidth = 2.2;
+        c.beginPath();
+        c.moveTo(22, 64);
+        c.quadraticCurveTo(64, 30, 106, 64);
+        c.quadraticCurveTo(64, 98, 22, 64);
+        c.stroke();
+        drawEngineGlow(c, 64, 64, 14, '#ff1744');
+      },
+
+      // 13. Tecnologia Informatica: microchip quantico con pin
+      computerTech(c) {
+        _drawBlueprintBg(c, '#00e5ff');
+        c.strokeStyle = '#00e5ff';
+        c.lineWidth = 2.2;
+        c.strokeRect(42, 42, 44, 44);
+        c.strokeRect(52, 52, 24, 24);
+        for (let i = 48; i <= 80; i += 8) {
+          c.beginPath();
+          c.moveTo(i, 32); c.lineTo(i, 42);
+          c.moveTo(i, 86); c.lineTo(i, 96);
+          c.moveTo(32, i); c.lineTo(42, i);
+          c.moveTo(86, i); c.lineTo(96, i);
+          c.stroke();
+        }
+      },
+
+      // 14. Astrofisica: sistema solare con orbite planetarie
+      astrophysics(c) {
+        _drawBlueprintBg(c, '#00e676');
+        drawEngineGlow(c, 64, 64, 13, '#ffea00');
+        c.strokeStyle = '#00e5ff';
+        c.lineWidth = 1.6;
+        c.beginPath();
+        c.arc(64, 64, 24, 0, Math.PI * 2);
+        c.stroke();
+        c.beginPath();
+        c.arc(64, 64, 38, 0, Math.PI * 2);
+        c.stroke();
+        c.fillStyle = '#00e676';
+        c.beginPath();
+        c.arc(88, 64, 4.5, 0, Math.PI * 2);
+        c.arc(38, 36, 5.5, 0, Math.PI * 2);
+        c.fill();
+      },
+
+      // 15. Rete Intergalattica di Ricerca: grafo di nodi connessi
+      intergalacticNetwork(c) {
+        _drawBlueprintBg(c, '#00e5ff');
+        const pts = [[64, 30], [32, 56], [96, 56], [42, 92], [86, 92], [64, 64]];
+        c.strokeStyle = 'rgba(0, 229, 255, 0.7)';
+        c.lineWidth = 1.6;
+        for (let i = 0; i < pts.length; i++) {
+          for (let j = i + 1; j < pts.length; j++) {
+            c.beginPath();
+            c.moveTo(pts[i][0], pts[i][1]);
+            c.lineTo(pts[j][0], pts[j][1]);
+            c.stroke();
+          }
+        }
+        for (const [px, py] of pts) {
+          drawEngineGlow(c, px, py, 7, '#00e676');
+        }
+      },
+
+      // 16. Tecnologia Portale Iperspaziale: doppio anello vettoriale con asse di salto
+      jumpGateTech(c) {
+        _drawBlueprintBg(c, '#d500f9');
+        c.strokeStyle = '#e040fb';
+        c.lineWidth = 2.4;
+        c.beginPath();
+        c.arc(64, 64, 32, 0, Math.PI * 2);
+        c.stroke();
+        c.strokeStyle = '#00e5ff';
+        c.beginPath();
+        c.arc(64, 64, 20, 0, Math.PI * 2);
+        c.stroke();
+        drawEngineGlow(c, 64, 64, 12, '#d500f9');
+      },
+
+      // 17. Ingegneria Lunare: falce di luna olografica con reticolo gravitazionale
+      lunarTech(c) {
+        _drawBlueprintBg(c, '#cfd8dc');
+        c.save();
+        c.fillStyle = 'rgba(0, 229, 255, 0.25)';
+        c.strokeStyle = '#eceff1';
+        c.lineWidth = 2.2;
+        c.beginPath();
+        c.arc(60, 64, 30, 0.25 * Math.PI, 1.75 * Math.PI);
+        c.arc(76, 64, 24, 1.65 * Math.PI, 0.35 * Math.PI, true);
+        c.closePath();
+        c.fill();
+        c.stroke();
+        c.restore();
+      },
+
+      // 18. Progetto Morte Nera (Gravitone): schema blueprint della sfera e del superlaser
+      deathStarTech(c) {
+        _drawBlueprintBg(c, '#ff1744');
+        c.strokeStyle = '#00e676';
+        c.lineWidth = 2.2;
+        c.beginPath();
+        c.arc(60, 66, 32, 0, Math.PI * 2);
+        c.moveTo(28, 66); c.lineTo(92, 66);
+        c.stroke();
+
+        c.beginPath();
+        c.arc(72, 52, 9, 0, Math.PI * 2);
+        c.stroke();
+
+        // Raggio superlaser blueprint
+        c.strokeStyle = '#ff1744';
+        c.lineWidth = 2.5;
+        c.beginPath();
+        c.moveTo(72, 52); c.lineTo(112, 22);
+        c.stroke();
+      }
+    };
+
+    // Registra tutte le nuove illustrazioni 128x128 nel motore centrale
+    G.registerRenderers(
+      Object.assign({}, PLANETARY_BUILDINGS, MOON_BUILDINGS, RESEARCH_TECHS)
+    );
+
+    // =========================================================
+    // 4. ICONE RISORSE 32x32 PX (getResourceIcon)
+    // =========================================================
+    const resourceCache = {};
+    const resCanvas = document.createElement('canvas');
+    resCanvas.width = 32;
+    resCanvas.height = 32;
+    const rCtx = resCanvas.getContext('2d');
+
+    function _renderResource32(type) {
+      rCtx.clearRect(0, 0, 32, 32);
+
+      if (type === 'metal') {
+        // Lingotto / piastra metallica verde neon #00e676
+        const g = rCtx.createLinearGradient(4, 6, 28, 26);
+        g.addColorStop(0, '#b9f6ca');
+        g.addColorStop(0.5, '#00e676');
+        g.addColorStop(1, '#004d40');
+        rCtx.fillStyle = g;
+        rCtx.strokeStyle = '#00e676';
+        rCtx.lineWidth = 1.5;
+        rCtx.beginPath();
+        rCtx.moveTo(8, 9);
+        rCtx.lineTo(24, 9);
+        rCtx.lineTo(28, 23);
+        rCtx.lineTo(4, 23);
+        rCtx.closePath();
+        rCtx.fill();
+        rCtx.stroke();
+
+        rCtx.strokeStyle = 'rgba(255,255,255,0.65)';
+        rCtx.lineWidth = 1;
+        rCtx.beginPath();
+        rCtx.moveTo(10, 13);
+        rCtx.lineTo(22, 13);
+        rCtx.stroke();
+      } else if (type === 'crystal') {
+        // Gemma sfaccettata azzurra #00d2ff
+        const g = rCtx.createLinearGradient(8, 3, 24, 29);
+        g.addColorStop(0, '#e0f7fa');
+        g.addColorStop(0.5, '#00d2ff');
+        g.addColorStop(1, '#01579b');
+        rCtx.fillStyle = g;
+        rCtx.strokeStyle = '#84ffff';
+        rCtx.lineWidth = 1.4;
+        rCtx.beginPath();
+        rCtx.moveTo(16, 3);
+        rCtx.lineTo(26, 12);
+        rCtx.lineTo(22, 28);
+        rCtx.lineTo(10, 28);
+        rCtx.lineTo(6, 12);
+        rCtx.closePath();
+        rCtx.fill();
+        rCtx.stroke();
+
+        rCtx.strokeStyle = 'rgba(255,255,255,0.5)';
+        rCtx.lineWidth = 1;
+        rCtx.beginPath();
+        rCtx.moveTo(16, 3); rCtx.lineTo(16, 28);
+        rCtx.moveTo(6, 12); rCtx.lineTo(26, 12);
+        rCtx.stroke();
+      } else if (type === 'deuterium') {
+        // Capsula / isotopo energetico arancione #ff9100
+        const g = rCtx.createRadialGradient(14, 14, 2, 16, 16, 13);
+        g.addColorStop(0, '#ffe0b2');
+        g.addColorStop(0.55, '#ff9100');
+        g.addColorStop(1, '#bf360c');
+        rCtx.fillStyle = g;
+        rCtx.strokeStyle = '#ffab40';
+        rCtx.lineWidth = 1.5;
+        rCtx.beginPath();
+        rCtx.roundRect(9, 4, 14, 24, 7);
+        rCtx.fill();
+        rCtx.stroke();
+
+        // Anelli di contenimento
+        rCtx.strokeStyle = '#ffffff';
+        rCtx.lineWidth = 1.2;
+        rCtx.beginPath();
+        rCtx.moveTo(9, 11); rCtx.lineTo(23, 11);
+        rCtx.moveTo(9, 21); rCtx.lineTo(23, 21);
+        rCtx.stroke();
+      } else {
+        // 'energy': fulmine / nucleo energetico giallo #ffea00
+        rCtx.save();
+        rCtx.shadowColor = '#ffea00';
+        rCtx.shadowBlur = 6;
+        rCtx.fillStyle = '#ffea00';
+        rCtx.strokeStyle = '#ffffff';
+        rCtx.lineWidth = 1;
+        rCtx.beginPath();
+        rCtx.moveTo(18, 3);
+        rCtx.lineTo(8, 17);
+        rCtx.lineTo(15, 17);
+        rCtx.lineTo(13, 29);
+        rCtx.lineTo(24, 14);
+        rCtx.lineTo(17, 14);
+        rCtx.closePath();
+        rCtx.fill();
+        rCtx.stroke();
+        rCtx.restore();
+      }
+
+      return resCanvas.toDataURL('image/png');
+    }
+
+    /**
+     * Restituisce un tag <img> nitido 32x32 px (con cache) per 'metal', 'crystal', 'deuterium', 'energy'
+     */
+    G.getResourceIcon = function (type, cssClass = 'res-icon') {
+      const key = String(type || 'metal').toLowerCase();
+      if (!resourceCache[key]) {
+        resourceCache[key] = _renderResource32(key);
+      }
+      return `<img src="${resourceCache[key]}" alt="${key}" class="${cssClass}" width="18" height="18">`;
+    };
+  })();
 })();
