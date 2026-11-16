@@ -8,6 +8,17 @@
   let audioCtx = null;
   let soundMuted = localStorage.getItem('universum_muted') === 'true';
 
+  // Listener Firestore attivi per Multiplayer
+  let unsubChatListener = null;
+  let unsubFleetsListener = null;
+  let unsubPrivateConvsListener = null;
+  let unsubPrivateMsgsListener = null;
+
+  let chatMessagesCache = [];
+  let privateConversationsCache = [];
+  let privateMessagesCache = [];
+  let unreadPrivateCount = 0;
+
   const uiState = {
     shipyardTab: 'ships',
     galaxyG: 1,
@@ -24,16 +35,8 @@
     lastAlertCount: 0,
     planetAnimAngle: 0,
     planetAnimId: null,
-    // Stato Multiplayer
-    chatMessages: [],
-    unreadChatCount: 0,
-    lastSeenChatTs: 0,
-    mpIncomingAttacks: [],
-    mpMyFleets: [],
-    mpMessagesUnsub: null,
-    mpFleetsUnsub: null,
-    mpGalaxyCacheKey: '',
-    mpGalaxyCacheData: null
+    commTab: 'galactic', // 'galactic' | 'private'
+    activePrivateTarget: null // { uid, nickname } | null
   };
 
   // =========================================================
@@ -202,7 +205,7 @@
   }
 
   // =========================================================
-  // UTILITY DI FORMATTAZIONE, SALVATAGGIO IBRIDO E MODALI
+  // UTILITY DI FORMATTAZIONE E MODALI
   // =========================================================
   function escapeHTML(str) {
     return String(str ?? '')
@@ -267,241 +270,134 @@
     return currentUniverse.planets[getActivePlanetIndex()];
   }
 
-  async function persistCurrentState(planetToSync = null) {
+  async function persistUniverseState() {
     if (!currentUniverse) return;
     if (isMultiplayerMode) {
-      if (!window.UniversumMP || !window.fbDB) return;
-      const p = planetToSync || getActivePlanet();
-      if (p) {
-        const docPayload = Object.assign({}, p, {
-          planetName: p.name,
-          lastUpdated: Date.now()
-        });
-        await window.UniversumMP.syncPlanetState(currentUniverse.id, docPayload);
-      }
-      const user = window.UniversumMP.getCurrentUser();
-      if (user) {
-        await window.fbDB.collection('online_universes').doc(currentUniverse.id)
-          .collection('players').doc(user.uid)
-          .set({ researches: currentUniverse.researches }, { merge: true });
+      if (window.UniversumMP && typeof window.UniversumMP.syncPlayerState === 'function') {
+        await window.UniversumMP.syncPlayerState(currentUniverse);
       }
     } else {
       await window.UniversumDB.save(currentUniverse);
     }
   }
 
+  function closePrivateMessageStream() {
+    if (typeof unsubPrivateMsgsListener === 'function') {
+      unsubPrivateMsgsListener();
+      unsubPrivateMsgsListener = null;
+    }
+    privateMessagesCache = [];
+  }
+
+  function updateCommBadges() {
+    const sb = document.getElementById('sidebar-chat-badge');
+    const db = document.getElementById('drawer-chat-badge');
+    const tabBadge = document.getElementById('tab-private-unread-badge');
+    const show = isMultiplayerMode && unreadPrivateCount > 0;
+
+    if (sb) {
+      sb.textContent = unreadPrivateCount;
+      sb.classList.toggle('hidden', !show);
+    }
+    if (db) {
+      db.textContent = unreadPrivateCount;
+      db.classList.toggle('hidden', !show);
+    }
+    if (tabBadge) {
+      tabBadge.textContent = unreadPrivateCount;
+      tabBadge.classList.toggle('hidden', !show);
+    }
+  }
+
+  function openPrivateChatWith(targetUid, targetNickname) {
+    if (!isMultiplayerMode || !targetUid) return;
+    const myUid = window.fbAuth?.currentUser?.uid;
+    if (targetUid === myUid) return;
+
+    uiState.commTab = 'private';
+    uiState.activePrivateTarget = {
+      uid: targetUid,
+      nickname: targetNickname || 'Comandante'
+    };
+    switchView('chat');
+  }
+
   // =========================================================
-  // LOBBY MULTIPLAYER (LOGIN, LISTA SERVER, CREA UNIVERSO ONLINE)
+  // LOBBY OFFLINE VS ONLINE (MULTIPLAYER PvP)
   // =========================================================
-  function setupLobbyTabsAndMultiplayer() {
-    const tabOffline = document.getElementById('tab-mode-offline');
-    const tabOnline = document.getElementById('tab-mode-online');
-    const panelOffline = document.getElementById('lobby-panel-offline');
-    const panelOnline = document.getElementById('lobby-panel-online');
+  function setupLobbyTabs() {
+    const tabOffline = document.getElementById('tab-lobby-offline');
+    const tabOnline = document.getElementById('tab-lobby-online');
+    const panelOffline = document.getElementById('panel-lobby-offline');
+    const panelOnline = document.getElementById('panel-lobby-online');
 
     tabOffline?.addEventListener('click', () => {
       playSound('click');
       tabOffline.classList.add('active');
-      tabOffline.setAttribute('aria-selected', 'true');
-      tabOnline?.classList.remove('active');
-      tabOnline?.setAttribute('aria-selected', 'false');
-      panelOffline?.classList.remove('hidden');
-      panelOnline?.classList.add('hidden');
+      tabOnline.classList.remove('active');
+      panelOffline.classList.remove('hidden');
+      panelOnline.classList.add('hidden');
     });
 
     tabOnline?.addEventListener('click', async () => {
       playSound('click');
       tabOnline.classList.add('active');
-      tabOnline.setAttribute('aria-selected', 'true');
-      tabOffline?.classList.remove('active');
-      tabOffline?.setAttribute('aria-selected', 'false');
-      panelOnline?.classList.remove('hidden');
-      panelOffline?.classList.add('hidden');
+      tabOffline.classList.remove('active');
+      panelOnline.classList.remove('hidden');
+      panelOffline.classList.add('hidden');
       await refreshOnlineLobbyState();
     });
 
-    // Form Login / Registrazione Multiplayer
     const authForm = document.getElementById('form-mp-auth');
     authForm?.addEventListener('submit', async (e) => {
       e.preventDefault();
+      if (!window.UniversumMP) {
+        toast('Modulo Multiplayer non disponibile.', 'error');
+        return;
+      }
       const submitter = e.submitter;
-      const mode = submitter?.dataset.authMode || 'login';
-      const nick = document.getElementById('mp-nickname')?.value;
-      const pass = document.getElementById('mp-password')?.value;
+      const isRegister = submitter && submitter.dataset.mode === 'register';
+      const nick = document.getElementById('mp-nickname').value;
+      const pass = document.getElementById('mp-password').value;
 
       try {
-        if (!window.UniversumMP) throw new Error('Modulo Multiplayer non caricato.');
-        const profile = await window.UniversumMP.registerOrLogin(nick, pass, mode === 'register');
+        await window.UniversumMP.registerOrLogin(nick, pass, isRegister);
         playSound('success');
-        toast(`Benvenuto nella rete PvP, ${profile.nickname}!`, 'success');
+        toast(isRegister ? 'Account Imperatore registrato!' : 'Accesso effettuato!', 'success');
         await refreshOnlineLobbyState();
       } catch (err) {
         playSound('error');
-        toast(err.message, 'error');
+        toast(err.message || 'Errore autenticazione Firebase.', 'error');
       }
     });
 
     document.getElementById('btn-mp-logout')?.addEventListener('click', async () => {
-      if (window.UniversumMP) await window.UniversumMP.logout();
+      if (window.fbAuth) await window.fbAuth.signOut();
       await refreshOnlineLobbyState();
-      toast('Disconnesso dalla rete Multiplayer.', 'info');
+      toast('Disconnesso dal server online.', 'info');
     });
 
     document.getElementById('btn-mp-refresh')?.addEventListener('click', async () => {
       playSound('click');
-      await refreshOnlineLobbyState();
+      await renderOnlineUniversesList();
     });
 
-    document.getElementById('btn-mp-create-uni')?.addEventListener('click', openCreateOnlineUniverseModal);
-  }
-
-  async function refreshOnlineLobbyState() {
-    const authBox = document.getElementById('mp-auth-box');
-    const serversBox = document.getElementById('mp-servers-box');
-    const userLabel = document.getElementById('mp-logged-user');
-    const listEl = document.getElementById('mp-universe-list');
-    if (!authBox || !serversBox || !listEl) return;
-
-    const user = window.UniversumMP ? window.UniversumMP.getCurrentUser() : null;
-    if (!user) {
-      authBox.classList.remove('hidden');
-      serversBox.classList.add('hidden');
-      return;
-    }
-
-    authBox.classList.add('hidden');
-    serversBox.classList.remove('hidden');
-    if (userLabel) userLabel.textContent = user.nickname;
-
-    listEl.innerHTML = `<div class="glass-panel" style="padding:20px; text-align:center;"><p class="text-crystal">Sincronizzazione server galattici in corso...</p></div>`;
-
-    try {
-      const servers = await window.UniversumMP.getOnlineUniverses();
-      if (servers.length === 0) {
-        listEl.innerHTML = `
-          <div class="glass-panel" style="padding:24px; text-align:center;">
-            <p style="font-weight:700; color:var(--res-crystal); margin-bottom:6px;">NESSUN UNIVERSO ONLINE ATTIVO</p>
-            <p class="text-muted">Crea il primo server PvP e invita altri comandanti!</p>
-          </div>
-        `;
-        return;
-      }
-
-      listEl.innerHTML = servers.map((s) => `
-        <article class="universe-card glass-panel">
-          <div class="universe-card-header">
-            <div>
-              <div class="universe-name">${escapeHTML(s.name)} ${s.hasPassword ? '🔒' : ''}</div>
-              <div class="text-muted" style="font-size:0.88rem;">Fondato da: <strong style="color:#fff;">${escapeHTML(s.createdBy)}</strong></div>
-            </div>
-            <div style="display:flex; gap:6px; flex-wrap:wrap;">
-              <span class="badge badge-red">PvP REALE</span>
-              <span class="badge badge-green">${s.speed}x</span>
-              <span class="badge badge-blue">👥 ${s.playerCount} Giocatori</span>
-            </div>
-          </div>
-          <div class="universe-meta">
-            <span>Mappa: <strong>${s.galaxies}G × ${s.systemsPerGalaxy}S</strong></span>
-            <span>Modalità Creativa: <strong>Disabilitata</strong></span>
-          </div>
-          <div>
-            <button type="button" class="btn btn-green btn-join-mp-server" data-uid="${s.id}" data-protected="${s.hasPassword ? '1' : '0'}" style="width:100%;">
-              🚀 ENTRA NELL'UNIVERSO PvP
-            </button>
-          </div>
-        </article>
-      `).join('');
-
-      listEl.querySelectorAll('.btn-join-mp-server').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          const uniId = btn.dataset.uid;
-          const isProtected = btn.dataset.protected === '1';
-          if (isProtected) {
-            openModal('STANZA PROTETTA DA PASSWORD', `
-              <form id="form-join-protected">
-                <div class="form-group">
-                  <label for="input-room-pwd">Inserisci Password Stanza</label>
-                  <input type="password" id="input-room-pwd" class="form-control" required>
-                </div>
-                <button type="submit" class="btn btn-green" style="width:100%;">ENTRA</button>
-              </form>
-            `);
-            document.getElementById('form-join-protected')?.addEventListener('submit', async (ev) => {
-              ev.preventDefault();
-              const pwd = document.getElementById('input-room-pwd').value;
-              closeModal();
-              await enterOnlineUniverse(uniId, pwd);
-            });
-          } else {
-            enterOnlineUniverse(uniId, '');
-          }
-        });
-      });
-    } catch (err) {
-      listEl.innerHTML = `<div class="glass-panel" style="padding:18px; color:#ff5252;">${escapeHTML(err.message)}</div>`;
-    }
-  }
-
-  function openCreateOnlineUniverseModal() {
-    openModal('CREA UNIVERSO ONLINE PvP', `
-      <form id="form-create-mp-uni">
-        <div class="form-group">
-          <label for="mp-uni-name">Nome Server / Universo</label>
-          <input type="text" id="mp-uni-name" class="form-control" value="Universo Alpha 10x" maxlength="32" required>
-        </div>
-        <div class="form-grid-3">
-          <div class="form-group">
-            <label for="mp-uni-speed">Velocità</label>
-            <select id="mp-uni-speed" class="form-control">
-              <option value="1">1x</option>
-              <option value="5">5x</option>
-              <option value="10" selected>10x</option>
-              <option value="50">50x</option>
-              <option value="100">100x</option>
-              <option value="500">500x (Blitz)</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label for="mp-uni-gal">Galassie</label>
-            <select id="mp-uni-gal" class="form-control">
-              <option value="1">1</option>
-              <option value="3" selected>3</option>
-              <option value="5">5</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label for="mp-uni-sys">Sistemi</label>
-            <select id="mp-uni-sys" class="form-control">
-              <option value="100">100</option>
-              <option value="250" selected>250</option>
-              <option value="499">499</option>
-            </select>
-          </div>
-        </div>
-        <div class="form-group">
-          <label for="mp-uni-pass">Password Stanza (Opzionale — lascia vuoto per server pubblico)</label>
-          <input type="text" id="mp-uni-pass" class="form-control" placeholder="Nessuna password" maxlength="24">
-        </div>
-        <div style="display:flex; gap:10px; margin-top:16px;">
-          <button type="submit" class="btn btn-green" style="flex:1;">🌐 CREA & ENTRA</button>
-          <button type="button" id="btn-cancel-mp-uni" class="btn btn-ghost">ANNULLA</button>
-        </div>
-      </form>
-    `);
-
-    document.getElementById('btn-cancel-mp-uni')?.addEventListener('click', closeModal);
-    document.getElementById('form-create-mp-uni')?.addEventListener('submit', async (e) => {
+    document.getElementById('form-mp-create-uni')?.addEventListener('submit', async (e) => {
       e.preventDefault();
+      if (!window.UniversumMP) return;
       try {
-        const created = await window.UniversumMP.createOnlineUniverse({
+        const cfg = {
           name: document.getElementById('mp-uni-name').value,
+          npcMode: document.getElementById('mp-uni-npc').value,
           speed: Number(document.getElementById('mp-uni-speed').value),
-          galaxies: Number(document.getElementById('mp-uni-gal').value),
-          systemsPerGalaxy: Number(document.getElementById('mp-uni-sys').value),
-          roomPassword: document.getElementById('mp-uni-pass').value
-        });
-        closeModal();
-        await enterOnlineUniverse(created.id, document.getElementById('mp-uni-pass')?.value || '');
+          galaxies: Number(document.getElementById('mp-uni-galaxies').value),
+          systemsPerGalaxy: Number(document.getElementById('mp-uni-systems').value),
+          passcode: document.getElementById('mp-uni-passcode').value.trim()
+        };
+        const uni = await window.UniversumMP.createOnlineUniverse(cfg);
+        playSound('complete');
+        toast(`Universo Online "${uni.name}" fondato!`, 'success');
+        startOnlineGame(uni);
       } catch (err) {
         playSound('error');
         toast(err.message, 'error');
@@ -509,67 +405,113 @@
     });
   }
 
-  async function enterOnlineUniverse(universeId, password = '') {
+  async function refreshOnlineLobbyState() {
+    const authBox = document.getElementById('mp-auth-box');
+    const contentBox = document.getElementById('mp-lobby-content');
+    const user = window.fbAuth ? window.fbAuth.currentUser : null;
+
+    if (!user) {
+      authBox?.classList.remove('hidden');
+      contentBox?.classList.add('hidden');
+      return;
+    }
+
+    authBox?.classList.add('hidden');
+    contentBox?.classList.remove('hidden');
+
+    const nickEl = document.getElementById('mp-logged-nickname');
+    if (nickEl) {
+      nickEl.textContent = user.displayName || (user.email ? user.email.split('@')[0] : 'Comandante');
+    }
+
+    await renderOnlineUniversesList();
+  }
+
+  async function renderOnlineUniversesList() {
+    const listEl = document.getElementById('mp-universe-list');
+    if (!listEl || !window.UniversumMP) return;
+
+    listEl.innerHTML = `<div class="glass-panel" style="padding:16px; text-align:center;"><p class="text-muted">Scansione universi online in corso...</p></div>`;
+
     try {
-      toast('Connessione all\'universo PvP...', 'info');
-      const session = await window.UniversumMP.joinOnlineUniverse(universeId, password);
+      const universes = await window.UniversumMP.getOnlineUniverses();
+      if (!universes || universes.length === 0) {
+        listEl.innerHTML = `<div class="glass-panel" style="padding:20px; text-align:center;"><p class="text-muted">Nessun universo online attivo. Crea il primo universo PvP qui sopra!</p></div>`;
+        return;
+      }
 
-      const normalizedPlanets = session.planets.map((p, idx) => ({
-        id: `mp_planet_${p.coords.g}_${p.coords.s}_${p.coords.p}`,
-        name: p.planetName || (idx === 0 ? 'Pianeta Madre' : 'Colonia PvP'),
-        coords: p.coords,
-        minTemp: p.minTemp ?? p.temperature?.min ?? -10,
-        maxTemp: p.maxTemp ?? p.temperature?.max ?? 30,
-        fieldsMax: p.fieldsMax || 220,
-        resources: p.resources || { metal: 5000, crystal: 5000, deuterium: 1000 },
-        buildings: p.buildings || {},
-        defenses: p.defenses || {},
-        fleet: p.fleet || {},
-        buildQueue: [],
-        shipyardQueue: [],
-        defenseQueue: [],
-        moon: p.moon || null,
-        debris: p.debris || { metal: 0, crystal: 0 },
-        ownerUid: p.ownerUid,
-        ownerName: p.ownerName,
-        lastUpdated: p.lastUpdated || Date.now()
-      }));
+      listEl.innerHTML = universes.map((u) => {
+        const npcBadge = u.npcMode === 'limited'
+          ? '<span class="badge badge-neutral">MAX 10 AVAMPOSTI NEUTRALI</span>'
+          : '<span class="badge badge-red">100% PvP • ZERO BOT</span>';
+        return `
+          <article class="universe-card glass-panel">
+            <div class="universe-card-header">
+              <div>
+                <div class="universe-name">${escapeHTML(u.name)}</div>
+                <div class="text-muted" style="font-size:0.9rem;">Fondatore: <strong style="color:#fff;">${escapeHTML(u.founderName || 'Imperatore')}</strong></div>
+              </div>
+              <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                ${npcBadge}
+                <span class="badge badge-green">${u.speed}x</span>
+                ${u.hasPasscode ? '<span class="badge badge-blue">🔒 PRIVATO</span>' : ''}
+              </div>
+            </div>
+            <div class="universe-meta">
+              <span>Giocatori iscritti: <strong>${u.playerCount || 1}</strong></span>
+              <span>Mappa: <strong>${u.galaxies}G × ${u.systemsPerGalaxy}S</strong></span>
+            </div>
+            <button type="button" class="btn btn-green btn-sm btn-join-online-uni" data-uid="${u.id}" data-locked="${u.hasPasscode ? '1' : '0'}">
+              🌐 ENTRA NELL'UNIVERSO
+            </button>
+          </article>
+        `;
+      }).join('');
 
-      const mpUniObj = {
-        id: session.universe.id,
-        seed: 0,
-        name: session.universe.name,
-        emperor: session.player.nickname,
-        creativeMode: false,
-        speed: session.universe.speed || 10,
-        galaxies: session.universe.galaxies || 3,
-        systemsPerGalaxy: session.universe.systemsPerGalaxy || 250,
-        botMode: 'peaceful',
-        botLevel: 1,
-        turboUntil: 0,
-        activePlanetId: normalizedPlanets[0]?.id,
-        planets: normalizedPlanets,
-        researches: session.player.researches || {},
-        researchQueue: null,
-        fleetsInFlight: [],
-        incomingAttacks: [],
-        spyReports: [],
-        messages: [],
-        contracts: [],
-        dailyQuests: []
-      };
+      listEl.querySelectorAll('.btn-join-online-uni').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const uniId = btn.dataset.uid;
+          const isLocked = btn.dataset.locked === '1';
 
-      startGame(mpUniObj, true);
-      playSound('complete');
-      toast(`Connesso a "${mpUniObj.name}"!`, 'success');
+          const proceedJoin = async (passcode = '') => {
+            try {
+              const joinedUni = await window.UniversumMP.joinOnlineUniverse(uniId, passcode);
+              playSound('complete');
+              startOnlineGame(joinedUni);
+            } catch (err) {
+              playSound('error');
+              toast(err.message, 'error');
+            }
+          };
+
+          if (isLocked) {
+            openModal('CODICE STANZA RICHIESTO', `
+              <form id="form-mp-passcode">
+                <div class="form-group">
+                  <label for="inp-room-code">Inserisci Codice Universo</label>
+                  <input type="text" id="inp-room-code" class="form-control" required>
+                </div>
+                <button type="submit" class="btn btn-green" style="width:100%;">ACCEDI</button>
+              </form>
+            `);
+            document.getElementById('form-mp-passcode')?.addEventListener('submit', async (ev) => {
+              ev.preventDefault();
+              const code = document.getElementById('inp-room-code').value;
+              closeModal();
+              await proceedJoin(code);
+            });
+          } else {
+            await proceedJoin('');
+          }
+        });
+      });
     } catch (err) {
-      playSound('error');
-      toast(err.message, 'error');
+      listEl.innerHTML = `<div class="glass-panel" style="padding:16px;"><p style="color:#ff5252;">Errore caricamento universi: ${escapeHTML(err.message)}</p></div>`;
     }
   }
 
   // =========================================================
-  // MODALI RINOMINA PIANETA E LUNA (NO window.prompt)
+  // MODALI RINOMINA PIANETA E LUNA (SINCRONIZZATI ANCHE ONLINE)
   // =========================================================
   function openRenamePlanetModal(planetIndex) {
     const planet = currentUniverse.planets[planetIndex];
@@ -595,13 +537,10 @@
     document.getElementById('form-rename-planet')?.addEventListener('submit', async (e) => {
       e.preventDefault();
       try {
-        let newName;
-        if (isMultiplayerMode) {
-          newName = await window.UniversumMP.renameOnlinePlanet(currentUniverse.id, planet.coords, inp.value);
-          planet.name = newName;
-          uiState.mpGalaxyCacheKey = '';
+        const newName = window.UniversumEngine.renamePlanet(currentUniverse, planetIndex, inp.value);
+        if (isMultiplayerMode && window.UniversumMP?.renameOnlinePlanet) {
+          await window.UniversumMP.renameOnlinePlanet(currentUniverse.id, planet.coords, newName);
         } else {
-          newName = window.UniversumEngine.renamePlanet(currentUniverse, planetIndex, inp.value);
           await window.UniversumDB.save(currentUniverse);
         }
         closeModal();
@@ -640,13 +579,10 @@
     document.getElementById('form-rename-moon')?.addEventListener('submit', async (e) => {
       e.preventDefault();
       try {
-        let newName;
-        if (isMultiplayerMode) {
-          newName = await window.UniversumMP.renameOnlineMoon(currentUniverse.id, planet.coords, inp.value);
-          planet.moon.name = newName;
-          uiState.mpGalaxyCacheKey = '';
+        const newName = window.UniversumEngine.renameMoon(currentUniverse, planetIndex, inp.value);
+        if (isMultiplayerMode && window.UniversumMP?.renameOnlineMoon) {
+          await window.UniversumMP.renameOnlineMoon(currentUniverse.id, planet.coords, newName);
         } else {
-          newName = window.UniversumEngine.renameMoon(currentUniverse, planetIndex, inp.value);
           await window.UniversumDB.save(currentUniverse);
         }
         closeModal();
@@ -661,7 +597,7 @@
   }
 
   // =========================================================
-  // 2. RENDERING PIANETA 2D PROCEDURALE (CANVAS)
+  // RENDERING PIANETA 2D PROCEDURALE (CANVAS)
   // =========================================================
   function startPlanetCanvas(planet) {
     if (uiState.planetAnimId) {
@@ -771,27 +707,8 @@
   }
 
   // =========================================================
-  // HEADER, BADGE CHAT NON LETTI & NAVIGAZIONE
+  // AGGIORNAMENTO HEADER RISORSE E NAVIGAZIONE
   // =========================================================
-  function updateChatUnreadBadges() {
-    const count = uiState.unreadChatCount;
-    const sbBadge = document.getElementById('sidebar-chat-badge');
-    const drBadge = document.getElementById('drawer-chat-badge');
-    const mobDot = document.getElementById('mobile-menu-unread-dot');
-
-    if (sbBadge) {
-      sbBadge.textContent = count > 99 ? '99+' : String(count);
-      sbBadge.classList.toggle('hidden', count === 0 || !isMultiplayerMode);
-    }
-    if (drBadge) {
-      drBadge.textContent = count > 99 ? '99+' : String(count);
-      drBadge.classList.toggle('hidden', count === 0 || !isMultiplayerMode);
-    }
-    if (mobDot) {
-      mobDot.classList.toggle('hidden', count === 0 || !isMultiplayerMode);
-    }
-  }
-
   function refreshPlanetSelector() {
     const select = document.getElementById('active-planet-select');
     if (!select || !currentUniverse) return;
@@ -812,7 +729,7 @@
     const dEl = document.getElementById('res-deuterium-val');
     const eEl = document.getElementById('res-energy-val');
 
-    if (currentUniverse.creativeMode) {
+    if (currentUniverse.creativeMode && !isMultiplayerMode) {
       if (mEl) mEl.textContent = '∞';
       if (cEl) cEl.textContent = '∞';
       if (dEl) dEl.textContent = '∞';
@@ -842,14 +759,13 @@
   }
 
   function switchView(viewName) {
+    // Chiude sempre eventuali listener privati aperti se si lascia la schermata Comunicazioni
+    if (currentView === 'chat' && viewName !== 'chat') {
+      closePrivateMessageStream();
+    }
+
     currentView = viewName;
     playSound('click');
-
-    if (viewName === 'chat') {
-      uiState.unreadChatCount = 0;
-      uiState.lastSeenChatTs = Date.now();
-      updateChatUnreadBadges();
-    }
 
     document.querySelectorAll('.sidebar-btn').forEach((btn) => {
       btn.classList.toggle('active', btn.dataset.view === viewName);
@@ -863,9 +779,9 @@
   }
 
   // =========================================================
-  // RENDERING DELLE SCHERMATE DI GIOCO
+  // RENDERING DELLE SCHERMATE (OFFLINE + MULTIPLAYER PvP)
   // =========================================================
-  function renderCurrentView() {
+  async function renderCurrentView() {
     const viewport = document.getElementById('game-viewport');
     if (!viewport || !currentUniverse) return;
 
@@ -884,13 +800,13 @@
         renderShipyardAndDefense(viewport);
         break;
       case 'fleet': renderFleet(viewport); break;
-      case 'galaxy': renderGalaxy(viewport); break;
+      case 'galaxy': await renderGalaxy(viewport); break;
       case 'espionage': renderEspionageAndSim(viewport); break;
       case 'moon': renderMoon(viewport); break;
       case 'diplomacy': renderDiplomacy(viewport); break;
       case 'empire': renderEmpire(viewport); break;
-      case 'highscore': renderHighscoreAndQuests(viewport); break;
-      case 'chat': renderGalacticChat(viewport); break;
+      case 'highscore': await renderHighscoreAndQuests(viewport); break;
+      case 'chat': await renderCommunications(viewport); break;
       case 'saves': renderSavesMenu(viewport); break;
       default: renderOverview(viewport);
     }
@@ -899,26 +815,6 @@
   // ---------------------------------------------------------
   // 1. PANORAMICA
   // ---------------------------------------------------------
-  function ensureDailyQuests() {
-    if (!Array.isArray(currentUniverse.dailyQuests) || currentUniverse.dailyQuests.length === 0) {
-      currentUniverse.dailyQuests = [
-        { id: 'q_mines', title: 'Espansione Estrattiva', desc: 'Porta la Miniera di Metallo almeno al Livello 3.', reward: { metal: 5000, crystal: 2500, deuterium: 500 }, claimed: false },
-        { id: 'q_spy', title: 'Occhi nello Spazio', desc: 'Effettua almeno 1 rapporto di spionaggio.', reward: { metal: 4000, crystal: 6000, deuterium: 1000 }, claimed: false },
-        { id: 'q_fleet', title: 'Primo Squadrone', desc: 'Possiedi almeno 5 navi da combattimento in orbita.', reward: { metal: 12000, crystal: 8000, deuterium: 2000 }, claimed: false }
-      ];
-    }
-  }
-
-  function checkQuestReady(q, planet) {
-    if (q.id === 'q_mines') return (planet.buildings?.metalMine || 0) >= 3;
-    if (q.id === 'q_spy') return (currentUniverse.spyReports || []).length >= 1;
-    if (q.id === 'q_fleet') {
-      const combatShips = (planet.fleet?.lightFighter || 0) + (planet.fleet?.heavyFighter || 0) + (planet.fleet?.cruiser || 0) + (planet.fleet?.battleship || 0);
-      return combatShips >= 5;
-    }
-    return false;
-  }
-
   function renderOverview(viewport) {
     const Data = window.UniversumData;
     const Engine = window.UniversumEngine;
@@ -928,18 +824,16 @@
     const usedFields = Data.getUsedFields(planet);
     const maxFields = Data.getMaxFields(planet);
 
-    ensureDailyQuests();
-
-    const incoming = isMultiplayerMode ? uiState.mpIncomingAttacks : (currentUniverse.incomingAttacks || []);
-    const flights = isMultiplayerMode ? uiState.mpMyFleets : (currentUniverse.fleetsInFlight || []);
+    const incoming = currentUniverse.incomingAttacks || [];
+    const flights = currentUniverse.fleetsInFlight || [];
     const messages = (currentUniverse.messages || []).slice(0, 6);
 
     viewport.innerHTML = `
       <div style="display:flex; flex-direction:column; gap:14px;">
         ${incoming.length > 0 ? `
-          <div class="glass-panel" style="padding:14px; border-color:var(--btn-red); background:rgba(255,23,68,0.16);">
+          <div class="glass-panel" style="padding:14px; border-color:var(--btn-red); background:rgba(255,23,68,0.18);">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
-              <strong style="color:#ff5252; font-family:var(--font-display);">🚨 ALLARME ATTACCO IN ARRIVO (${incoming.length})</strong>
+              <strong style="color:#ff5252; font-family:var(--font-display);">🚨 ALLARME ATTACCO OSTILE IN ARRIVO (${incoming.length})</strong>
               <span class="badge badge-red live-timer" data-end="${incoming[0].arrivalTime}">--:--</span>
             </div>
             <p style="font-size:0.95rem; margin-top:6px;">${escapeHTML(incoming[0].attackerName)} diretto verso [${incoming[0].targetCoords.g}:${incoming[0].targetCoords.s}:${incoming[0].targetCoords.p}]</p>
@@ -958,7 +852,7 @@
                 <div>Coordinate: <strong class="text-crystal">[${planet.coords.g}:${planet.coords.s}:${planet.coords.p}]</strong></div>
                 <div>Campi: <strong>${usedFields} / ${maxFields}</strong></div>
                 <div>Temperatura: <strong>${planet.minTemp}°C / ${planet.maxTemp}°C</strong></div>
-                <div>Velocità Univ.: <strong class="text-metal">${Engine.getEffectiveSpeed(currentUniverse)}x</strong></div>
+                <div>Velocità: <strong class="text-metal">${Engine.getEffectiveSpeed(currentUniverse)}x</strong></div>
               </div>
               ${!isMultiplayerMode ? `
                 <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:12px;">
@@ -967,7 +861,7 @@
                 </div>
               ` : `
                 <div style="margin-top:12px;">
-                  <button type="button" id="btn-mp-open-chat-quick" class="btn btn-blue btn-sm">💬 APRI CHAT GALATTICA</button>
+                  <button type="button" id="btn-overview-open-chat" class="btn btn-blue btn-sm">💬 APRI COMUNICAZIONI</button>
                 </div>
               `}
             </div>
@@ -994,14 +888,14 @@
 
         <div class="glass-panel" style="padding:14px;">
           <h3 style="font-size:0.95rem; color:var(--res-crystal); margin-bottom:10px;">CODE DI PRODUZIONE & RICERCA</h3>
-          <div id="overview-queues-list" style="display:flex; flex-direction:column; gap:8px;">
+          <div style="display:flex; flex-direction:column; gap:8px;">
             ${renderQueuesSummaryHTML(planet)}
           </div>
         </div>
 
         <div class="glass-panel" style="padding:14px;">
           <h3 style="font-size:0.95rem; color:var(--res-crystal); margin-bottom:10px;">MOVIMENTI FLOTTA (${flights.length})</h3>
-          ${flights.length === 0 ? '<p class="text-muted">Nessuna flotta attualmente nello spazio profondo.</p>' : `
+          ${flights.length === 0 ? '<p class="text-muted">Nessuna flotta in transito.</p>' : `
             <div style="display:flex; flex-direction:column; gap:8px;">
               ${flights.map((f) => {
                 const targetTs = f.status === 'outbound' ? f.arrivalTime : f.returnTime;
@@ -1020,34 +914,10 @@
           `}
         </div>
 
-        ${!isMultiplayerMode ? `
-          <div class="glass-panel" style="padding:14px;">
-            <h3 style="font-size:0.95rem; color:var(--btn-gold); margin-bottom:10px;">MISSIONI GIORNALIERE</h3>
-            <div style="display:flex; flex-direction:column; gap:8px;">
-              ${currentUniverse.dailyQuests.map((q) => {
-                const ready = checkQuestReady(q, planet);
-                return `
-                  <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; background:rgba(0,0,0,0.35); padding:10px; border-radius:8px;">
-                    <div>
-                      <strong>${escapeHTML(q.title)}</strong>
-                      <div class="text-muted" style="font-size:0.88rem;">${escapeHTML(q.desc)}</div>
-                      <div style="font-size:0.82rem; color:var(--res-metal);">Premio: ${formatNum(q.reward.metal)} M, ${formatNum(q.reward.crystal)} C, ${formatNum(q.reward.deuterium)} D</div>
-                    </div>
-                    ${q.claimed
-                      ? '<span class="badge badge-blue">RISCATTATA</span>'
-                      : `<button type="button" class="btn btn-green btn-sm btn-claim-quest" data-qid="${q.id}" ${ready ? '' : 'disabled'}>${ready ? 'RISCATTA' : 'IN CORSO'}</button>`
-                    }
-                  </div>
-                `;
-              }).join('')}
-            </div>
-          </div>
-        ` : ''}
-
         <div class="glass-panel" style="padding:14px;">
-          <h3 style="font-size:0.95rem; color:var(--res-crystal); margin-bottom:10px;">DIARIO DI BORDO & RAPPORTI</h3>
+          <h3 style="font-size:0.95rem; color:var(--res-crystal); margin-bottom:10px;">DIARIO DI BORDO</h3>
           <div style="display:flex; flex-direction:column; gap:8px;">
-            ${messages.length === 0 ? '<p class="text-muted">Nessun messaggio recente.</p>' : messages.map((m) => `
+            ${messages.map((m) => `
               <div style="border-left:3px solid var(--btn-blue); padding-left:10px;">
                 <div style="font-weight:700; font-size:0.95rem;">${escapeHTML(m.title)}</div>
                 <div class="text-muted" style="font-size:0.88rem;">${escapeHTML(m.body)}</div>
@@ -1061,11 +931,11 @@
     startPlanetCanvas(planet);
 
     document.getElementById('btn-rename-active-planet')?.addEventListener('click', () => openRenamePlanetModal(pIdx));
-    document.getElementById('btn-mp-open-chat-quick')?.addEventListener('click', () => switchView('chat'));
+    document.getElementById('btn-overview-open-chat')?.addEventListener('click', () => switchView('chat'));
 
     document.getElementById('btn-overview-turbo')?.addEventListener('click', async () => {
       const res = Engine.activateTurbo(currentUniverse);
-      await persistCurrentState();
+      await persistUniverseState();
       updateTopBarNumbers();
       renderCurrentView();
       playSound('success');
@@ -1077,26 +947,10 @@
       const bonusC = Math.floor((1000 + Math.random() * 3000) * Math.sqrt(currentUniverse.speed || 1));
       planet.resources.metal += bonusM;
       planet.resources.crystal += bonusC;
-      await persistCurrentState();
+      await persistUniverseState();
       updateTopBarNumbers();
       playSound('success');
       toast(`Capsula cargo intercettata: +${formatNum(bonusM)} M, +${formatNum(bonusC)} C!`, 'success');
-    });
-
-    viewport.querySelectorAll('.btn-claim-quest').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        const q = currentUniverse.dailyQuests.find((item) => item.id === btn.dataset.qid);
-        if (!q || q.claimed) return;
-        q.claimed = true;
-        planet.resources.metal += q.reward.metal;
-        planet.resources.crystal += q.reward.crystal;
-        planet.resources.deuterium += q.reward.deuterium;
-        await persistCurrentState();
-        updateTopBarNumbers();
-        renderCurrentView();
-        playSound('complete');
-        toast(`Ricompensa "${q.title}" accreditata!`, 'success');
-      });
     });
   }
 
@@ -1114,7 +968,6 @@
         </div>
       `);
     }
-
     if (currentUniverse.researchQueue) {
       const r = currentUniverse.researchQueue;
       const name = Data.RESEARCHES[r.id]?.name || r.id;
@@ -1125,7 +978,6 @@
         </div>
       `);
     }
-
     if (planet.shipyardQueue && planet.shipyardQueue.length > 0) {
       const sq = planet.shipyardQueue[0];
       const name = Data.SHIPS[sq.id]?.name || sq.id;
@@ -1136,7 +988,6 @@
         </div>
       `);
     }
-
     if (planet.defenseQueue && planet.defenseQueue.length > 0) {
       const dq = planet.defenseQueue[0];
       const name = Data.DEFENSES[dq.id]?.name || dq.id;
@@ -1147,10 +998,7 @@
         </div>
       `);
     }
-
-    return rows.length > 0
-      ? rows.join('')
-      : '<p class="text-muted">Nessuna costruzione o ricerca in corso.</p>';
+    return rows.length > 0 ? rows.join('') : '<p class="text-muted">Nessuna costruzione o ricerca in corso.</p>';
   }
 
   // ---------------------------------------------------------
@@ -1161,7 +1009,7 @@
     const Engine = window.UniversumEngine;
     const pIdx = getActivePlanetIndex();
     const planet = getActivePlanet();
-    const isCreative = currentUniverse.creativeMode;
+    const isCreative = currentUniverse.creativeMode && !isMultiplayerMode;
 
     const cards = Object.values(Data.BUILDINGS).map((b) => {
       const curLv = Number(planet.buildings[b.id] || 0);
@@ -1209,7 +1057,7 @@
       btn.addEventListener('click', async () => {
         try {
           const res = Engine.startBuilding(currentUniverse, pIdx, btn.dataset.bid, false);
-          await persistCurrentState(planet);
+          await persistUniverseState();
           updateTopBarNumbers();
           renderCurrentView();
           playSound(res.instant ? 'complete' : 'click');
@@ -1230,7 +1078,7 @@
     const Engine = window.UniversumEngine;
     const pIdx = getActivePlanetIndex();
     const planet = getActivePlanet();
-    const isCreative = currentUniverse.creativeMode;
+    const isCreative = currentUniverse.creativeMode && !isMultiplayerMode;
 
     const cards = Object.values(Data.RESEARCHES).map((r) => {
       const curLv = Number(currentUniverse.researches[r.id] || 0);
@@ -1278,7 +1126,7 @@
       btn.addEventListener('click', async () => {
         try {
           const res = Engine.startResearch(currentUniverse, btn.dataset.rid, pIdx);
-          await persistCurrentState(planet);
+          await persistUniverseState();
           updateTopBarNumbers();
           renderCurrentView();
           playSound(res.instant ? 'complete' : 'click');
@@ -1299,7 +1147,7 @@
     const Engine = window.UniversumEngine;
     const pIdx = getActivePlanetIndex();
     const planet = getActivePlanet();
-    const isCreative = currentUniverse.creativeMode;
+    const isCreative = currentUniverse.creativeMode && !isMultiplayerMode;
     const isDef = uiState.shipyardTab === 'defense';
 
     const dict = isDef ? Data.DEFENSES : Data.SHIPS;
@@ -1393,7 +1241,7 @@
         const qty = Math.max(1, Math.floor(Number(inp?.value) || 1));
         try {
           const res = Engine.buildUnits(currentUniverse, pIdx, uid, qty, isDef);
-          await persistCurrentState(planet);
+          await persistUniverseState();
           updateTopBarNumbers();
           renderCurrentView();
           playSound(res.instant ? 'complete' : 'click');
@@ -1407,7 +1255,7 @@
   }
 
   // ---------------------------------------------------------
-  // 5. FLOTTA & MISSIONI (OFFLINE + MULTIPLAYER PvP)
+  // 5. FLOTTA & MISSIONI
   // ---------------------------------------------------------
   function renderFleet(viewport) {
     const Data = window.UniversumData;
@@ -1451,7 +1299,7 @@
         </div>
 
         <div class="glass-panel" style="padding:14px;">
-          <h2 style="font-size:1.05rem; color:var(--res-crystal); margin-bottom:10px;">2. COORDINATE & MISSIONE ${isMultiplayerMode ? '(PvP)' : ''}</h2>
+          <h2 style="font-size:1.05rem; color:var(--res-crystal); margin-bottom:10px;">2. COORDINATE & MISSIONE</h2>
           <div class="form-grid-3">
             <div class="form-group">
               <label>Galassia</label>
@@ -1470,21 +1318,21 @@
           <div class="form-group">
             <label>Tipo Missione</label>
             <select id="flt-mission-select" class="form-control">
-              <option value="attack" ${uiState.fleetMission === 'attack' ? 'selected' : ''}>⚔️ Attacca Pianeta</option>
+              <option value="attack" ${uiState.fleetMission === 'attack' ? 'selected' : ''}>⚔️ Attacca Bersaglio</option>
               <option value="spy" ${uiState.fleetMission === 'spy' ? 'selected' : ''}>👁️ Spionaggio</option>
               <option value="colonize" ${uiState.fleetMission === 'colonize' ? 'selected' : ''}>🌍 Colonizza Pianeta Vuoto</option>
               <option value="transport" ${uiState.fleetMission === 'transport' ? 'selected' : ''}>📦 Trasporta Risorse</option>
-              ${!isMultiplayerMode ? `<option value="deploy" ${uiState.fleetMission === 'deploy' ? 'selected' : ''}>🛸 Schiera Flotta su Tuo Pianeta</option>` : ''}
+              <option value="deploy" ${uiState.fleetMission === 'deploy' ? 'selected' : ''}>🛸 Schiera Flotta su Tuo Pianeta</option>
               <option value="explore" ${uiState.fleetMission === 'explore' ? 'selected' : ''}>🌌 Esplora Spazio Profondo (Pos. 16)</option>
               <option value="recycle" ${uiState.fleetMission === 'recycle' ? 'selected' : ''}>♻️ Ricicla Campo Detriti</option>
               <option value="destroyMoon" ${uiState.fleetMission === 'destroyMoon' ? 'selected' : ''}>🌑 Distruggi Luna (Morte Nera)</option>
             </select>
           </div>
 
-          <div id="blackhole-option-box" class="${(!isMultiplayerMode && uiState.fleetMission === 'explore') ? '' : 'hidden'}" style="margin-bottom:12px;">
+          <div id="blackhole-option-box" class="${uiState.fleetMission === 'explore' ? '' : 'hidden'}" style="margin-bottom:12px;">
             <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
               <input type="checkbox" id="flt-blackhole-chk" ${uiState.fleetBlackHole ? 'checked' : ''} style="width:20px; height:20px;">
-              <span>Spedizione Segreta nel Buco Nero (+50.000 Deuterio, 5% di vincere 1.000.000 risorse)</span>
+              <span>Spedizione Segreta nel Buco Nero (+50.000 Deuterio)</span>
             </label>
           </div>
 
@@ -1530,9 +1378,7 @@
     });
 
     document.getElementById('btn-fleet-all')?.addEventListener('click', () => {
-      for (const s of availableShips) {
-        uiState.fleetSelection[s.id] = Number(planet.fleet[s.id] || 0);
-      }
+      for (const s of availableShips) uiState.fleetSelection[s.id] = Number(planet.fleet[s.id] || 0);
       renderCurrentView();
     });
 
@@ -1568,25 +1414,9 @@
     document.getElementById('btn-launch-fleet')?.addEventListener('click', async () => {
       syncTarget();
       try {
-        if (isMultiplayerMode) {
-          await persistCurrentState(planet);
-          const mObj = await window.UniversumMP.launchOnlineFleet(
-            currentUniverse.id,
-            planet.coords,
-            uiState.fleetTarget,
-            uiState.fleetMission,
-            uiState.fleetSelection,
-            uiState.fleetCargo
-          );
-          await syncPlayerOnlinePlanets();
-          uiState.fleetSelection = {};
-          uiState.fleetCargo = { metal: 0, crystal: 0, deuterium: 0 };
-          updateTopBarNumbers();
-          playSound('success');
-          toast(`Flotta PvP inviata verso [${mObj.targetCoords.g}:${mObj.targetCoords.s}:${mObj.targetCoords.p}]!`, 'success');
-          switchView('overview');
-        } else {
-          const missionObj = Galaxy.launchFleet(
+        let missionObj;
+        if (isMultiplayerMode && window.UniversumMP?.launchOnlineFleet) {
+          missionObj = await window.UniversumMP.launchOnlineFleet(
             currentUniverse,
             pIdx,
             uiState.fleetTarget,
@@ -1595,14 +1425,24 @@
             uiState.fleetCargo,
             { blackHole: uiState.fleetBlackHole }
           );
-          uiState.fleetSelection = {};
-          uiState.fleetCargo = { metal: 0, crystal: 0, deuterium: 0 };
+        } else {
+          missionObj = Galaxy.launchFleet(
+            currentUniverse,
+            pIdx,
+            uiState.fleetTarget,
+            uiState.fleetMission,
+            uiState.fleetSelection,
+            uiState.fleetCargo,
+            { blackHole: uiState.fleetBlackHole }
+          );
           await window.UniversumDB.save(currentUniverse);
-          updateTopBarNumbers();
-          playSound('success');
-          toast(`Flotta inviata verso [${missionObj.targetCoords.g}:${missionObj.targetCoords.s}:${missionObj.targetCoords.p}]!`, 'success');
-          switchView('overview');
         }
+        uiState.fleetSelection = {};
+        uiState.fleetCargo = { metal: 0, crystal: 0, deuterium: 0 };
+        updateTopBarNumbers();
+        playSound('success');
+        toast(`Flotta inviata verso [${missionObj.targetCoords.g}:${missionObj.targetCoords.s}:${missionObj.targetCoords.p}]!`, 'success');
+        switchView('overview');
       } catch (err) {
         playSound('error');
         toast(err.message, 'error');
@@ -1611,36 +1451,35 @@
   }
 
   // ---------------------------------------------------------
-  // 6. GALASSIA (OFFLINE + MULTIPLAYER CONDIVISA)
+  // 6. GALASSIA (CON PULSANTE ✉️ PER CHAT PRIVATA PvP)
   // ---------------------------------------------------------
   async function renderGalaxy(viewport) {
     const Galaxy = window.UniversumGalaxy;
     const pIdx = getActivePlanetIndex();
-    const g = Math.min(currentUniverse.galaxies, Math.max(1, uiState.galaxyG));
-    const s = Math.min(currentUniverse.systemsPerGalaxy, Math.max(1, uiState.galaxyS));
 
     let sysData;
-    if (isMultiplayerMode) {
-      const cacheKey = `${currentUniverse.id}:${g}:${s}`;
-      if (uiState.mpGalaxyCacheKey !== cacheKey || !uiState.mpGalaxyCacheData) {
-        viewport.innerHTML = `<div class="glass-panel" style="padding:24px; text-align:center;"><p class="text-crystal">Scansione sistema [${g}:${s}] nella rete galattica...</p></div>`;
-        try {
-          uiState.mpGalaxyCacheData = await window.UniversumMP.getOnlineSystem(currentUniverse.id, g, s);
-          uiState.mpGalaxyCacheKey = cacheKey;
-        } catch (err) {
-          viewport.innerHTML = `<div class="glass-panel" style="padding:20px; color:#ff5252;">${escapeHTML(err.message)}</div>`;
-          return;
-        }
-      }
-      sysData = uiState.mpGalaxyCacheData;
+    if (isMultiplayerMode && window.UniversumMP?.getOnlineSystem) {
+      viewport.innerHTML = `<div class="glass-panel" style="padding:20px; text-align:center;"><p class="text-muted">Sincronizzazione quadrante galattico online...</p></div>`;
+      sysData = await window.UniversumMP.getOnlineSystem(currentUniverse.id, uiState.galaxyG, uiState.galaxyS);
     } else {
-      sysData = Galaxy.getSystemData(currentUniverse, g, s);
+      sysData = Galaxy.getSystemData(currentUniverse, uiState.galaxyG, uiState.galaxyS);
     }
 
+    const myUid = window.fbAuth?.currentUser?.uid;
+
     const filteredSlots = sysData.slots.filter((slot) => {
-      if (uiState.galaxyFilter === 'mine') return slot.ownerType === 'player';
-      if (uiState.galaxyFilter === 'bot') return slot.ownerType === 'bot' || slot.ownerType === 'enemy_player';
-      if (uiState.galaxyFilter === 'empty') return slot.ownerType === 'empty';
+      const isMine = isMultiplayerMode
+        ? (slot.ownerUid && slot.ownerUid === myUid)
+        : (slot.ownerType === 'player');
+      const isHostileTarget = isMultiplayerMode
+        ? (slot.ownerUid && slot.ownerUid !== myUid && !slot.isNpc)
+        : (slot.ownerType === 'bot');
+      const isOutpost = isMultiplayerMode && Boolean(slot.isNpc);
+      const isEmpty = !slot.ownerUid && slot.ownerType !== 'player' && slot.ownerType !== 'bot' && !slot.isNpc;
+
+      if (uiState.galaxyFilter === 'mine') return isMine;
+      if (uiState.galaxyFilter === 'bot') return isHostileTarget || isOutpost;
+      if (uiState.galaxyFilter === 'empty') return isEmpty;
       if (uiState.galaxyFilter === 'moon') return Boolean(slot.moon);
       return true;
     });
@@ -1671,7 +1510,7 @@
             ${[
               { id: 'all', label: 'Tutti' },
               { id: 'mine', label: 'Miei' },
-              { id: 'bot', label: isMultiplayerMode ? 'Rivali PvP' : 'BOT' },
+              { id: 'bot', label: isMultiplayerMode ? 'Giocatori / Avamposti' : 'BOT' },
               { id: 'empty', label: 'Vuoti' },
               { id: 'moon', label: 'Lune' }
             ].map((f) => `
@@ -1683,46 +1522,64 @@
         <div style="display:flex; flex-direction:column; gap:8px;">
           ${filteredSlots.map((slot) => {
             const hasDebris = (slot.debris?.metal || 0) + (slot.debris?.crystal || 0) > 0;
-            const isEnemyPvP = slot.ownerType === 'enemy_player';
-            const isHostile = slot.ownerType === 'bot' || isEnemyPvP;
+            const isMine = isMultiplayerMode
+              ? (slot.ownerUid && slot.ownerUid === myUid)
+              : (slot.ownerType === 'player');
+            const isRealEnemy = isMultiplayerMode && slot.ownerUid && slot.ownerUid !== myUid && !slot.isNpc;
+            const isNeutralOutpost = isMultiplayerMode && Boolean(slot.isNpc);
+            const isOfflineBot = !isMultiplayerMode && slot.ownerType === 'bot';
+            const isEmpty = !isMine && !isRealEnemy && !isNeutralOutpost && !isOfflineBot;
 
+            let cardClass = 'galaxy-slot-empty';
             let badgeHTML = '<span class="badge badge-blue">VUOTO</span>';
-            if (slot.ownerType === 'player') {
-              badgeHTML = '<span class="badge badge-green">TUO</span>';
-            } else if (isEnemyPvP) {
-              badgeHTML = '<span class="badge badge-pvp-real"><span class="status-dot-live"></span> GIOCATORE REALE</span>';
-            } else if (slot.ownerType === 'bot') {
+
+            if (isMine) {
+              cardClass = 'galaxy-slot-player';
+              badgeHTML = '<span class="badge badge-green">TUO PIANETA</span>';
+            } else if (isRealEnemy) {
+              cardClass = 'galaxy-slot-enemy-pvp';
+              badgeHTML = '<span class="badge badge-red">⚔️ GIOCATORE REALE</span>';
+            } else if (isNeutralOutpost) {
+              cardClass = 'galaxy-slot-outpost';
+              badgeHTML = '<span class="badge badge-neutral">🛰️ AVAMPOSTO NEUTRALE</span>';
+            } else if (isOfflineBot) {
+              cardClass = 'galaxy-slot-enemy-pvp';
               badgeHTML = `<span class="badge badge-red">${escapeHTML(slot.tier)} • ${escapeHTML(slot.personality)}</span>`;
             }
 
+            const ownerLabel = slot.ownerName || slot.emperor;
+
             return `
-              <div class="glass-panel ${isEnemyPvP ? 'slot-card-pvp-enemy' : ''}" style="padding:12px; display:flex; flex-direction:column; gap:8px;">
-                <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+              <div class="glass-panel ${cardClass}" style="padding:12px; display:flex; flex-direction:column; gap:8px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
                   <div>
                     <strong class="font-display text-crystal">[${slot.coords.p}]</strong>
-                    <strong style="font-size:1.05rem; margin-left:6px;">${escapeHTML(slot.name)}</strong>
+                    <strong style="font-size:1.05rem; margin-left:6px;">${escapeHTML(slot.planetName || slot.name || 'Slot Colonizzabile')}</strong>
                     ${slot.moon ? `<span title="${escapeHTML(slot.moon.name || 'Luna')}"> 🌑</span>` : ''}
                     ${hasDebris ? `<span class="badge badge-creative" style="margin-left:4px;">♻️ Detriti</span>` : ''}
                   </div>
                   ${badgeHTML}
                 </div>
 
-                <div class="text-muted" style="font-size:0.88rem;">
-                  ${slot.emperor ? `Imperatore: <strong style="color:#fff;">${escapeHTML(slot.emperor)}</strong> • ` : ''}
-                  Temp: ${slot.minTemp}°/${slot.maxTemp}°C • Campi: ${slot.fieldsMax}
+                <div class="text-muted" style="font-size:0.88rem; display:flex; align-items:center; flex-wrap:wrap; gap:6px;">
+                  ${ownerLabel ? `<span>Comandante: <strong style="color:#fff;">${escapeHTML(ownerLabel)}</strong></span>` : ''}
+                  ${isRealEnemy ? `
+                    <button type="button" class="btn btn-blue btn-sm btn-gal-pm" data-uid="${escapeHTML(slot.ownerUid)}" data-nick="${escapeHTML(ownerLabel)}" style="min-width:44px; min-height:44px; padding:4px 10px;" title="Messaggio Privato">✉️</button>
+                  ` : ''}
+                  <span>• Temp: ${slot.minTemp ?? -10}°/${slot.maxTemp ?? 35}°C • Campi: ${slot.fieldsMax || 200}</span>
                 </div>
 
                 <div style="display:flex; flex-wrap:wrap; gap:6px;">
-                  ${slot.ownerType === 'player' ? `
-                    <button type="button" class="btn btn-green btn-sm btn-gal-action" data-act="manage" data-p="${slot.coords.p}" data-pid="${slot.planetId || ''}">🛰️ Gestisci</button>
-                    <button type="button" class="btn btn-blue btn-sm btn-gal-action" data-act="rename-player" data-p="${slot.coords.p}" data-pid="${slot.planetId || ''}">✏️ Rinomina</button>
+                  ${isMine ? `
+                    <button type="button" class="btn btn-green btn-sm btn-gal-action" data-act="manage" data-pid="${slot.planetId || slot.id}">🛰️ Gestisci</button>
+                    <button type="button" class="btn btn-blue btn-sm btn-gal-action" data-act="rename-player" data-p="${slot.coords.p}">✏️ Rinomina</button>
                   ` : ''}
-                  ${isHostile ? `
+                  ${(isRealEnemy || isNeutralOutpost || isOfflineBot) ? `
                     <button type="button" class="btn btn-blue btn-sm btn-gal-action" data-act="quick-spy" data-p="${slot.coords.p}">👁️ Spia</button>
                     <button type="button" class="btn btn-red btn-sm btn-gal-action" data-act="prep-attack" data-p="${slot.coords.p}">⚔️ Attacca</button>
-                    ${!isMultiplayerMode ? `<button type="button" class="btn btn-ghost btn-sm btn-gal-action" data-act="trade" data-p="${slot.coords.p}">🤝 Commercia</button>` : ''}
+                    <button type="button" class="btn btn-ghost btn-sm btn-gal-action" data-act="trade" data-p="${slot.coords.p}">🤝 Commercia</button>
                   ` : ''}
-                  ${slot.ownerType === 'empty' ? `
+                  ${isEmpty ? `
                     <button type="button" class="btn btn-green btn-sm btn-gal-action" data-act="prep-colonize" data-p="${slot.coords.p}">🌍 Colonizza</button>
                   ` : ''}
                   ${hasDebris ? `
@@ -1735,7 +1592,7 @@
 
           <div class="glass-panel" style="padding:12px; border-color:var(--btn-creative); display:flex; justify-content:space-between; align-items:center; gap:10px;">
             <div>
-              <strong class="font-display" style="color:var(--btn-gold);">[16] SPAZIO PROFONDO</strong>
+              <strong class="font-display" style="color:var(--btn-gold);">[16] SPAZIO PROFONDO & BUCO NERO</strong>
               <div class="text-muted" style="font-size:0.88rem;">Invia flotte esplorative alla ricerca di relitti e anomalie.</div>
             </div>
             <button type="button" class="btn btn-creative btn-sm btn-gal-action" data-act="prep-explore" data-p="16">🌌 Esplora</button>
@@ -1744,11 +1601,10 @@
       </div>
     `;
 
-    const setCoords = (ng, ns) => {
-      uiState.galaxyG = Math.min(currentUniverse.galaxies, Math.max(1, ng));
-      uiState.galaxyS = Math.min(currentUniverse.systemsPerGalaxy, Math.max(1, ns));
-      uiState.mpGalaxyCacheKey = '';
-      renderCurrentView();
+    const setCoords = async (g, s) => {
+      uiState.galaxyG = Math.min(currentUniverse.galaxies, Math.max(1, g));
+      uiState.galaxyS = Math.min(currentUniverse.systemsPerGalaxy, Math.max(1, s));
+      await renderCurrentView();
     };
 
     document.getElementById('gal-prev-g')?.addEventListener('click', () => setCoords(sysData.galaxy - 1, sysData.system));
@@ -1766,27 +1622,31 @@
       });
     });
 
+    viewport.querySelectorAll('.btn-gal-pm').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        openPrivateChatWith(btn.dataset.uid, btn.dataset.nick);
+      });
+    });
+
     viewport.querySelectorAll('.btn-gal-action').forEach((btn) => {
       btn.addEventListener('click', async () => {
         const act = btn.dataset.act;
         const pos = Number(btn.dataset.p);
 
         if (act === 'manage') {
-          const found = currentUniverse.planets.find((pl) => pl.id === btn.dataset.pid || (pl.coords.g === sysData.galaxy && pl.coords.s === sysData.system && pl.coords.p === pos));
-          if (found) currentUniverse.activePlanetId = found.id;
+          currentUniverse.activePlanetId = btn.dataset.pid;
           refreshPlanetSelector();
           updateTopBarNumbers();
           switchView('overview');
         } else if (act === 'rename-player') {
-          const idx = currentUniverse.planets.findIndex((pl) => pl.id === btn.dataset.pid || (pl.coords.g === sysData.galaxy && pl.coords.s === sysData.system && pl.coords.p === pos));
+          const idx = currentUniverse.planets.findIndex(
+            (pl) => pl.coords.g === sysData.galaxy && pl.coords.s === sysData.system && pl.coords.p === pos
+          );
           if (idx >= 0) openRenamePlanetModal(idx);
         } else if (act === 'quick-spy') {
           try {
-            if (isMultiplayerMode) {
-              const originP = getActivePlanet();
-              await persistCurrentState(originP);
-              await window.UniversumMP.launchOnlineFleet(currentUniverse.id, originP.coords, { g: sysData.galaxy, s: sysData.system, p: pos }, 'spy', { espionageProbe: 2 });
-              await syncPlayerOnlinePlanets();
+            if (isMultiplayerMode && window.UniversumMP?.launchOnlineFleet) {
+              await window.UniversumMP.launchOnlineFleet(currentUniverse, pIdx, { g: sysData.galaxy, s: sysData.system, p: pos }, 'spy', { espionageProbe: 2 });
             } else {
               Galaxy.launchFleet(currentUniverse, pIdx, { g: sysData.galaxy, s: sysData.system, p: pos }, 'spy', { espionageProbe: 2 });
               await window.UniversumDB.save(currentUniverse);
@@ -1822,14 +1682,13 @@
   }
 
   // ---------------------------------------------------------
-  // 7. SPIONAGGIO & CALCOLATORE BATTAGLIA INTERATTIVO
+  // 7. SPIONAGGIO & CALCOLATORE BATTAGLIA
   // ---------------------------------------------------------
   function renderEspionageAndSim(viewport) {
     const Data = window.UniversumData;
     const reports = currentUniverse.spyReports || [];
     const selectedReport = reports.find((r) => r.id === uiState.selectedSpyReportId) || null;
     const planet = getActivePlanet();
-
     const combatShips = Object.values(Data.SHIPS).filter((s) => s.attack > 0 && s.id !== 'solarSatellite');
 
     viewport.innerHTML = `
@@ -1838,14 +1697,12 @@
           <div class="glass-panel" style="padding:14px; border-color:var(--btn-gold);">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
               <h2 style="font-size:1.05rem; color:var(--btn-gold);">SIMULATORE TATTICO — ${escapeHTML(selectedReport.targetName)} [${selectedReport.key}]</h2>
-              <button type="button" id="btn-close-sim" class="btn btn-ghost btn-sm">✕ CHIUDI SIMULATORE</button>
+              <button type="button" id="btn-close-sim" class="btn btn-ghost btn-sm">✕ CHIUDI</button>
             </div>
-
             <div id="sim-results-panel" style="background:rgba(0,0,0,0.45); padding:12px; border-radius:10px; margin-bottom:12px;"></div>
-
             <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:14px;">
               ${combatShips.map((s) => {
-                const maxOwned = Math.max(Number(planet.fleet[s.id] || 0), currentUniverse.creativeMode ? 500 : 0);
+                const maxOwned = Math.max(Number(planet.fleet[s.id] || 0), (currentUniverse.creativeMode && !isMultiplayerMode) ? 500 : 0);
                 const curVal = Number(uiState.simFleet[s.id] || 0);
                 return `
                   <div style="background:rgba(0,0,0,0.35); padding:8px 10px; border-radius:8px;">
@@ -1862,7 +1719,6 @@
                 `;
               }).join('')}
             </div>
-
             <button type="button" id="btn-sim-real-attack" class="btn btn-red" style="width:100%;">⚔️ INVIA FLOTTA VERA CONTRO [${selectedReport.key}]</button>
           </div>
         ` : ''}
@@ -1874,13 +1730,13 @@
               ${reports.map((r) => `
                 <div style="background:rgba(0,0,0,0.35); padding:12px; border-radius:8px; border:1px solid rgba(0,210,255,0.2);">
                   <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px; margin-bottom:6px;">
-                    <strong>${escapeHTML(r.targetName)} [${r.key}] — ${escapeHTML(r.emperor)}</strong>
+                    <strong>${escapeHTML(r.targetName)} [${r.key}] — ${escapeHTML(r.emperor || r.ownerName || '')}</strong>
                     <span class="badge badge-blue">Scansioni: ${r.scanCount || 1}</span>
                   </div>
                   <div style="font-size:0.9rem; margin-bottom:8px;">
-                    Risorse: <span class="text-metal">${formatNum(r.resources.metal)} M</span> |
-                    <span class="text-crystal">${formatNum(r.resources.crystal)} C</span> |
-                    <span class="text-deuterium">${formatNum(r.resources.deuterium)} D</span>
+                    Risorse: <span class="text-metal">${formatNum(r.resources?.metal || 0)} M</span> |
+                    <span class="text-crystal">${formatNum(r.resources?.crystal || 0)} C</span> |
+                    <span class="text-deuterium">${formatNum(r.resources?.deuterium || 0)} D</span>
                   </div>
                   <button type="button" class="btn btn-creative btn-sm btn-open-sim" data-rid="${r.id}">🧮 SIMULA BATTAGLIA</button>
                 </div>
@@ -1939,9 +1795,7 @@
       btn.addEventListener('click', () => {
         uiState.selectedSpyReportId = btn.dataset.rid;
         uiState.simFleet = {};
-        for (const s of combatShips) {
-          uiState.simFleet[s.id] = Number(planet.fleet[s.id] || 0);
-        }
+        for (const s of combatShips) uiState.simFleet[s.id] = Number(planet.fleet[s.id] || 0);
         renderCurrentView();
       });
     });
@@ -1954,38 +1808,24 @@
       if (!box) return;
       try {
         let res;
-        if (isMultiplayerMode && report.fleet) {
-          // Simulazione diretta sui dati spiati del giocatore PvP
-          let wins = 0;
-          let draws = 0;
-          let losses = 0;
-          const iterations = 25;
-          for (let i = 0; i < iterations; i++) {
-            const c = window.UniversumGalaxy.resolveCombat(uiState.simFleet, currentUniverse.researches, {
-              fleet: report.fleet || {},
-              defenses: report.defenses || {},
-              tech: {},
-              resources: report.resources,
-              buildings: report.buildings || {},
-              moon: report.moon
-            });
-            if (c.result === 'attacker_win') wins++;
-            else if (c.result === 'draw') draws++;
-            else losses++;
-          }
-          const winPct = Math.round((wins / iterations) * 100);
-          const drawPct = Math.round((draws / iterations) * 100);
-          const losePct = Math.max(0, 100 - winPct - drawPct);
+        if (isMultiplayerMode) {
+          const combat = window.UniversumGalaxy.resolveCombat(uiState.simFleet, currentUniverse.researches, {
+            fleet: report.fleet || {},
+            defenses: report.defenses || {},
+            tech: report.tech || { weaponsTech: 0, shieldingTech: 0, armourTech: 0 },
+            resources: report.resources || { metal: 0, crystal: 0, deuterium: 0 },
+            buildings: report.buildings || {},
+            moon: report.hasMoon ? { name: 'Luna' } : null
+          });
+          const winPct = combat.result === 'attacker_win' ? 95 : combat.result === 'draw' ? 50 : 5;
           res = {
-            winPct,
-            drawPct,
-            losePct,
             uncertaintyPct: 5,
+            winPct,
+            drawPct: combat.result === 'draw' ? 50 : 0,
+            losePct: 100 - winPct,
             avgLosses: 0,
-            estimatedLoot: Math.floor(((report.resources.metal + report.resources.crystal + report.resources.deuterium) * 0.5) * (winPct / 100)),
-            debrisCreated: 0,
-            moonDestroyChance: 0,
-            planetDestroyChance: 0,
+            estimatedLoot: combat.loot.metal + combat.loot.crystal + combat.loot.deuterium,
+            debrisCreated: combat.debris.metal + combat.debris.crystal,
             advice: winPct >= 80 ? 'ATTACCO CONSIGLIATO' : winPct < 45 ? 'NON ATTACCARE - SEI TROPPO DEBOLE' : 'ATTACCO RISCHIOSO'
           };
         } else {
@@ -2005,7 +1845,7 @@
         box.innerHTML = `
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:6px;">
             <strong class="font-display" style="color:${adviceColor};">${res.advice}</strong>
-            <span class="badge badge-blue">Incertezza Spia: ±${res.uncertaintyPct}%</span>
+            <span class="badge badge-blue">Incertezza: ±${res.uncertaintyPct}%</span>
           </div>
           <div style="display:flex; height:14px; border-radius:7px; overflow:hidden; background:#111; margin-bottom:8px;">
             <div style="width:${res.winPct}%; background:var(--btn-green);"></div>
@@ -2018,10 +1858,8 @@
             <span style="color:var(--btn-red);">Sconfitta: ${res.losePct}%</span>
           </div>
           <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; font-size:0.86rem;">
-            <div>Perdite Medie: <strong>${formatNum(res.avgLosses)}</strong></div>
             <div>Bottino Stimato: <strong class="text-metal">${formatNum(res.estimatedLoot)}</strong></div>
             <div>Detriti Generati: <strong class="text-crystal">${formatNum(res.debrisCreated)}</strong></div>
-            <div>Distruzione Luna/Pianeta: <strong>${res.moonDestroyChance}% / ${res.planetDestroyChance}%</strong></div>
           </div>
         `;
       } catch (e) {
@@ -2039,7 +1877,7 @@
     const Galaxy = window.UniversumGalaxy;
     const pIdx = getActivePlanetIndex();
     const planet = getActivePlanet();
-    const isCreative = currentUniverse.creativeMode;
+    const isCreative = currentUniverse.creativeMode && !isMultiplayerMode;
 
     if (!planet.moon) {
       const cost = Galaxy.getMoonCreationCost(currentUniverse);
@@ -2047,7 +1885,7 @@
         <div class="glass-panel" style="padding:20px; text-align:center;">
           <div style="font-size:3rem; margin-bottom:8px;">🌑</div>
           <h2 style="font-size:1.15rem; color:var(--res-crystal); margin-bottom:8px;">NESSUNA LUNA IN ORBITA SU ${escapeHTML(planet.name)}</h2>
-          <p class="text-muted" style="margin-bottom:14px;">Stabilizza i detriti gravitazionali per creare un satellite artificiale dotato di Falange di Sensori e Portale Iperspaziale (Richiede Ingegneria Lunare Lv.1).</p>
+          <p class="text-muted" style="margin-bottom:14px;">Richiede Ingegneria Lunare Lv.1.</p>
           <div style="margin-bottom:16px; font-weight:700;">
             Costo: <span class="text-metal">${formatNum(cost.metal)} M</span> • <span class="text-crystal">${formatNum(cost.crystal)} C</span> • <span class="text-deuterium">${formatNum(cost.deuterium)} D</span>
           </div>
@@ -2058,7 +1896,7 @@
       document.getElementById('btn-create-moon')?.addEventListener('click', async () => {
         try {
           Galaxy.createMoon(currentUniverse, pIdx);
-          await persistCurrentState(planet);
+          await persistUniverseState();
           refreshPlanetSelector();
           updateTopBarNumbers();
           renderCurrentView();
@@ -2119,7 +1957,7 @@
         </div>
 
         <div class="glass-panel" style="padding:14px;">
-          <h3 style="font-size:1rem; color:var(--btn-gold); margin-bottom:8px;">🌀 PORTALE IPERSPAZIALE (SALTO ISTANTANEO)</h3>
+          <h3 style="font-size:1rem; color:var(--btn-gold); margin-bottom:8px;">🌀 PORTALE IPERSPAZIALE</h3>
           ${otherMoons.length === 0 ? '<p class="text-muted">Crea almeno un’altra Luna su una colonia per attivare i salti tra Portali.</p>' : `
             <div class="form-group">
               <label>Luna di Destinazione</label>
@@ -2139,7 +1977,7 @@
       btn.addEventListener('click', async () => {
         try {
           const res = Engine.startBuilding(currentUniverse, pIdx, btn.dataset.mbid, true);
-          await persistCurrentState(planet);
+          await persistUniverseState();
           updateTopBarNumbers();
           renderCurrentView();
           playSound(res.instant ? 'complete' : 'click');
@@ -2155,10 +1993,7 @@
       try {
         const destIdx = Number(document.getElementById('jumpgate-dest-select').value);
         const res = Galaxy.useJumpGate(currentUniverse, pIdx, destIdx, planet.fleet);
-        await persistCurrentState(planet);
-        if (isMultiplayerMode) {
-          await persistCurrentState(currentUniverse.planets[destIdx]);
-        }
+        await persistUniverseState();
         updateTopBarNumbers();
         renderCurrentView();
         playSound('complete');
@@ -2171,36 +2006,28 @@
   }
 
   // ---------------------------------------------------------
-  // 9. COMMERCIO & DIPLOMAZIA
+  // 9. COMMERCIO
   // ---------------------------------------------------------
   function renderDiplomacy(viewport) {
     const Galaxy = window.UniversumGalaxy;
     const pIdx = getActivePlanetIndex();
     const contracts = currentUniverse.contracts || [];
 
-    viewport.innerHTML = `
-      <div style="display:flex; flex-direction:column; gap:14px;">
-        ${!isMultiplayerMode ? `
+    if (isMultiplayerMode) {
+      viewport.innerHTML = `
+        <div style="display:flex; flex-direction:column; gap:14px;">
           <div class="glass-panel" style="padding:14px;">
-            <h2 style="font-size:1.05rem; color:var(--res-crystal); margin-bottom:10px;">🤝 SCAMBIO COMMERCIALE CON BOT</h2>
+            <h2 style="font-size:1.05rem; color:var(--res-crystal); margin-bottom:8px;">🤝 TRASPORTO & SCAMBIO DIRETTO PvP</h2>
+            <p class="text-muted" style="margin-bottom:12px;">In modalità Multiplayer PvP puoi inviare carichi di risorse direttamente ai pianeti di altri giocatori reali o agli Avamposti Neutrali utilizzando la missione <strong>Trasporta</strong> dalla sezione Flotta.</p>
+            <button type="button" id="btn-mp-goto-transport" class="btn btn-blue" style="width:100%;">📦 PREPARA CONVOGLIO MERCANTILE</button>
+          </div>
+
+          <div class="glass-panel" style="padding:14px;">
+            <h3 style="font-size:1rem; color:var(--btn-gold); margin-bottom:10px;">🕶️ MERCATO NERO GALATTICO (TASSO 3:2:1 -15%)</h3>
             <div class="form-grid-3">
               <div class="form-group">
-                <label>Galassia BOT</label>
-                <input type="number" id="trd-g" class="form-control" value="${uiState.fleetTarget.g}" min="1" max="${currentUniverse.galaxies}">
-              </div>
-              <div class="form-group">
-                <label>Sistema BOT</label>
-                <input type="number" id="trd-s" class="form-control" value="${uiState.fleetTarget.s}" min="1" max="${currentUniverse.systemsPerGalaxy}">
-              </div>
-              <div class="form-group">
-                <label>Posizione BOT</label>
-                <input type="number" id="trd-p" class="form-control" value="${uiState.fleetTarget.p}" min="1" max="15">
-              </div>
-            </div>
-            <div class="form-grid-3">
-              <div class="form-group">
-                <label>Cedi</label>
-                <select id="trd-give-res" class="form-control">
+                <label>Offri</label>
+                <select id="bm-give" class="form-control">
                   <option value="metal">Metallo</option>
                   <option value="crystal">Cristallo</option>
                   <option value="deuterium">Deuterio</option>
@@ -2208,23 +2035,93 @@
               </div>
               <div class="form-group">
                 <label>Quantità</label>
-                <input type="number" id="trd-amount" class="form-control" value="10000" min="100">
+                <input type="number" id="bm-amount" class="form-control" value="15000" min="500">
               </div>
               <div class="form-group">
-                <label>Ricevi</label>
-                <select id="trd-get-res" class="form-control">
-                  <option value="crystal">Cristallo</option>
+                <label>Ottieni</label>
+                <select id="bm-get" class="form-control">
                   <option value="deuterium">Deuterio</option>
+                  <option value="crystal">Cristallo</option>
                   <option value="metal">Metallo</option>
                 </select>
               </div>
             </div>
-            <div style="display:flex; flex-wrap:wrap; gap:10px;">
-              <button type="button" id="btn-exec-bot-trade" class="btn btn-green" style="flex:1;">SCAMBIA CON BOT</button>
-              <button type="button" id="btn-sign-bot-contract" class="btn btn-blue" style="flex:1;">🛡️ PATTO DIFESA (10k M)</button>
+            <button type="button" id="btn-exec-blackmarket" class="btn btn-creative" style="width:100%;">ESEGUI TRANSAZIONE ISTANTANEA</button>
+          </div>
+        </div>
+      `;
+
+      document.getElementById('btn-mp-goto-transport')?.addEventListener('click', () => {
+        uiState.fleetMission = 'transport';
+        switchView('fleet');
+      });
+
+      document.getElementById('btn-exec-blackmarket')?.addEventListener('click', async () => {
+        try {
+          const res = Galaxy.blackMarketTrade(
+            currentUniverse,
+            pIdx,
+            document.getElementById('bm-give').value,
+            Number(document.getElementById('bm-amount').value),
+            document.getElementById('bm-get').value
+          );
+          await persistUniverseState();
+          updateTopBarNumbers();
+          playSound('success');
+          toast(`Mercato Nero: ottenuti ${formatNum(res.received)}!`, 'creative');
+        } catch (err) {
+          playSound('error');
+          toast(err.message, 'error');
+        }
+      });
+      return;
+    }
+
+    viewport.innerHTML = `
+      <div style="display:flex; flex-direction:column; gap:14px;">
+        <div class="glass-panel" style="padding:14px;">
+          <h2 style="font-size:1.05rem; color:var(--res-crystal); margin-bottom:10px;">🤝 SCAMBIO COMMERCIALE CON BOT</h2>
+          <div class="form-grid-3">
+            <div class="form-group">
+              <label>Galassia BOT</label>
+              <input type="number" id="trd-g" class="form-control" value="${uiState.fleetTarget.g}" min="1" max="${currentUniverse.galaxies}">
+            </div>
+            <div class="form-group">
+              <label>Sistema BOT</label>
+              <input type="number" id="trd-s" class="form-control" value="${uiState.fleetTarget.s}" min="1" max="${currentUniverse.systemsPerGalaxy}">
+            </div>
+            <div class="form-group">
+              <label>Posizione BOT</label>
+              <input type="number" id="trd-p" class="form-control" value="${uiState.fleetTarget.p}" min="1" max="15">
             </div>
           </div>
-        ` : ''}
+          <div class="form-grid-3">
+            <div class="form-group">
+              <label>Cedi</label>
+              <select id="trd-give-res" class="form-control">
+                <option value="metal">Metallo</option>
+                <option value="crystal">Cristallo</option>
+                <option value="deuterium">Deuterio</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Quantità</label>
+              <input type="number" id="trd-amount" class="form-control" value="10000" min="100">
+            </div>
+            <div class="form-group">
+              <label>Ricevi</label>
+              <select id="trd-get-res" class="form-control">
+                <option value="crystal">Cristallo</option>
+                <option value="deuterium">Deuterio</option>
+                <option value="metal">Metallo</option>
+              </select>
+            </div>
+          </div>
+          <div style="display:flex; flex-wrap:wrap; gap:10px;">
+            <button type="button" id="btn-exec-bot-trade" class="btn btn-green" style="flex:1;">SCAMBIA CON BOT</button>
+            <button type="button" id="btn-sign-bot-contract" class="btn btn-blue" style="flex:1;">🛡️ PATTO DIFESA (10k M)</button>
+          </div>
+        </div>
 
         <div class="glass-panel" style="padding:14px;">
           <h3 style="font-size:1rem; color:var(--btn-gold); margin-bottom:10px;">🕶️ MERCATO NERO GALATTICO (TASSO 3:2:1 -15%)</h3>
@@ -2253,16 +2150,14 @@
           <button type="button" id="btn-exec-blackmarket" class="btn btn-creative" style="width:100%;">ESEGUI TRANSAZIONE ISTANTANEA</button>
         </div>
 
-        ${!isMultiplayerMode ? `
-          <div class="glass-panel" style="padding:14px;">
-            <h3 style="font-size:1rem; color:var(--res-crystal); margin-bottom:8px;">CONTRATTI ATTIVI (${contracts.length})</h3>
-            ${contracts.length === 0 ? '<p class="text-muted">Nessun patto siglato.</p>' : contracts.map((c) => `
-              <div style="padding:8px; background:rgba(0,0,0,0.35); border-radius:8px; margin-bottom:6px;">
-                <strong>${escapeHTML(c.botName)} [${c.key}]</strong> — Protezione attiva (${formatNum(c.dailyCostMetal)} M/giorno)
-              </div>
-            `).join('')}
-          </div>
-        ` : ''}
+        <div class="glass-panel" style="padding:14px;">
+          <h3 style="font-size:1rem; color:var(--res-crystal); margin-bottom:8px;">CONTRATTI ATTIVI (${contracts.length})</h3>
+          ${contracts.length === 0 ? '<p class="text-muted">Nessun patto siglato.</p>' : contracts.map((c) => `
+            <div style="padding:8px; background:rgba(0,0,0,0.35); border-radius:8px; margin-bottom:6px;">
+              <strong>${escapeHTML(c.botName)} [${c.key}]</strong> — Protezione attiva (${formatNum(c.dailyCostMetal)} M/giorno)
+            </div>
+          `).join('')}
+        </div>
       </div>
     `;
 
@@ -2281,7 +2176,7 @@
           Number(document.getElementById('trd-amount').value),
           document.getElementById('trd-get-res').value
         );
-        await persistCurrentState();
+        await persistUniverseState();
         updateTopBarNumbers();
         playSound('success');
         toast(`Scambio con ${res.botName}: ricevuti ${formatNum(res.received)}!`, 'success');
@@ -2299,7 +2194,7 @@
           p: Number(document.getElementById('trd-p').value)
         };
         const ctr = Galaxy.signBotContract(currentUniverse, pIdx, coords);
-        await persistCurrentState();
+        await persistUniverseState();
         updateTopBarNumbers();
         renderCurrentView();
         playSound('complete');
@@ -2319,7 +2214,7 @@
           Number(document.getElementById('bm-amount').value),
           document.getElementById('bm-get').value
         );
-        await persistCurrentState();
+        await persistUniverseState();
         updateTopBarNumbers();
         playSound('success');
         toast(`Mercato Nero: ottenuti ${formatNum(res.received)}!`, 'creative');
@@ -2404,36 +2299,36 @@
   }
 
   // ---------------------------------------------------------
-  // 11. CLASSIFICA (REALE IN MULTIPLAYER, VS BOT IN OFFLINE)
+  // 11. CLASSIFICA (CON PULSANTE ✉️ PER MESSAGGI PRIVATI)
   // ---------------------------------------------------------
   async function renderHighscoreAndQuests(viewport) {
-    if (isMultiplayerMode && window.UniversumMP) {
-      viewport.innerHTML = `<div class="glass-panel" style="padding:24px; text-align:center;"><p class="text-crystal">Calcolo classifica imperatori PvP...</p></div>`;
+    if (isMultiplayerMode && window.UniversumMP?.getLeaderboard) {
+      viewport.innerHTML = `<div class="glass-panel" style="padding:20px; text-align:center;"><p class="text-muted">Calcolo classifica imperatori reali...</p></div>`;
       try {
-        const leaderboard = await window.UniversumMP.getLeaderboard(currentUniverse.id);
-        const me = window.UniversumMP.getCurrentUser();
-        const myUid = me ? me.uid : null;
+        const players = await window.UniversumMP.getLeaderboard(currentUniverse.id);
+        const myUid = window.fbAuth?.currentUser?.uid;
 
         viewport.innerHTML = `
           <div class="glass-panel" style="padding:14px;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
-              <h2 style="font-size:1.1rem; color:var(--btn-gold);">🏆 CLASSIFICA GLOBALE PvP (${leaderboard.length} IMPERATORI)</h2>
-              <button type="button" id="btn-refresh-mp-rank" class="btn btn-blue btn-sm">↻ AGGIORNA</button>
+              <h2 style="font-size:1.1rem; color:var(--btn-gold);">🏆 CLASSIFICA PvP GIOCATORI REALI</h2>
+              <span class="badge badge-red">ZERO BOT</span>
             </div>
             <div style="display:flex; flex-direction:column; gap:8px;">
-              ${leaderboard.map((row, idx) => {
-                const isMe = row.uid === myUid;
+              ${players.map((p, idx) => {
+                const isMe = p.uid === myUid;
+                const nick = p.nickname || 'Comandante';
                 return `
-                  <div style="display:flex; justify-content:space-between; align-items:center; padding:12px; border-radius:8px; background:${isMe ? 'rgba(0,210,255,0.2)' : 'rgba(0,0,0,0.38)'}; border:1px solid ${isMe ? 'var(--btn-blue)' : 'rgba(255,255,255,0.08)'};">
-                    <div>
-                      <strong class="font-display" style="color:${idx === 0 ? 'var(--btn-gold)' : '#fff'};">#${idx + 1}</strong>
-                      <strong style="margin-left:8px; font-size:1.05rem;">${escapeHTML(row.nickname)}</strong>
-                      ${isMe ? '<span class="badge badge-green" style="margin-left:6px;">TU</span>' : '<span class="badge badge-red" style="margin-left:6px;">PvP</span>'}
-                      <div class="text-muted" style="font-size:0.84rem; margin-top:2px;">
-                        Pianeti: ${row.planetCount} • Edifici: ${formatNum(row.buildingPts)} • Ricerche: ${formatNum(row.researchPts)} • Flotta: ${formatNum(row.fleetPts)}
-                      </div>
+                  <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:10px 12px; border-radius:8px; background:${isMe ? 'rgba(0,210,255,0.2)' : 'rgba(0,0,0,0.35)'}; border:1px solid ${isMe ? 'var(--btn-blue)' : 'transparent'};">
+                    <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                      <strong class="font-display">#${idx + 1}</strong>
+                      <strong>${escapeHTML(nick)}</strong>
+                      ${isMe ? '<span class="badge badge-green">TU</span>' : `
+                        <button type="button" class="btn btn-blue btn-sm btn-hs-pm" data-uid="${escapeHTML(p.uid)}" data-nick="${escapeHTML(nick)}" style="min-width:44px; min-height:44px; padding:4px 10px;" title="Messaggio Privato">✉️</button>
+                      `}
+                      <span class="text-muted" style="font-size:0.82rem;">(${p.planetCount || 1} pianeti)</span>
                     </div>
-                    <strong class="font-display text-crystal" style="font-size:1rem;">${formatNum(row.totalPts)} pt</strong>
+                    <strong class="font-display text-crystal">${formatNum(p.points || 0)} pt</strong>
                   </div>
                 `;
               }).join('')}
@@ -2441,14 +2336,17 @@
           </div>
         `;
 
-        document.getElementById('btn-refresh-mp-rank')?.addEventListener('click', () => renderCurrentView());
+        viewport.querySelectorAll('.btn-hs-pm').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            openPrivateChatWith(btn.dataset.uid, btn.dataset.nick);
+          });
+        });
       } catch (err) {
-        viewport.innerHTML = `<div class="glass-panel" style="padding:18px; color:#ff5252;">${escapeHTML(err.message)}</div>`;
+        viewport.innerHTML = `<div class="glass-panel" style="padding:16px;"><p style="color:#ff5252;">Errore classifica: ${escapeHTML(err.message)}</p></div>`;
       }
       return;
     }
 
-    // Modalità Offline
     const Data = window.UniversumData;
     let buildingPts = 0;
     let fleetPts = 0;
@@ -2463,8 +2361,8 @@
     for (const lv of Object.values(currentUniverse.researches || {})) {
       researchPts += (Number(lv) || 0) * 350;
     }
-
     const playerTotal = buildingPts + researchPts + fleetPts;
+
     const rivals = [
       { name: 'Egemonia Valkor', pts: Math.floor(playerTotal * 1.45 + 12000), tag: 'BOT Elite' },
       { name: 'Dominio Krell', pts: Math.floor(playerTotal * 0.95 + 6500), tag: 'BOT Forte' },
@@ -2473,95 +2371,106 @@
       { name: 'Avanguardia Sirius', pts: Math.floor(playerTotal * 0.3 + 800), tag: 'BOT Debole' }
     ].sort((a, b) => b.pts - a.pts);
 
-    const achievements = [
-      { title: 'Signore delle Stelle', desc: 'Possiedi almeno 3 pianeti nel tuo Impero.', unlocked: currentUniverse.planets.length >= 3 },
-      { title: 'Architetto Lunare', desc: 'Stabilizza almeno 1 Luna in orbita.', unlocked: currentUniverse.planets.some((p) => Boolean(p.moon)) },
-      { title: 'Terrore della Galassia', desc: 'Costruisci o conquista almeno 1 Morte Nera.', unlocked: currentUniverse.planets.some((p) => (p.fleet?.deathStar || 0) >= 1) },
-      { title: 'Maestro dello Spionaggio', desc: 'Accumula 5 rapporti di spionaggio.', unlocked: (currentUniverse.spyReports || []).length >= 5 }
-    ];
-
     viewport.innerHTML = `
-      <div style="display:flex; flex-direction:column; gap:14px;">
-        <div class="glass-panel" style="padding:14px;">
-          <h2 style="font-size:1.1rem; color:var(--btn-gold); margin-bottom:10px;">🏆 CLASSIFICA GALATTICA</h2>
-          <div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:12px; font-size:0.9rem;">
-            <span>Edifici: <strong>${formatNum(buildingPts)}</strong></span>
-            <span>Ricerche: <strong>${formatNum(researchPts)}</strong></span>
-            <span>Flotta: <strong>${formatNum(fleetPts)}</strong></span>
-          </div>
-          <div style="display:flex; flex-direction:column; gap:8px;">
-            ${rivals.map((r, i) => `
-              <div style="display:flex; justify-content:space-between; align-items:center; padding:10px; border-radius:8px; background:${r.isPlayer ? 'rgba(0,210,255,0.18)' : 'rgba(0,0,0,0.35)'}; border:1px solid ${r.isPlayer ? 'var(--btn-blue)' : 'transparent'};">
-                <div>
-                  <strong class="font-display">#${i + 1}</strong>
-                  <strong style="margin-left:8px;">${escapeHTML(r.name)}</strong>
-                  <span class="badge ${r.isPlayer ? 'badge-green' : 'badge-blue'}" style="margin-left:6px;">${r.tag}</span>
-                </div>
-                <strong class="font-display text-crystal">${formatNum(r.pts)} pt</strong>
-              </div>
-            `).join('')}
-          </div>
+      <div class="glass-panel" style="padding:14px;">
+        <h2 style="font-size:1.1rem; color:var(--btn-gold); margin-bottom:10px;">🏆 CLASSIFICA GALATTICA</h2>
+        <div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:12px; font-size:0.9rem;">
+          <span>Edifici: <strong>${formatNum(buildingPts)}</strong></span>
+          <span>Ricerche: <strong>${formatNum(researchPts)}</strong></span>
+          <span>Flotta: <strong>${formatNum(fleetPts)}</strong></span>
         </div>
-
-        <div class="glass-panel" style="padding:14px;">
-          <h3 style="font-size:1rem; color:var(--res-crystal); margin-bottom:10px;">🎖️ OBIETTIVI & TITOLI SBLOCCABILI</h3>
-          <div style="display:flex; flex-direction:column; gap:8px;">
-            ${achievements.map((a) => `
-              <div style="display:flex; justify-content:space-between; align-items:center; padding:10px; border-radius:8px; background:rgba(0,0,0,0.35);">
-                <div>
-                  <strong>${escapeHTML(a.title)}</strong>
-                  <div class="text-muted" style="font-size:0.88rem;">${escapeHTML(a.desc)}</div>
-                </div>
-                <span class="badge ${a.unlocked ? 'badge-green' : 'badge-blue'}">${a.unlocked ? 'SBLOCCATO' : 'BLOCCATO'}</span>
+        <div style="display:flex; flex-direction:column; gap:8px;">
+          ${rivals.map((r, i) => `
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:10px; border-radius:8px; background:${r.isPlayer ? 'rgba(0,210,255,0.18)' : 'rgba(0,0,0,0.35)'}; border:1px solid ${r.isPlayer ? 'var(--btn-blue)' : 'transparent'};">
+              <div>
+                <strong class="font-display">#${i + 1}</strong>
+                <strong style="margin-left:8px;">${escapeHTML(r.name)}</strong>
+                <span class="badge ${r.isPlayer ? 'badge-green' : 'badge-blue'}" style="margin-left:6px;">${r.tag}</span>
               </div>
-            `).join('')}
-          </div>
+              <strong class="font-display text-crystal">${formatNum(r.pts)} pt</strong>
+            </div>
+          `).join('')}
         </div>
       </div>
     `;
   }
 
   // ---------------------------------------------------------
-  // 12. CHAT GALATTICA (SOLO MULTIPLAYER)
+  // 12. COMUNICAZIONI (TAB 1: CHAT GALATTICA 50 | TAB 2: PRIVATI 15)
   // ---------------------------------------------------------
-  function renderGalacticChat(viewport) {
-    if (!isMultiplayerMode || !window.UniversumMP) {
-      viewport.innerHTML = `<div class="glass-panel" style="padding:20px;"><p class="text-muted">La Chat Galattica è disponibile negli Universi Online Multiplayer.</p></div>`;
+  async function renderCommunications(viewport) {
+    if (!isMultiplayerMode) {
+      viewport.innerHTML = `<div class="glass-panel" style="padding:18px;"><p class="text-muted">Le Comunicazioni sono disponibili esclusivamente negli Universi Online Multiplayer.</p></div>`;
       return;
     }
 
-    const me = window.UniversumMP.getCurrentUser();
-    const myUid = me ? me.uid : null;
+    const isGalactic = uiState.commTab === 'galactic';
 
     viewport.innerHTML = `
-      <div class="glass-panel chat-container" style="padding:14px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-          <h2 style="font-size:1.05rem; color:var(--res-crystal);">💬 FREQUENZA GALATTICA — ${escapeHTML(currentUniverse.name)}</h2>
-          <span class="badge badge-green"><span class="status-dot-live"></span> LIVE</span>
+      <div style="display:flex; flex-direction:column; gap:12px;">
+        <!-- DUE SCHEDE GRANDI IN ALTO (ALTEZZA MINIMO 48px) -->
+        <div class="comm-tabs-bar">
+          <button type="button" id="comm-tab-galactic" class="comm-tab-btn ${isGalactic ? 'active' : ''}">
+            🌌 Chat Galattica (50)
+          </button>
+          <button type="button" id="comm-tab-private" class="comm-tab-btn ${!isGalactic ? 'active' : ''}">
+            ✉️ Messaggi Privati (15)
+            <span id="tab-private-unread-badge" class="badge badge-red ${unreadPrivateCount > 0 ? '' : 'hidden'}">${unreadPrivateCount}</span>
+          </button>
         </div>
 
-        <div id="chat-messages-feed" class="chat-messages-box">
-          ${renderChatMessagesHTML(uiState.chatMessages, myUid)}
-        </div>
+        <div id="comm-tab-body"></div>
+      </div>
+    `;
 
+    document.getElementById('comm-tab-galactic')?.addEventListener('click', async () => {
+      closePrivateMessageStream();
+      uiState.commTab = 'galactic';
+      playSound('click');
+      await renderCommunications(viewport);
+    });
+
+    document.getElementById('comm-tab-private')?.addEventListener('click', async () => {
+      uiState.commTab = 'private';
+      playSound('click');
+      await renderCommunications(viewport);
+    });
+
+    const bodyEl = document.getElementById('comm-tab-body');
+    if (isGalactic) {
+      renderGalacticChatTab(bodyEl);
+    } else {
+      await renderPrivateMessagesTab(bodyEl);
+    }
+  }
+
+  function renderGalacticChatTab(container) {
+    if (!container) return;
+    container.innerHTML = `
+      <div class="glass-panel chat-panel-wrapper">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <span class="text-muted" style="font-size:0.88rem;">Tocca il nickname di un imperatore per inviargli un messaggio privato</span>
+          <span class="badge badge-green">ULTIMI 50</span>
+        </div>
+        <div id="chat-messages-box" class="chat-messages-box"></div>
         <form id="form-send-chat" class="chat-input-bar">
-          <input type="text" id="input-chat-msg" class="form-control" placeholder="Trasmetti messaggio agli imperatori..." maxlength="240" autocomplete="off" required>
-          <button type="submit" class="btn btn-green">INVIA</button>
+          <input type="text" id="input-chat-msg" class="form-control" placeholder="Trasmetti nel canale galattico..." maxlength="240" autocomplete="off" required>
+          <button type="submit" class="btn btn-blue">INVIA</button>
         </form>
       </div>
     `;
 
-    const feedEl = document.getElementById('chat-messages-feed');
-    if (feedEl) feedEl.scrollTop = feedEl.scrollHeight;
+    renderGalacticChatMessagesDOM();
 
     document.getElementById('form-send-chat')?.addEventListener('submit', async (e) => {
       e.preventDefault();
       const inp = document.getElementById('input-chat-msg');
-      const txt = inp?.value || '';
-      if (!txt.trim()) return;
+      const text = (inp?.value || '').trim();
+      if (!text || !window.UniversumMP?.sendChatMessage) return;
+
       inp.value = '';
       try {
-        await window.UniversumMP.sendChatMessage(currentUniverse.id, txt);
+        await window.UniversumMP.sendChatMessage(currentUniverse.id, text);
         playSound('click');
       } catch (err) {
         playSound('error');
@@ -2570,49 +2479,263 @@
     });
   }
 
-  function renderChatMessagesHTML(messages, myUid) {
-    if (!messages || messages.length === 0) {
-      return '<p class="text-muted" style="text-align:center; margin:auto;">Nessuna trasmissione recente su questo canale.</p>';
+  function renderGalacticChatMessagesDOM() {
+    const box = document.getElementById('chat-messages-box');
+    if (!box) return;
+    const myUid = window.fbAuth?.currentUser?.uid;
+
+    if (chatMessagesCache.length === 0) {
+      box.innerHTML = `<p class="text-muted" style="text-align:center; margin:auto;">Nessuna trasmissione nel canale galattico.</p>`;
+      return;
     }
-    return messages.map((m) => {
-      const isMine = myUid && m.senderUid === myUid;
-      const d = new Date(m.time || Date.now());
-      const timeStr = d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+
+    box.innerHTML = chatMessagesCache.map((m) => {
+      const isMine = m.uid === myUid;
+      const dateObj = m.createdAt?.toDate ? m.createdAt.toDate() : new Date(m.timestamp || Date.now());
+      const timeStr = dateObj.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+      const nick = m.nickname || 'Comandante';
+
       return `
         <div class="chat-msg-item ${isMine ? 'mine' : ''}">
           <div class="chat-msg-header">
-            <span class="chat-sender-name">${escapeHTML(m.senderName || 'Comandante')}</span>
-            <span class="chat-timestamp">${timeStr}</span>
+            ${isMine
+              ? `<span class="chat-msg-sender">${escapeHTML(nick)} (Tu)</span>`
+              : `<button type="button" class="chat-sender-link" data-uid="${escapeHTML(m.uid)}" data-nick="${escapeHTML(nick)}" title="Apri chat privata">${escapeHTML(nick)} ✉️</button>`
+            }
+            <span class="chat-msg-time">${timeStr}</span>
           </div>
           <div class="chat-msg-text">${escapeHTML(m.text)}</div>
         </div>
       `;
     }).join('');
+
+    box.querySelectorAll('.chat-sender-link').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        openPrivateChatWith(btn.dataset.uid, btn.dataset.nick);
+      });
+    });
+
+    box.scrollTop = box.scrollHeight;
+  }
+
+  async function renderPrivateMessagesTab(container) {
+    if (!container || !window.UniversumMP) return;
+
+    // Chiudi sempre il listener precedente della singola conversazione prima di ricostruire
+    closePrivateMessageStream();
+
+    let playersList = [];
+    try {
+      playersList = await window.UniversumMP.getUniversePlayers(currentUniverse.id);
+    } catch (e) {
+      playersList = [];
+    }
+
+    const activeTarget = uiState.activePrivateTarget;
+
+    container.innerHTML = `
+      <div style="display:flex; flex-direction:column; gap:12px;">
+        <!-- SELETTORE NUOVA CHAT CON... -->
+        <div class="glass-panel" style="padding:12px;">
+          <label for="select-new-private-chat" style="display:block; font-size:0.82rem; color:var(--res-crystal); font-weight:700; margin-bottom:6px; text-transform:uppercase;">
+            Nuova chat privata con...
+          </label>
+          <div style="display:flex; gap:8px;">
+            <select id="select-new-private-chat" class="form-control">
+              <option value="">-- Seleziona un Imperatore --</option>
+              ${playersList.map((p) => `
+                <option value="${escapeHTML(p.uid)}" data-nick="${escapeHTML(p.nickname)}" ${activeTarget?.uid === p.uid ? 'selected' : ''}>
+                  ${escapeHTML(p.nickname)}
+                </option>
+              `).join('')}
+            </select>
+          </div>
+        </div>
+
+        <!-- LISTA CONVERSAZIONI ATTIVE -->
+        <div class="glass-panel" style="padding:12px;">
+          <h3 style="font-size:0.9rem; color:var(--res-crystal); margin-bottom:8px;">CONVERSAZIONI ATTIVE</h3>
+          <div id="private-convs-list" class="private-conv-list"></div>
+        </div>
+
+        <!-- FINESTRA CONVERSAZIONE SELEZIONATA (ULTIMI 15 MESSAGGI) -->
+        ${activeTarget ? `
+          <div class="glass-panel chat-panel-wrapper" style="height:440px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(0,210,255,0.2); padding-bottom:8px;">
+              <div>
+                <span class="text-muted" style="font-size:0.82rem;">Canale criptato con</span>
+                <strong class="font-display text-crystal" style="margin-left:6px;">${escapeHTML(activeTarget.nickname)}</strong>
+              </div>
+              <button type="button" id="btn-close-private-thread" class="btn btn-ghost btn-sm">✕ CHIUDI</button>
+            </div>
+
+            <div id="private-messages-box" class="private-messages-box">
+              <p class="text-muted" style="text-align:center; margin:auto;">Caricamento ultimi 15 messaggi...</p>
+            </div>
+
+            <form id="form-send-private" class="chat-input-bar">
+              <input type="text" id="input-private-msg" class="form-control" placeholder="Scrivi messaggio privato (max 300 car.)..." maxlength="300" autocomplete="off" required>
+              <button type="submit" class="btn btn-green">INVIA</button>
+            </form>
+          </div>
+        ` : `
+          <div class="glass-panel" style="padding:20px; text-align:center;">
+            <p class="text-muted">Seleziona un giocatore dal menu a tendina o da una conversazione attiva per leggere e inviare gli ultimi 15 messaggi privati.</p>
+          </div>
+        `}
+      </div>
+    `;
+
+    renderPrivateConversationsDOM();
+
+    document.getElementById('select-new-private-chat')?.addEventListener('change', async (e) => {
+      const sel = e.target;
+      const uid = sel.value;
+      if (!uid) return;
+      const opt = sel.options[sel.selectedIndex];
+      const nick = opt?.dataset?.nick || opt?.textContent || 'Comandante';
+      uiState.activePrivateTarget = { uid, nickname: nick };
+      playSound('click');
+      await renderPrivateMessagesTab(container);
+    });
+
+    if (activeTarget) {
+      unsubPrivateMsgsListener = window.UniversumMP.listenPrivateMessages(
+        currentUniverse.id,
+        activeTarget.uid,
+        (msgs) => {
+          privateMessagesCache = msgs;
+          renderPrivateMessagesDOM();
+        }
+      );
+
+      document.getElementById('btn-close-private-thread')?.addEventListener('click', async () => {
+        closePrivateMessageStream();
+        uiState.activePrivateTarget = null;
+        await renderPrivateMessagesTab(container);
+      });
+
+      document.getElementById('form-send-private')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const inp = document.getElementById('input-private-msg');
+        const text = (inp?.value || '').trim();
+        if (!text) return;
+
+        inp.value = '';
+        try {
+          await window.UniversumMP.sendPrivateMessage(
+            currentUniverse.id,
+            activeTarget.uid,
+            activeTarget.nickname,
+            text
+          );
+          playSound('click');
+        } catch (err) {
+          playSound('error');
+          toast(err.message, 'error');
+        }
+      });
+    }
+  }
+
+  function renderPrivateConversationsDOM() {
+    const listEl = document.getElementById('private-convs-list');
+    if (!listEl) return;
+
+    if (privateConversationsCache.length === 0) {
+      listEl.innerHTML = `<p class="text-muted" style="font-size:0.9rem;">Nessuna conversazione privata avviata.</p>`;
+      return;
+    }
+
+    listEl.innerHTML = privateConversationsCache.map((c) => {
+      const isSelected = uiState.activePrivateTarget?.uid === c.otherUid;
+      const timeStr = c.lastTimestamp
+        ? new Date(c.lastTimestamp).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
+        : '';
+      return `
+        <button type="button" class="private-conv-item ${isSelected ? 'active' : ''} ${c.isUnread ? 'unread' : ''}" data-uid="${escapeHTML(c.otherUid)}" data-nick="${escapeHTML(c.otherName)}">
+          <div style="display:flex; align-items:center; gap:8px; min-width:0;">
+            <span class="unread-dot ${c.isUnread ? 'active' : ''}"></span>
+            <div style="text-align:left; min-width:0;">
+              <div class="font-display" style="font-size:0.88rem; color:#fff;">${escapeHTML(c.otherName)}</div>
+              <div class="text-muted" style="font-size:0.84rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:210px;">
+                ${escapeHTML(c.lastMessage)}
+              </div>
+            </div>
+          </div>
+          <span class="text-muted" style="font-size:0.78rem; flex-shrink:0;">${timeStr}</span>
+        </button>
+      `;
+    }).join('');
+
+    listEl.querySelectorAll('.private-conv-item').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        uiState.activePrivateTarget = {
+          uid: btn.dataset.uid,
+          nickname: btn.dataset.nick
+        };
+        playSound('click');
+        const bodyEl = document.getElementById('comm-tab-body');
+        if (bodyEl) await renderPrivateMessagesTab(bodyEl);
+      });
+    });
+  }
+
+  function renderPrivateMessagesDOM() {
+    const box = document.getElementById('private-messages-box');
+    if (!box) return;
+    const myUid = window.fbAuth?.currentUser?.uid;
+
+    if (privateMessagesCache.length === 0) {
+      box.innerHTML = `<p class="text-muted" style="text-align:center; margin:auto;">Nessun messaggio in questa conversazione. Invia il primo!</p>`;
+      return;
+    }
+
+    box.innerHTML = privateMessagesCache.map((m) => {
+      const isMine = m.senderUid === myUid;
+      const timeStr = m.timestamp
+        ? new Date(m.timestamp).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
+        : '';
+
+      return `
+        <div class="pm-bubble-row ${isMine ? 'sent' : 'received'}">
+          <div class="pm-bubble ${isMine ? 'sent' : 'received'}">
+            <div class="pm-bubble-meta">
+              <span>${escapeHTML(isMine ? 'Tu' : (m.senderName || 'Imperatore'))}</span>
+              <span>${timeStr}</span>
+            </div>
+            <div class="pm-bubble-text">${escapeHTML(m.text)}</div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    box.scrollTop = box.scrollHeight;
   }
 
   // ---------------------------------------------------------
-  // 13. GESTIONE PARTITA & RITORNO LOBBY
+  // GESTIONE PARTITE & IMPOSTAZIONI AUDIO
   // ---------------------------------------------------------
   function renderSavesMenu(viewport) {
     viewport.innerHTML = `
       <div class="glass-panel" style="padding:18px; display:flex; flex-direction:column; gap:12px;">
         <h2 style="font-size:1.1rem; color:var(--res-crystal);">💾 GESTIONE PARTITA & SISTEMA</h2>
-        <p class="text-muted">Universo attivo: <strong style="color:#fff;">${escapeHTML(currentUniverse.name)}</strong> ${isMultiplayerMode ? '<span class="badge badge-red">ONLINE PvP</span>' : ''}</p>
+        <p class="text-muted">Universo attivo: <strong style="color:#fff;">${escapeHTML(currentUniverse.name)}</strong> (${isMultiplayerMode ? 'ONLINE PvP' : 'OFFLINE'})</p>
 
-        <button type="button" id="btn-save-now" class="btn btn-green">💾 ${isMultiplayerMode ? 'SINCRONIZZA SU CLOUD ORA' : 'SALVA UNIVERSO ORA'}</button>
+        <button type="button" id="btn-save-now" class="btn btn-green">💾 SINCRONIZZA / SALVA ORA</button>
         ${!isMultiplayerMode ? `
           <button type="button" id="btn-export-download" class="btn btn-blue">⬇ SCARICA BACKUP JSON</button>
           <button type="button" id="btn-export-copy" class="btn btn-ghost">📋 COPIA JSON NEGLI APPUNTI</button>
         ` : ''}
         <button type="button" id="btn-toggle-sound" class="btn btn-ghost">${soundMuted ? '🔇 SUONI: DISATTIVATI (ATTIVA)' : '🔊 SUONI: ATTIVI (DISATTIVA)'}</button>
-        <button type="button" id="btn-return-lobby-view" class="btn btn-red">🏠 TORNA A "LE MIE PARTITE"</button>
+        <button type="button" id="btn-return-lobby-view" class="btn btn-red">🏠 TORNA ALLA LOBBY PRINCIPALE</button>
       </div>
     `;
 
     document.getElementById('btn-save-now')?.addEventListener('click', async () => {
-      await persistCurrentState();
+      await persistUniverseState();
       playSound('success');
-      toast(isMultiplayerMode ? 'Stato sincronizzato su Firestore!' : 'Partita salvata su IndexedDB!', 'success');
+      toast(isMultiplayerMode ? 'Dati sincronizzati con Firestore!' : 'Partita salvata su IndexedDB!', 'success');
     });
 
     document.getElementById('btn-export-download')?.addEventListener('click', async () => {
@@ -2640,154 +2763,45 @@
       renderCurrentView();
     });
 
-    document.getElementById('btn-return-lobby-view')?.addEventListener('click', exitToLobby);
+    document.getElementById('btn-return-lobby-view')?.addEventListener('click', async () => {
+      await exitActiveGameToLobby();
+    });
   }
 
-  async function exitToLobby() {
-    try {
-      await persistCurrentState();
-    } catch (e) {}
-
+  async function exitActiveGameToLobby() {
+    if (currentUniverse) {
+      await persistUniverseState();
+    }
     stopGameLoop();
-    if (isMultiplayerMode && window.UniversumMP) {
-      window.UniversumMP.stopListeners();
-    }
-    if (uiState.mpMessagesUnsub) {
-      uiState.mpMessagesUnsub();
-      uiState.mpMessagesUnsub = null;
-    }
-    if (uiState.mpFleetsUnsub) {
-      uiState.mpFleetsUnsub();
-      uiState.mpFleetsUnsub = null;
-    }
-
+    cleanupMultiplayerListeners();
     isMultiplayerMode = false;
     currentUniverse = null;
+
     document.getElementById('screen-game')?.classList.add('hidden');
     document.getElementById('screen-lobby')?.classList.remove('hidden');
     await window.UniversumDB.renderLobbyList();
   }
 
-  // =========================================================
-  // SINCRONIZZAZIONE REAL-TIME MULTIPLAYER
-  // =========================================================
-  async function syncPlayerOnlinePlanets() {
-    if (!isMultiplayerMode || !window.fbDB || !window.UniversumMP) return;
-    const user = window.UniversumMP.getCurrentUser();
-    if (!user) return;
-
-    const snap = await window.fbDB.collection('online_universes').doc(currentUniverse.id)
-      .collection('planets').where('ownerUid', '==', user.uid).get();
-
-    const updated = snap.docs.map((d, idx) => {
-      const raw = d.data();
-      const live = window.UniversumMP.calculateLiveResources(raw, currentUniverse.speed, currentUniverse.researches);
-      return {
-        id: `mp_planet_${live.coords.g}_${live.coords.s}_${live.coords.p}`,
-        name: live.planetName || (idx === 0 ? 'Pianeta Madre' : 'Colonia PvP'),
-        coords: live.coords,
-        minTemp: live.minTemp ?? live.temperature?.min ?? -10,
-        maxTemp: live.maxTemp ?? live.temperature?.max ?? 30,
-        fieldsMax: live.fieldsMax || 220,
-        resources: live.resources,
-        buildings: live.buildings || {},
-        defenses: live.defenses || {},
-        fleet: live.fleet || {},
-        buildQueue: [],
-        shipyardQueue: [],
-        defenseQueue: [],
-        moon: live.moon || null,
-        debris: live.debris || { metal: 0, crystal: 0 },
-        ownerUid: live.ownerUid,
-        ownerName: live.ownerName,
-        lastUpdated: live.lastUpdated || Date.now()
-      };
-    });
-
-    if (updated.length > 0) {
-      currentUniverse.planets = updated;
-      refreshPlanetSelector();
+  function cleanupMultiplayerListeners() {
+    if (typeof unsubChatListener === 'function') {
+      unsubChatListener();
+      unsubChatListener = null;
     }
-  }
+    if (typeof unsubFleetsListener === 'function') {
+      unsubFleetsListener();
+      unsubFleetsListener = null;
+    }
+    if (typeof unsubPrivateConvsListener === 'function') {
+      unsubPrivateConvsListener();
+      unsubPrivateConvsListener = null;
+    }
+    closePrivateMessageStream();
 
-  function attachMultiplayerRealtimeFeeds(uniId) {
-    if (!window.UniversumMP || !window.fbDB) return;
-    const user = window.UniversumMP.getCurrentUser();
-    if (!user) return;
-
-    uiState.chatMessages = [];
-    uiState.unreadChatCount = 0;
-    uiState.lastSeenChatTs = Date.now();
-    updateChatUnreadBadges();
-
-    // 1. Chat Galattica in tempo reale
-    window.UniversumMP.listenChat(uniId, (msgs) => {
-      uiState.chatMessages = msgs;
-      if (currentView === 'chat') {
-        uiState.unreadChatCount = 0;
-        uiState.lastSeenChatTs = Date.now();
-        const feedEl = document.getElementById('chat-messages-feed');
-        if (feedEl) {
-          feedEl.innerHTML = renderChatMessagesHTML(msgs, user.uid);
-          feedEl.scrollTop = feedEl.scrollHeight;
-        }
-      } else {
-        const unread = msgs.filter((m) => m.senderUid !== user.uid && (m.time || 0) > uiState.lastSeenChatTs).length;
-        uiState.unreadChatCount = unread;
-      }
-      updateChatUnreadBadges();
-    });
-
-    // 2. Radar Attacchi in arrivo
-    window.UniversumMP.listenIncomingRadar(uniId, (incomingList) => {
-      uiState.mpIncomingAttacks = incomingList;
-      if (currentView === 'overview') renderCurrentView();
-    });
-
-    // 3. Flotte proprie in transito
-    if (uiState.mpFleetsUnsub) uiState.mpFleetsUnsub();
-    uiState.mpFleetsUnsub = window.fbDB.collection('online_universes').doc(uniId).collection('fleets')
-      .where('attackerUid', '==', user.uid)
-      .onSnapshot((snap) => {
-        uiState.mpMyFleets = snap.docs.map((d) => d.data());
-        if (currentView === 'overview') renderCurrentView();
-      });
-
-    // 4. Messaggi / Rapporti Spia e Battaglie PvP
-    if (uiState.mpMessagesUnsub) uiState.mpMessagesUnsub();
-    uiState.mpMessagesUnsub = window.fbDB.collection('online_universes').doc(uniId).collection('messages')
-      .where('recipientUid', '==', user.uid)
-      .orderBy('time', 'desc')
-      .limit(30)
-      .onSnapshot((snap) => {
-        const msgs = [];
-        const spies = [];
-        snap.forEach((doc) => {
-          const m = Object.assign({ id: doc.id }, doc.data());
-          msgs.push(m);
-          if (m.type === 'spy' && m.reportData) {
-            spies.push({
-              id: doc.id,
-              time: m.time,
-              key: `${m.reportData.coords.g}:${m.reportData.coords.s}:${m.reportData.coords.p}`,
-              coords: m.reportData.coords,
-              targetName: m.reportData.ownerName || 'Pianeta PvP',
-              emperor: m.reportData.ownerName || 'Comandante',
-              scanCount: 1,
-              resources: m.reportData.resources,
-              fleet: m.reportData.fleet,
-              defenses: m.reportData.defenses,
-              buildings: m.reportData.buildings,
-              moon: m.reportData.moon
-            });
-          }
-        });
-        currentUniverse.messages = msgs;
-        currentUniverse.spyReports = spies;
-        if (currentView === 'overview' || currentView === 'espionage') {
-          renderCurrentView();
-        }
-      });
+    chatMessagesCache = [];
+    privateConversationsCache = [];
+    unreadPrivateCount = 0;
+    uiState.activePrivateTarget = null;
+    updateCommBadges();
   }
 
   // =========================================================
@@ -2806,52 +2820,50 @@
 
   function startGameLoop() {
     stopGameLoop();
-    let mpSyncCounter = 0;
+    let mpTickCounter = 0;
 
     gameLoopTimer = setInterval(async () => {
       if (!currentUniverse) return;
 
-      const prevQueueCount = getActivePlanet().buildQueue.length +
-        getActivePlanet().shipyardQueue.length +
-        getActivePlanet().defenseQueue.length +
+      const activeP = getActivePlanet();
+      const prevQueueCount = (activeP?.buildQueue?.length || 0) +
+        (activeP?.shipyardQueue?.length || 0) +
+        (activeP?.defenseQueue?.length || 0) +
         (currentUniverse.researchQueue ? 1 : 0);
 
       window.UniversumEngine.tick(currentUniverse, 1);
 
       if (isMultiplayerMode) {
-        mpSyncCounter++;
-        if (mpSyncCounter >= 12) {
-          mpSyncCounter = 0;
-          await window.UniversumMP.resolveArrivedOnlineFleets(currentUniverse.id).catch(() => {});
-          await syncPlayerOnlinePlanets().catch(() => {});
+        mpTickCounter++;
+        if (mpTickCounter % 3 === 0 && window.UniversumMP?.resolveArrivedOnlineFleets) {
+          window.UniversumMP.resolveArrivedOnlineFleets(currentUniverse.id).catch(() => {});
+        }
+        if (mpTickCounter % 15 === 0) {
+          persistUniverseState().catch(() => {});
         }
       } else {
         window.UniversumGalaxy.processFleetsAndBots(currentUniverse);
       }
 
-      const newQueueCount = getActivePlanet().buildQueue.length +
-        getActivePlanet().shipyardQueue.length +
-        getActivePlanet().defenseQueue.length +
+      const newQueueCount = (activeP?.buildQueue?.length || 0) +
+        (activeP?.shipyardQueue?.length || 0) +
+        (activeP?.defenseQueue?.length || 0) +
         (currentUniverse.researchQueue ? 1 : 0);
 
       if (newQueueCount < prevQueueCount) {
         playSound('complete');
-        if (isMultiplayerMode) {
-          persistCurrentState().catch(() => {});
-        }
+        if (isMultiplayerMode) persistUniverseState().catch(() => {});
         if (currentView === 'overview' || currentView === 'buildings' || currentView === 'research' || currentView === 'shipyard') {
           renderCurrentView();
         }
       }
 
-      if (!isMultiplayerMode) {
-        const atkCount = (currentUniverse.incomingAttacks || []).length;
-        if (atkCount > uiState.lastAlertCount) {
-          playSound('alarm');
-          toast('🚨 ATTENZIONE: Attacco BOT rilevato dai sensori!', 'error');
-        }
-        uiState.lastAlertCount = atkCount;
+      const atkCount = (currentUniverse.incomingAttacks || []).length;
+      if (atkCount > uiState.lastAlertCount) {
+        playSound('alarm');
+        toast('🚨 ALLARME RADAR: Flotta ostile in arrivo sul tuo pianeta!', 'error');
       }
+      uiState.lastAlertCount = atkCount;
 
       updateTopBarNumbers();
       document.querySelectorAll('.live-timer').forEach((el) => {
@@ -2863,17 +2875,41 @@
   }
 
   // =========================================================
-  // AVVIO PARTITA (OFFLINE O MULTIPLAYER)
+  // AVVIO PARTITA OFFLINE & ONLINE MULTIPLAYER
   // =========================================================
-  function startGame(universe, multiplayerFlag = false) {
-    currentUniverse = universe;
-    isMultiplayerMode = Boolean(multiplayerFlag);
+  function configureGameShellUI() {
+    document.getElementById('screen-lobby')?.classList.add('hidden');
+    document.getElementById('screen-game')?.classList.remove('hidden');
 
-    let offlineReport = { offlineSeconds: 0 };
-    if (!isMultiplayerMode) {
-      offlineReport = window.UniversumEngine.processOfflineProgress(currentUniverse);
-      window.UniversumGalaxy.processFleetsAndBots(currentUniverse);
+    const mpBadge = document.getElementById('mp-mode-badge');
+    if (mpBadge) mpBadge.classList.toggle('hidden', !isMultiplayerMode);
+
+    const creativeBar = document.getElementById('creative-quick-bar');
+    if (creativeBar) {
+      creativeBar.classList.toggle('hidden', isMultiplayerMode || !currentUniverse.creativeMode);
     }
+
+    // Aggiorna etichetta "💬 Comunicazioni" e visibilità voci solo Multiplayer
+    const sbComm = document.querySelector('.sidebar-btn[data-view="chat"]');
+    if (sbComm) {
+      sbComm.classList.toggle('hidden', !isMultiplayerMode);
+      sbComm.innerHTML = `💬 Comunicazioni <span id="sidebar-chat-badge" class="badge badge-red ${unreadPrivateCount > 0 ? '' : 'hidden'}" style="margin-left:auto;">${unreadPrivateCount}</span>`;
+    }
+
+    const drComm = document.querySelector('.drawer-item[data-view="chat"]');
+    if (drComm) {
+      drComm.classList.toggle('hidden', !isMultiplayerMode);
+      drComm.innerHTML = `<span class="icon">💬</span>Comunicazioni <span id="drawer-chat-badge" class="badge badge-red ${unreadPrivateCount > 0 ? '' : 'hidden'}">${unreadPrivateCount}</span>`;
+    }
+  }
+
+  function startGame(universe) {
+    cleanupMultiplayerListeners();
+    isMultiplayerMode = false;
+    currentUniverse = universe;
+
+    const offlineReport = window.UniversumEngine.processOfflineProgress(currentUniverse);
+    window.UniversumGalaxy.processFleetsAndBots(currentUniverse);
 
     const home = currentUniverse.planets[0];
     if (home) {
@@ -2883,30 +2919,13 @@
     }
     uiState.lastAlertCount = (currentUniverse.incomingAttacks || []).length;
 
-    document.getElementById('screen-lobby')?.classList.add('hidden');
-    document.getElementById('screen-game')?.classList.remove('hidden');
-
-    // Mostra/nascondi elementi specifici Multiplayer vs Creativa
-    document.getElementById('mp-live-badge')?.classList.toggle('hidden', !isMultiplayerMode);
-    document.querySelectorAll('.mp-only-nav').forEach((el) => {
-      el.classList.toggle('hidden', !isMultiplayerMode);
-    });
-
-    const creativeBar = document.getElementById('creative-quick-bar');
-    if (creativeBar) {
-      creativeBar.classList.toggle('hidden', isMultiplayerMode || !currentUniverse.creativeMode);
-    }
-
-    if (isMultiplayerMode) {
-      attachMultiplayerRealtimeFeeds(currentUniverse.id);
-    }
-
+    configureGameShellUI();
     refreshPlanetSelector();
     updateTopBarNumbers();
     switchView('overview');
     startGameLoop();
 
-    if (!isMultiplayerMode && !currentUniverse.creativeMode && offlineReport.offlineSeconds >= 30) {
+    if (!currentUniverse.creativeMode && offlineReport.offlineSeconds >= 30) {
       const unitNames = Object.entries(offlineReport.completedUnits)
         .map(([k, v]) => `${v}× ${k}`)
         .join(', ');
@@ -2925,6 +2944,71 @@
     }
   }
 
+  function startOnlineGame(universe) {
+    cleanupMultiplayerListeners();
+    isMultiplayerMode = true;
+    currentUniverse = universe;
+    currentUniverse.creativeMode = false;
+
+    const home = currentUniverse.planets[0];
+    if (home) {
+      uiState.galaxyG = home.coords.g;
+      uiState.galaxyS = home.coords.s;
+      uiState.fleetTarget = { g: home.coords.g, s: home.coords.s, p: home.coords.p };
+    }
+
+    // 1. Sottoscrizione Chat Galattica (ultimi 50 messaggi)
+    if (window.UniversumMP?.listenChat) {
+      unsubChatListener = window.UniversumMP.listenChat(currentUniverse.id, (msgs) => {
+        chatMessagesCache = msgs;
+        if (currentView === 'chat' && uiState.commTab === 'galactic') {
+          renderGalacticChatMessagesDOM();
+        }
+      });
+    }
+
+    // 2. Sottoscrizione Conversazioni Private e conteggio messaggi privati non letti
+    if (window.UniversumMP?.listenPrivateConversations) {
+      unsubPrivateConvsListener = window.UniversumMP.listenPrivateConversations(
+        currentUniverse.id,
+        (convs, unreadCount) => {
+          const prevUnread = unreadPrivateCount;
+          privateConversationsCache = convs;
+          unreadPrivateCount = unreadCount;
+          updateCommBadges();
+
+          if (unreadCount > prevUnread && currentView !== 'chat') {
+            playSound('click');
+            toast('✉️ Nuovo messaggio privato ricevuto!', 'info');
+          }
+
+          if (currentView === 'chat' && uiState.commTab === 'private') {
+            renderPrivateConversationsDOM();
+          }
+        }
+      );
+    }
+
+    // 3. Sottoscrizione Radar Flotte PvP in tempo reale
+    if (window.UniversumMP?.listenIncomingFleets) {
+      unsubFleetsListener = window.UniversumMP.listenIncomingFleets(currentUniverse, (incomingList) => {
+        currentUniverse.incomingAttacks = incomingList;
+        if (incomingList.length > uiState.lastAlertCount) {
+          playSound('alarm');
+          toast('🚨 RADAR PvP: Un giocatore ha lanciato una flotta verso di te!', 'error');
+        }
+        uiState.lastAlertCount = incomingList.length;
+        if (currentView === 'overview') renderCurrentView();
+      });
+    }
+
+    configureGameShellUI();
+    refreshPlanetSelector();
+    updateTopBarNumbers();
+    switchView('overview');
+    startGameLoop();
+  }
+
   function bindGlobalUIEvents() {
     document.getElementById('active-planet-select')?.addEventListener('change', (e) => {
       if (!currentUniverse) return;
@@ -2937,7 +3021,7 @@
     document.getElementById('btn-turbo-toggle')?.addEventListener('click', async () => {
       if (!currentUniverse || isMultiplayerMode) return;
       const res = window.UniversumEngine.activateTurbo(currentUniverse);
-      await persistCurrentState();
+      await persistUniverseState();
       updateTopBarNumbers();
       playSound('success');
       toast(`TURBO 2x attivo (${formatDuration(res.remainingSec)})!`, 'creative');
@@ -2952,7 +3036,7 @@
             getActivePlanetIndex(),
             btn.dataset.creative
           );
-          await persistCurrentState();
+          await persistUniverseState();
           updateTopBarNumbers();
           renderCurrentView();
           playSound('complete');
@@ -2992,22 +3076,25 @@
       switchView('saves');
     });
 
-    document.getElementById('btn-back-lobby')?.addEventListener('click', exitToLobby);
+    document.getElementById('btn-back-lobby')?.addEventListener('click', async () => {
+      await exitActiveGameToLobby();
+    });
 
     if (window.UniversumEngine && typeof window.UniversumEngine.bindAutoSave === 'function') {
-      window.UniversumEngine.bindAutoSave(() => (!isMultiplayerMode ? currentUniverse : null));
+      window.UniversumEngine.bindAutoSave(() => (isMultiplayerMode ? null : currentUniverse));
     }
   }
 
   function init() {
     generateDynamicPWAIcon();
-    setupLobbyTabsAndMultiplayer();
+    setupLobbyTabs();
     bindGlobalUIEvents();
   }
 
   window.UniversumUI = {
     init,
     startGame,
+    startOnlineGame,
     switchView,
     toast,
     playSound
