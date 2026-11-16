@@ -1,46 +1,66 @@
-const CACHE_NAME = "universum-v2";
-const ASSETS = [
-  "./",
-  "./index.html",
-  "./style.css",
-  "./firebase-config.js",
-  "./multiplayer.js",
-  "./db.js",
-  "./data.js",
-  "./engine.js",
-  "./galaxy.js",
-  "./ui.js"
+const CACHE_NAME = 'universum-v1';
+const STATIC_ASSETS = [
+  './',
+  './index.html',
+  './style.css',
+  './db.js',
+  './data.js',
+  './engine.js',
+  './galaxy.js',
+  './ui.js',
+  './manifest.json'
 ];
 
-self.addEventListener("install", (event) => {
+self.addEventListener('install', (event) => {
   self.skipWaiting();
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS).catch(() => {}))
+    caches.open(CACHE_NAME).then((cache) => {
+      return cache.addAll(STATIC_ASSETS).catch((err) => {
+        console.warn('[SW] Pre-cache parziale (alcuni moduli verranno cachati al volo):', err);
+      });
+    })
   );
 });
 
-self.addEventListener("activate", (event) => {
+self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
-    )
+    caches.keys().then((keys) => {
+      return Promise.all(
+        keys.map((key) => {
+          if (key !== CACHE_NAME) {
+            return caches.delete(key);
+          }
+        })
+      );
+    }).then(() => self.clients.claim())
   );
-  self.clients.claim();
 });
 
-self.addEventListener("fetch", (event) => {
-  if (event.request.method !== "GET") return;
-  if (event.request.url.includes("firestore.googleapis.com") || event.request.url.includes("identitytoolkit")) {
-    return;
-  }
+// Strategia Network-First con fallback su Cache
+self.addEventListener('fetch', (event) => {
+  if (event.request.method !== 'GET') return;
+  if (!event.request.url.startsWith('http')) return;
 
   event.respondWith(
     fetch(event.request)
-      .then((response) => {
-        const clone = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-        return response;
+      .then((networkResponse) => {
+        if (networkResponse && networkResponse.status === 200) {
+          const responseToCache = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseToCache);
+          });
+        }
+        return networkResponse;
       })
-      .catch(() => caches.match(event.request))
+      .catch(() => {
+        return caches.match(event.request).then((cachedResponse) => {
+          if (cachedResponse) {
+            return cachedResponse;
+          }
+          if (event.request.mode === 'navigate') {
+            return caches.match('./index.html');
+          }
+        });
+      })
   );
 });
