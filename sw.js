@@ -1,4 +1,4 @@
-const CACHE_NAME = 'universum-v4';
+const CACHE_NAME = 'universum-v5';
 const STATIC_ASSETS = [
   './',
   './index.html',
