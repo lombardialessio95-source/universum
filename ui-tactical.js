@@ -4,7 +4,7 @@
   const UI = window.UniversumUI;
 
   // =========================================================
-  // FLOTTA & MISSIONI
+  // FLOTTA & MISSIONI (SPINTA 10-100%, ESPLORAZIONE, EMBARGO, OCCUPAZIONE)
   // =========================================================
   UI.renderFleet = function (viewport) {
     const { escapeHTML, formatNum, formatDuration, svgIcon, artTag } = UI;
@@ -12,18 +12,38 @@
     const uni = st.currentUniverse;
     const Data = window.UniversumData;
     const Galaxy = window.UniversumGalaxy;
+    const MCore = window.UniversumMissionsCore;
+    const Siege = window.UniversumSiege;
     const pIdx = UI.getActivePlanetIndex();
     const planet = UI.getActivePlanet();
 
+    if (!st.fleetFuelPercent) st.fleetFuelPercent = 100;
+    if (!st.fleetExploreHours) st.fleetExploreHours = 1;
+    if (!st.fleetRansom) st.fleetRansom = { metal: 10000, crystal: 5000, deuterium: 2500 };
+
+    const maxSlots = MCore ? MCore.getMaxFleetSlots(uni) : 5;
+    const usedSlots = MCore ? MCore.getUsedFleetSlots(uni) : (uni.fleetsInFlight || []).length;
+    const maxExpHours = MCore ? MCore.getMaxExploreHours(uni) : 1;
+    if (st.fleetExploreHours > maxExpHours) st.fleetExploreHours = maxExpHours;
+
     const availableShips = Object.values(Data.SHIPS).filter((s) => s.id !== 'solarSatellite');
     const dist = Galaxy.calculateDistance(planet.coords, st.fleetTarget);
-    const flightStats = Galaxy.getFleetSpeedAndFuel(uni, st.fleetSelection, dist);
+    const flightStats = MCore
+      ? MCore.getAdjustedFlightStats(uni, st.fleetSelection, dist, st.fleetFuelPercent, st.fleetExploreHours, st.fleetMission)
+      : Galaxy.getFleetSpeedAndFuel(uni, st.fleetSelection, dist);
+
+    const embargoHours = (st.fleetMission === 'embargo' && MCore)
+      ? MCore.calculateEmbargoHours(st.fleetSelection, st.fleetCargo.deuterium)
+      : 0;
 
     viewport.innerHTML = `
       <div style="display:flex; flex-direction:column; gap:14px;">
         <div class="glass-panel" style="padding:14px;">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
-            <h2 style="font-size:1.05rem; color:var(--res-crystal);">1. SELEZIONE SQUADRONE</h2>
+            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+              <h2 style="font-size:1.05rem; color:var(--res-crystal);">1. SELEZIONE SQUADRONE</h2>
+              <span class="badge ${usedSlots >= maxSlots ? 'badge-red' : 'badge-green'}">Slot: ${usedSlots}/${maxSlots}</span>
+            </div>
             <div style="display:flex; gap:8px;">
               <button type="button" id="btn-fleet-all" class="btn btn-blue btn-sm">TUTTI</button>
               <button type="button" id="btn-fleet-zero" class="btn btn-ghost btn-sm">AZZERA</button>
@@ -54,7 +74,7 @@
         </div>
 
         <div class="glass-panel" style="padding:14px;">
-          <h2 style="font-size:1.05rem; color:var(--res-crystal); margin-bottom:10px;">2. COORDINATE & MISSIONE</h2>
+          <h2 style="font-size:1.05rem; color:var(--res-crystal); margin-bottom:10px;">2. COORDINATE, SPINTA &amp; MISSIONE</h2>
           <div class="form-grid-3">
             <div class="form-group">
               <label>Galassia</label>
@@ -70,11 +90,22 @@
             </div>
           </div>
 
+          <div style="background:rgba(0,0,0,0.35); padding:10px 12px; border-radius:8px; margin-bottom:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+              <label style="margin:0; font-size:0.88rem; color:var(--res-crystal);">POTENZA MOTORI &amp; CARBURANTE</label>
+              <strong id="flt-fuel-pct-label" class="font-display text-deuterium">${st.fleetFuelPercent}%</strong>
+            </div>
+            <input type="range" id="flt-fuel-slider" min="10" max="100" step="10" value="${st.fleetFuelPercent}" style="width:100%; height:28px;">
+            <div class="text-muted" style="font-size:0.8rem;">Riduci la spinta per risparmiare fino all'80% di Deuterio (aumenta il tempo di volo).</div>
+          </div>
+
           <div class="form-group">
             <label>Tipo Missione</label>
             <select id="flt-mission-select" class="form-control">
               <option value="attack" ${st.fleetMission === 'attack' ? 'selected' : ''}>Attacca Bersaglio</option>
               <option value="spy" ${st.fleetMission === 'spy' ? 'selected' : ''}>Spionaggio</option>
+              <option value="embargo" ${st.fleetMission === 'embargo' ? 'selected' : ''}>Embargo Planetario (Blocca Rotte)</option>
+              <option value="occupy" ${st.fleetMission === 'occupy' ? 'selected' : ''}>Occupazione Planetaria (Prelievo 5%/g + Riscatto)</option>
               <option value="colonize" ${st.fleetMission === 'colonize' ? 'selected' : ''}>Colonizza Pianeta Vuoto</option>
               <option value="transport" ${st.fleetMission === 'transport' ? 'selected' : ''}>Trasporta Risorse</option>
               <option value="deploy" ${st.fleetMission === 'deploy' ? 'selected' : ''}>Schiera Flotta su Tuo Pianeta</option>
@@ -84,11 +115,44 @@
             </select>
           </div>
 
-          <div id="blackhole-option-box" class="${st.fleetMission === 'explore' ? '' : 'hidden'}" style="margin-bottom:12px;">
+          <div id="explore-options-box" class="${st.fleetMission === 'explore' ? '' : 'hidden'}" style="background:rgba(0,210,255,0.08); border:1px solid rgba(0,210,255,0.25); padding:10px; border-radius:8px; margin-bottom:12px;">
+            <div class="form-group" style="margin-bottom:8px;">
+              <label>Durata Stazionamento Esplorativo (Max ${maxExpHours}h con Esplorazione Profonda Lv.${Number(uni.researches?.expeditionTech || 0)})</label>
+              <select id="flt-explore-hours" class="form-control">
+                ${Array.from({ length: maxExpHours }, (_, idx) => idx + 1).map((h) => `
+                  <option value="${h}" ${st.fleetExploreHours === h ? 'selected' : ''}>${h} ${h === 1 ? 'Ora' : 'Ore'} di Esplorazione</option>
+                `).join('')}
+              </select>
+            </div>
             <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
               <input type="checkbox" id="flt-blackhole-chk" ${st.fleetBlackHole ? 'checked' : ''} style="width:20px; height:20px;">
               <span>Spedizione Segreta nel Buco Nero (+50.000 Deuterio)</span>
             </label>
+          </div>
+
+          <div class="${st.fleetMission === 'embargo' ? '' : 'hidden'}" style="background:rgba(255,23,68,0.1); border:1px solid rgba(255,23,68,0.35); padding:10px; border-radius:8px; margin-bottom:12px; font-size:0.88rem;">
+            <strong>Blocca completamente partenze e arrivi del pianeta bersaglio.</strong><br>
+            Carica <strong>Deuterio</strong> nelle stive per alimentare l'orbita • Autonomia stimata: <strong class="text-deuterium">${embargoHours} ore</strong>.
+          </div>
+
+          <div class="${st.fleetMission === 'occupy' ? '' : 'hidden'}" style="background:rgba(255,215,0,0.08); border:1px solid rgba(255,215,0,0.35); padding:10px; border-radius:8px; margin-bottom:12px;">
+            <div style="font-size:0.88rem; margin-bottom:8px;">
+              <strong>Prelievo automatico del 5% al giorno</strong> finché c'è deuterio disponibile. Imposta il <strong>Riscatto</strong> che il nemico può pagare per liberare il pianeta:
+            </div>
+            <div class="form-grid-3">
+              <div class="form-group" style="margin-bottom:0;">
+                <label>Riscatto Metallo</label>
+                <input type="number" id="flt-ransom-m" class="form-control" min="0" value="${st.fleetRansom.metal}">
+              </div>
+              <div class="form-group" style="margin-bottom:0;">
+                <label>Riscatto Cristallo</label>
+                <input type="number" id="flt-ransom-c" class="form-control" min="0" value="${st.fleetRansom.crystal}">
+              </div>
+              <div class="form-group" style="margin-bottom:0;">
+                <label>Riscatto Deuterio</label>
+                <input type="number" id="flt-ransom-d" class="form-control" min="0" value="${st.fleetRansom.deuterium}">
+              </div>
+            </div>
           </div>
 
           <div class="form-grid-3">
@@ -101,25 +165,46 @@
               <input type="number" id="flt-cargo-c" class="form-control" min="0" value="${st.fleetCargo.crystal}">
             </div>
             <div class="form-group">
-              <label>Carico Deuterio</label>
+              <label>${st.fleetMission === 'embargo' ? 'Riserva Deuterio Embargo' : 'Carico Deuterio'}</label>
               <input type="number" id="flt-cargo-d" class="form-control" min="0" value="${st.fleetCargo.deuterium}">
             </div>
           </div>
 
           <div style="background:rgba(0,0,0,0.4); padding:12px; border-radius:8px; margin-bottom:14px; display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px;">
             <span>Distanza: <strong>${formatNum(dist)}</strong></span>
-            <span>Durata Viaggio: <strong class="text-crystal">${formatDuration(flightStats.durationSec)}</strong></span>
-            <span>Consumo Carburante: <strong class="text-deuterium">${formatNum(flightStats.fuelCost)} D</strong></span>
+            <span>Viaggio: <strong class="text-crystal">${formatDuration(flightStats.durationSec)}</strong></span>
+            <span>Carburante: <strong class="text-deuterium">${formatNum(flightStats.fuelCost)} D</strong></span>
           </div>
 
-          <button type="button" id="btn-launch-fleet" class="btn btn-green" style="width:100%;">${svgIcon('rocket')} INVIA FLOTTA IN MISSIONE</button>
+          <button type="button" id="btn-launch-fleet" class="btn btn-green" style="width:100%;" ${usedSlots >= maxSlots ? 'disabled' : ''}>
+            ${svgIcon('rocket')} ${usedSlots >= maxSlots ? `SLOT FLOTTA PIENI (${usedSlots}/${maxSlots})` : 'INVIA FLOTTA IN MISSIONE'}
+          </button>
         </div>
       </div>
     `;
 
+    const syncTarget = () => {
+      st.fleetTarget.g = Math.max(1, Number(document.getElementById('flt-target-g').value) || 1);
+      st.fleetTarget.s = Math.max(1, Number(document.getElementById('flt-target-s').value) || 1);
+      st.fleetTarget.p = Math.max(1, Number(document.getElementById('flt-target-p').value) || 1);
+      st.fleetMission = document.getElementById('flt-mission-select').value;
+      st.fleetFuelPercent = Math.min(100, Math.max(10, Number(document.getElementById('flt-fuel-slider')?.value) || 100));
+      st.fleetExploreHours = Math.max(1, Number(document.getElementById('flt-explore-hours')?.value) || 1);
+      st.fleetBlackHole = Boolean(document.getElementById('flt-blackhole-chk')?.checked);
+      st.fleetCargo.metal = Math.max(0, Number(document.getElementById('flt-cargo-m').value) || 0);
+      st.fleetCargo.crystal = Math.max(0, Number(document.getElementById('flt-cargo-c').value) || 0);
+      st.fleetCargo.deuterium = Math.max(0, Number(document.getElementById('flt-cargo-d').value) || 0);
+      st.fleetRansom = {
+        metal: Math.max(0, Number(document.getElementById('flt-ransom-m')?.value) || 0),
+        crystal: Math.max(0, Number(document.getElementById('flt-ransom-c')?.value) || 0),
+        deuterium: Math.max(0, Number(document.getElementById('flt-ransom-d')?.value) || 0)
+      };
+    };
+
     viewport.querySelectorAll('.fleet-ship-input').forEach((inp) => {
-      inp.addEventListener('input', () => {
+      inp.addEventListener('change', () => {
         st.fleetSelection[inp.dataset.sid] = Math.max(0, Math.floor(Number(inp.value) || 0));
+        UI.renderCurrentView();
       });
     });
 
@@ -142,16 +227,14 @@
       UI.renderCurrentView();
     });
 
-    const syncTarget = () => {
-      st.fleetTarget.g = Math.max(1, Number(document.getElementById('flt-target-g').value) || 1);
-      st.fleetTarget.s = Math.max(1, Number(document.getElementById('flt-target-s').value) || 1);
-      st.fleetTarget.p = Math.max(1, Number(document.getElementById('flt-target-p').value) || 1);
-      st.fleetMission = document.getElementById('flt-mission-select').value;
-      st.fleetBlackHole = Boolean(document.getElementById('flt-blackhole-chk')?.checked);
-      st.fleetCargo.metal = Math.max(0, Number(document.getElementById('flt-cargo-m').value) || 0);
-      st.fleetCargo.crystal = Math.max(0, Number(document.getElementById('flt-cargo-c').value) || 0);
-      st.fleetCargo.deuterium = Math.max(0, Number(document.getElementById('flt-cargo-d').value) || 0);
-    };
+    document.getElementById('flt-fuel-slider')?.addEventListener('input', (e) => {
+      const lbl = document.getElementById('flt-fuel-pct-label');
+      if (lbl) lbl.textContent = `${e.target.value}%`;
+    });
+    document.getElementById('flt-fuel-slider')?.addEventListener('change', () => {
+      syncTarget();
+      UI.renderCurrentView();
+    });
 
     document.getElementById('flt-mission-select')?.addEventListener('change', (e) => {
       syncTarget();
@@ -159,7 +242,7 @@
       UI.renderCurrentView();
     });
 
-    ['flt-target-g', 'flt-target-s', 'flt-target-p'].forEach((id) => {
+    ['flt-target-g', 'flt-target-s', 'flt-target-p', 'flt-explore-hours', 'flt-cargo-d'].forEach((id) => {
       document.getElementById(id)?.addEventListener('change', () => {
         syncTarget();
         UI.renderCurrentView();
@@ -170,6 +253,13 @@
       syncTarget();
       try {
         let missionObj;
+        const opts = {
+          blackHole: st.fleetBlackHole,
+          fuelPercent: st.fleetFuelPercent,
+          exploreHours: st.fleetExploreHours,
+          ransom: st.fleetRansom
+        };
+
         if (st.isMultiplayerMode && window.UniversumMP?.launchOnlineFleet) {
           missionObj = await window.UniversumMP.launchOnlineFleet(
             uni,
@@ -178,8 +268,19 @@
             st.fleetMission,
             st.fleetSelection,
             st.fleetCargo,
-            { blackHole: st.fleetBlackHole }
+            opts
           );
+        } else if (Siege && typeof Siege.launchEnhancedFleet === 'function') {
+          missionObj = Siege.launchEnhancedFleet(
+            uni,
+            pIdx,
+            st.fleetTarget,
+            st.fleetMission,
+            st.fleetSelection,
+            st.fleetCargo,
+            opts
+          );
+          await window.UniversumDB.save(uni);
         } else {
           missionObj = Galaxy.launchFleet(
             uni,
@@ -188,16 +289,17 @@
             st.fleetMission,
             st.fleetSelection,
             st.fleetCargo,
-            { blackHole: st.fleetBlackHole }
+            opts
           );
           await window.UniversumDB.save(uni);
         }
+
         st.fleetSelection = {};
         st.fleetCargo = { metal: 0, crystal: 0, deuterium: 0 };
         UI.updateTopBarNumbers();
         UI.playSound('success');
         UI.toast(`Flotta inviata verso [${missionObj.targetCoords.g}:${missionObj.targetCoords.s}:${missionObj.targetCoords.p}]!`, 'success');
-        UI.switchView('overview');
+        UI.switchView('movements');
       } catch (err) {
         UI.playSound('error');
         UI.toast(err.message, 'error');
@@ -206,7 +308,7 @@
   };
 
   // =========================================================
-  // GALASSIA (CON PULSANTE CHAT PRIVATA PvP)
+  // GALASSIA (CON CHAT PRIVATA PvP, EMBARGO & OCCUPAZIONE)
   // =========================================================
   UI.renderGalaxy = async function (viewport) {
     const { escapeHTML, svgIcon } = UI;
@@ -335,6 +437,8 @@
                   ${(isRealEnemy || isNeutralOutpost || isOfflineBot) ? `
                     <button type="button" class="btn btn-blue btn-sm btn-gal-action" data-act="quick-spy" data-p="${slot.coords.p}">${svgIcon('eye')} Spia</button>
                     <button type="button" class="btn btn-red btn-sm btn-gal-action" data-act="prep-attack" data-p="${slot.coords.p}">${svgIcon('sword')} Attacca</button>
+                    <button type="button" class="btn btn-creative btn-sm btn-gal-action" data-act="prep-embargo" data-p="${slot.coords.p}">Embargo</button>
+                    <button type="button" class="btn btn-creative btn-sm btn-gal-action" data-act="prep-occupy" data-p="${slot.coords.p}">Occupa</button>
                     <button type="button" class="btn btn-ghost btn-sm btn-gal-action" data-act="trade" data-p="${slot.coords.p}">${svgIcon('handshake')} Commercia</button>
                   ` : ''}
                   ${isEmpty ? `
@@ -405,6 +509,9 @@
           try {
             if (st.isMultiplayerMode && window.UniversumMP?.launchOnlineFleet) {
               await window.UniversumMP.launchOnlineFleet(uni, pIdx, { g: sysData.galaxy, s: sysData.system, p: pos }, 'spy', { espionageProbe: 2 });
+            } else if (window.UniversumSiege?.launchEnhancedFleet) {
+              window.UniversumSiege.launchEnhancedFleet(uni, pIdx, { g: sysData.galaxy, s: sysData.system, p: pos }, 'spy', { espionageProbe: 2 });
+              await window.UniversumDB.save(uni);
             } else {
               Galaxy.launchFleet(uni, pIdx, { g: sysData.galaxy, s: sysData.system, p: pos }, 'spy', { espionageProbe: 2 });
               await window.UniversumDB.save(uni);
@@ -418,6 +525,14 @@
         } else if (act === 'prep-attack') {
           st.fleetTarget = { g: sysData.galaxy, s: sysData.system, p: pos };
           st.fleetMission = 'attack';
+          UI.switchView('fleet');
+        } else if (act === 'prep-embargo') {
+          st.fleetTarget = { g: sysData.galaxy, s: sysData.system, p: pos };
+          st.fleetMission = 'embargo';
+          UI.switchView('fleet');
+        } else if (act === 'prep-occupy') {
+          st.fleetTarget = { g: sysData.galaxy, s: sysData.system, p: pos };
+          st.fleetMission = 'occupy';
           UI.switchView('fleet');
         } else if (act === 'prep-colonize') {
           st.fleetTarget = { g: sysData.galaxy, s: sysData.system, p: pos };
