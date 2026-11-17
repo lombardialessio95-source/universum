@@ -201,6 +201,10 @@
           <svg class="nav-svg" viewBox="0 0 24 24"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
           Flotta &amp; Missioni
         </button>
+        <button type="button" class="sidebar-btn" data-view="movements">
+          <svg class="nav-svg" viewBox="0 0 24 24"><path d="M3 12h18M15 6l6 6-6 6"/></svg>
+          Movimento Flotta
+        </button>
         <button type="button" class="sidebar-btn" data-view="galaxy">
           <svg class="nav-svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9" stroke-dasharray="3 3"/></svg>
           Galassia
@@ -277,6 +281,7 @@
           <button type="button" class="drawer-item" data-view="shipyard"><span class="icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><path d="M12 2L4 20l8-4 8 4L12 2z"/></svg></span>Cantiere</button>
           <button type="button" class="drawer-item" data-view="defense"><span class="icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><path d="M12 2l8 4v6c0 5.5-3.8 10.7-8 12-4.2-1.3-8-6.5-8-12V6l8-4z"/></svg></span>Difesa</button>
           <button type="button" class="drawer-item" data-view="fleet"><span class="icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg></span>Flotta</button>
+          <button type="button" class="drawer-item" data-view="movements"><span class="icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><path d="M3 12h18M15 6l6 6-6 6"/></svg></span>Movimenti</button>
           <button type="button" class="drawer-item" data-view="galaxy"><span class="icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9" stroke-dasharray="3 3"/></svg></span>Galassia</button>
           <button type="button" class="drawer-item" data-view="espionage"><span class="icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg></span>Spionaggio</button>
           <button type="button" class="drawer-item" data-view="diplomacy"><span class="icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>Commercio</button>
@@ -310,20 +315,24 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 
-  <!-- MODULI APPLICAZIONE -->
-  <script src="./db.js"></script>
-  <script src="./data.js"></script>
-  <script src="./graphics-core.js"></script>
-  <script src="./graphics-ships.js"></script>
-  <script src="./graphics-structures.js"></script>
-  <script src="./engine-core.js"></script>
-  <script src="./engine-actions.js"></script>
-  <script src="./galaxy.js"></script>
-  <script src="./firebase-config.js"></script>
-  <script src="./multiplayer.js"></script>
-  <script src="./ui-core.js"></script>
-  <script src="./ui-economy.js"></script>
-  <script src="./ui-tactical.js"></script>
-  <script src="./ui-social.js"></script>
+  <!-- MODULI CORE APPLICAZIONE -->
+  <script src="./db.js"></script>                  <!-- Database locale IndexedDB (salvataggi offline, export/import JSON) -->
+  <script src="./data.js"></script>                <!-- Enciclopedia: costi, requisiti e formule di edifici, ricerche, navi e difese -->
+  <script src="./graphics-core.js"></script>       <!-- Nucleo grafico: cache immagini, SVG interfaccia e helper Canvas -->
+  <script src="./graphics-ships.js"></script>      <!-- Ritratti procedurali Canvas 128x128: 14 navi e difese -->
+  <script src="./graphics-structures.js"></script> <!-- Ritratti procedurali Canvas 128x128: edifici, luna e tecnologie -->
+  <script src="./engine-core.js"></script>         <!-- Motore matematico: tempi, produzione risorse/energia, code, tick e offline -->
+  <script src="./engine-actions.js"></script>      <!-- Azioni giocatore: avvio costruzioni/ricerche/navi, turbo, cheat e autosave -->
+  <script src="./galaxy.js"></script>              <!-- Generatore galassia da seed, combattimenti 6 round, spionaggio e IA BOT -->
+  <script src="./firebase-config.js"></script>     <!-- Chiavi e inizializzazione Firebase Auth + Firestore -->
+  <script src="./multiplayer.js"></script>         <!-- Logica PvP online: auth, universi condivisi, flotte live, chat e classifica -->
+  <script src="./ui-core.js"></script>             <!-- Regia UI: stato globale, loop 1s, audio WebAudio, Panoramica e salvataggi -->
+  <script src="./ui-economy.js"></script>          <!-- Schermate UI: Edifici, Ricerche, Cantiere Navale, Difese e Luna -->
+  <script src="./ui-tactical.js"></script>         <!-- Schermate UI: Flotta, Galassia, Spionaggio, Simulatore e Imperiale/Quest -->
+  <script src="./ui-social.js"></script>           <!-- Schermate UI: Commercio BOT, Classifica e Comunicazioni (Chat/MP) -->
+
+  <!-- MODULI PLUGIN ESPANSIONE -->
+  <script src="./missions-core.js"></script>       <!-- Plugin Missioni: ricerca Esplorazione Profonda, carburante/spinta 10-100%, slot flotta e richiamo -->
+  <script src="./ui-fleet-movements.js"></script>  <!-- Schermata UI: Movimento Flotta, conteggio slot (5+lv), countdown, richiamo e stato assedi -->
 </body>
 </html>
