@@ -47,7 +47,6 @@
   }
 
   function calculatePlanetTemperature(position, rngVal) {
-    // Slot 1-3 caldi (+40..+100°C), 4-11 temperati (-10..+50°C), 12-15 freddi (-100..-20°C)
     let maxTemp;
     if (position <= 3) {
       maxTemp = Math.floor(55 + rngVal * 45);
@@ -60,7 +59,6 @@
   }
 
   function calculateSlotMaxFields(position, rngVal) {
-    // Posizioni centrali (6-10) più grandi
     const centerBonus = Math.max(0, 5 - Math.abs(8 - position)) * 18;
     return Math.floor(130 + centerBonus + rngVal * 95);
   }
@@ -76,14 +74,12 @@
     const temps = calculatePlanetTemperature(p, rng());
     const maxFields = calculateSlotMaxFields(p, rng());
 
-    // Verifica se il giocatore possiede già questo slot tra i suoi pianeti
     const playerPlanet = (universe.planets || []).find(
       (pl) => pl.coords && pl.coords.g === g && pl.coords.s === s && pl.coords.p === p
     );
 
     const delta = (universe.galaxyDeltas && universe.galaxyDeltas[key]) || null;
 
-    // Se distrutto dalla Morte Nera e non ancora ricolonizzato
     if (delta && delta.destroyed && !playerPlanet) {
       return {
         coords: { g, s, p },
@@ -101,7 +97,6 @@
       };
     }
 
-    // Se il pianeta appartiene al giocatore
     if (playerPlanet || (delta && (delta.owner === 'player' || delta.ownerType === 'player'))) {
       const pName = playerPlanet ? playerPlanet.name : (delta.planetName || 'Colonia');
       const hasMoon = Boolean((playerPlanet && playerPlanet.moon) || (delta && delta.hasMoon));
@@ -122,7 +117,6 @@
       };
     }
 
-    // Sistema di partenza del giocatore: NESSUN BOT
     const homePlanet = (universe.planets && universe.planets[0]) || { coords: { g: 1, s: 1, p: 4 } };
     const isHomeSystem = (g === homePlanet.coords.g && s === homePlanet.coords.s);
     if (isHomeSystem) {
@@ -141,7 +135,6 @@
       };
     }
 
-    // Probabilità presenza BOT negli altri sistemi (~42%)
     const presenceRoll = rng();
     if (presenceRoll > 0.42) {
       return {
@@ -159,7 +152,6 @@
       };
     }
 
-    // Generazione BOT procedurale
     const prefix = BOT_PREFIXES[Math.floor(rng() * BOT_PREFIXES.length)];
     const bName = BOT_NAMES[Math.floor(rng() * BOT_NAMES.length)];
     const pSuffix = PLANET_NAMES[Math.floor(rng() * PLANET_NAMES.length)];
@@ -171,7 +163,6 @@
       ? (rng() < 0.5 ? 'Pacifico' : 'Commerciante')
       : personalities[Math.floor(rng() * personalities.length)];
 
-    // Tier del BOT influenzato da botLevel e distanza galattica
     const tierRoll = rng() + ((universe.botLevel || 2) - 1) * 0.12;
     let tier = 'Debole';
     let powerMult = 1;
@@ -186,7 +177,6 @@
       powerMult = 2.8;
     }
 
-    // Calcolo risorse dinamiche BOT in base all'età dell'universo e al delta saccheggi
     const hoursElapsed = Math.min(72, Math.max(0.5, (Date.now() - (universe.createdAt || Date.now())) / 3600000));
     const growthFactor = (1 + hoursElapsed * 0.25) * Math.min(20, Math.sqrt(universe.speed || 10));
     const lootPenalty = (delta && delta.lootedAt && (Date.now() - delta.lootedAt < 3600000)) ? 0.25 : 1;
@@ -206,7 +196,6 @@
       espionageTech: Math.max(1, techLv - 1)
     };
 
-    // Edifici BOT (conservati se conquistato)
     const mineBase = Math.min(32, Math.max(3, Math.floor(4 + Math.log2(powerMult + 1) * 4.2)));
     const buildings = {
       metalMine: mineBase + Math.floor(rng() * 3),
@@ -225,7 +214,6 @@
       hiddenBunker: personality === 'Commerciante' ? 3 : 1
     };
 
-    // Flotta e difese BOT (aggiornate dai delta se già colpite)
     const fleet = (delta && delta.fleetOverride) ? Object.assign({}, delta.fleetOverride) : {
       smallCargo: Math.floor((4 + rng() * 8) * powerMult),
       largeCargo: Math.floor((2 + rng() * 5) * powerMult),
@@ -250,7 +238,6 @@
       spaceTrap: personality === 'Guerriero' ? Math.floor(2 * powerMult) : 0
     };
 
-    // Tasso di scambio commerciale BOT (Metallo : Cristallo : Deuterio)
     const tradeRates = personality === 'Commerciante'
       ? { metal: 2.5, crystal: 1.5, deuterium: 1.0 }
       : { metal: 3.0, crystal: 2.0, deuterium: 1.0 };
@@ -499,7 +486,6 @@
     let attackers = expandUnitPool(attackerFleet, attackerTech, false);
     const defFleetUnits = expandUnitPool(defenderData.fleet || {}, defenderData.tech || {}, false);
 
-    // Separa Trappole Spaziali dalle altre difese
     const defClean = Object.assign({}, defenderData.defenses || {});
     const trapCount = Math.max(0, Math.floor(Number(defClean.spaceTrap || 0)));
     delete defClean.spaceTrap;
@@ -509,7 +495,6 @@
 
     const log = [];
 
-    // Pre-Round: detonazione Trappole Spaziali
     if (trapCount > 0 && attackers.length > 0) {
       const trapSpec = Data.DEFENSES.spaceTrap;
       const wMult = 1 + (Number(defenderData.tech?.weaponsTech || 0) * 0.1);
@@ -534,11 +519,9 @@
       if (attackers.length === 0 || defenders.length === 0) break;
       roundsPlayed = round;
 
-      // Ricarica scudi ad ogni round
       for (const u of attackers) u.shield = u.maxShield;
       for (const u of defenders) u.shield = u.maxShield;
 
-      // Fuoco Attaccanti -> Difensori
       for (let i = 0; i < attackers.length; i++) {
         const shooter = attackers[i];
         if (shooter.attack <= 0) continue;
@@ -552,9 +535,7 @@
           const target = defenders[targetIdx];
           if (!target || target.hull <= 0) continue;
 
-          // Rimbalzo se colpo < 1% dello scudo attivo
           if (target.shield > 0 && shooter.attack < target.shield * 0.01) {
-            // Nessun danno
           } else if (shooter.attack <= target.shield) {
             target.shield -= shooter.attack;
           } else {
@@ -563,7 +544,6 @@
             target.hull -= hullDmg;
           }
 
-          // Esplosione rapida se scafo < 70%
           if (target.hull > 0 && target.hull < target.maxHull * 0.7) {
             const explodeProb = 1 - (target.hull / target.maxHull);
             if (Math.random() < explodeProb) {
@@ -571,7 +551,6 @@
             }
           }
 
-          // Fuoco Rapido
           const rf = shooter.rapidFire[target.id];
           if (rf && rf > 1) {
             if (Math.random() < (rf - 1) / rf) {
@@ -581,7 +560,6 @@
         }
       }
 
-      // Fuoco Difensori -> Attaccanti
       for (let i = 0; i < defenders.length; i++) {
         const shooter = defenders[i];
         if (shooter.attack <= 0) continue;
@@ -596,7 +574,6 @@
           if (!target || target.hull <= 0) continue;
 
           if (target.shield > 0 && shooter.attack < target.shield * 0.01) {
-            // Rimbalza
           } else if (shooter.attack <= target.shield) {
             target.shield -= shooter.attack;
           } else {
@@ -621,7 +598,6 @@
         }
       }
 
-      // Rimuovi unità esplose a fine round
       attackers = attackers.filter((u) => u.hull > 0);
       defenders = defenders.filter((u) => u.hull > 0);
     }
@@ -629,7 +605,6 @@
     const attackerSurvivors = summarizePool(attackers);
     const defenderAllSurvivors = summarizePool(defenders);
 
-    // Separa navi sopravvissute e difese sopravvissute del difensore
     const defenderFleetSurvivors = {};
     const defenderDefenseSurvivors = {};
     for (const [id, cnt] of Object.entries(defenderAllSurvivors)) {
@@ -637,7 +612,6 @@
       else defenderFleetSurvivors[id] = cnt;
     }
 
-    // Calcolo perdite e campo detriti (30% costo M+C delle navi distrutte)
     let debrisMetal = 0;
     let debrisCrystal = 0;
     const attackerLosses = {};
@@ -669,7 +643,6 @@
       }
     }
 
-    // Riparazione difese al 70% (tranne trappole spaziali già detonate)
     const repairedDefenses = Object.assign({}, defenderDefenseSurvivors);
     for (const [id, initCnt] of Object.entries(defClean)) {
       const surv = defenderDefenseSurvivors[id] || 0;
@@ -688,7 +661,6 @@
     if (attackers.length > 0 && defenders.length === 0) result = 'attacker_win';
     else if (attackers.length === 0 && defenders.length > 0) result = 'defender_win';
 
-    // Saccheggio se vince l'attaccante
     const loot = { metal: 0, crystal: 0, deuterium: 0 };
     if (result === 'attacker_win') {
       const bunkerLv = Math.min(9, Number(defenderData.buildings?.hiddenBunker || 0));
@@ -712,7 +684,6 @@
       }
     }
 
-    // Effetto Morte Nera (per OGNI Morte Nera sopravvissuta)
     let moonDestroyed = false;
     let planetDestroyed = false;
     const survivingDeathStars = attackerSurvivors.deathStar || 0;
@@ -757,7 +728,6 @@
       throw new Error('Seleziona un pianeta BOT valido come bersaglio di simulazione.');
     }
 
-    // Conta quanti rapporti spia il giocatore ha effettuato su queste coordinate
     const reportsForTarget = (universe.spyReports || []).filter(
       (r) => r.coords && r.coords.g === targetCoords.g && r.coords.s === targetCoords.s && r.coords.p === targetCoords.p
     );
@@ -777,7 +747,6 @@
     let sumDebris = 0;
 
     for (let it = 0; it < iterations; it++) {
-      // Variazione casuale entro il margine di incertezza spionaggio
       const scaleMap = (map) => {
         const out = {};
         for (const [k, v] of Object.entries(map || {})) {
@@ -854,7 +823,7 @@
     return 5;
   }
 
-  function getFleetSpeedAndFuel(universe, fleet, distance) {
+  function getFleetSpeedAndFuel(universe, fleet, distance, speedPct = 100) {
     const Data = window.UniversumData;
     let minSpeed = Infinity;
     let totalFuelPerDist = 0;
@@ -880,13 +849,16 @@
       ? window.UniversumEngine.getEffectiveSpeed(universe)
       : (universe.speed || 10);
 
+    const pct = Math.min(100, Math.max(10, Number(speedPct) || 100)) / 100;
+    const baseSec = 10 + (35000 / Math.sqrt(speedMult)) * Math.sqrt((distance * 10) / minSpeed);
     const durationSec = universe.creativeMode
       ? 3
-      : Math.max(5, Math.floor((10 + (35000 / Math.sqrt(speedMult)) * Math.sqrt((distance * 10) / minSpeed))));
+      : Math.max(5, Math.floor(baseSec / pct));
 
+    const fuelFactor = 0.2 + 0.8 * (pct * pct);
     const fuelCost = universe.creativeMode
       ? 0
-      : Math.max(1, Math.floor(1 + (totalFuelPerDist * distance) / 35000));
+      : Math.max(1, Math.floor((1 + (totalFuelPerDist * distance) / 35000) * fuelFactor));
 
     return { minSpeed, durationSec, fuelCost };
   }
@@ -919,7 +891,6 @@
 
     if (totalShips === 0) throw new Error('Seleziona almeno una nave per la missione.');
 
-    // Validazioni specifiche missione
     if (mission === 'spy' && !cleanFleet.espionageProbe) {
       throw new Error('Devi inviare almeno una Sonda Spia per la missione Spionaggio.');
     }
@@ -934,13 +905,12 @@
     }
 
     const distance = calculateDistance(originP.coords, targetCoords);
-    const { durationSec, fuelCost } = getFleetSpeedAndFuel(universe, cleanFleet, distance);
+    const { durationSec, fuelCost } = getFleetSpeedAndFuel(universe, cleanFleet, distance, options.fuelPercent || 100);
 
     const loadM = Math.max(0, Math.floor(Number(cargo.metal) || 0));
     const loadC = Math.max(0, Math.floor(Number(cargo.crystal) || 0));
     const loadD = Math.max(0, Math.floor(Number(cargo.deuterium) || 0));
 
-    // Spedizione Segreta nel Buco Nero (50k Deuterio extra)
     const blackHoleFee = (!universe.creativeMode && mission === 'explore' && options.blackHole) ? 50000 : 0;
 
     if (loadM + loadC + loadD + fuelCost > totalCargoCap && !universe.creativeMode) {
@@ -961,7 +931,6 @@
       originP.resources.deuterium -= (loadD + fuelCost + blackHoleFee);
     }
 
-    // Sottrai navi dal pianeta di origine
     for (const [id, qty] of Object.entries(cleanFleet)) {
       originP.fleet[id] -= qty;
     }
@@ -973,10 +942,12 @@
       originPlanetId: originP.id,
       originCoords: Object.assign({}, originP.coords),
       targetCoords: Object.assign({}, targetCoords),
+      ships: Object.assign({}, cleanFleet),
       fleet: cleanFleet,
       cargo: { metal: loadM, crystal: loadC, deuterium: loadD },
       options,
-      status: 'outbound', // 'outbound' | 'returning'
+      status: 'outbound',
+      departureTime: now,
       startTime: now,
       arrivalTime: now + durationSec * 1000,
       returnTime: now + durationSec * 2000,
@@ -1007,6 +978,10 @@
     const key = coordKey(flt.targetCoords.g, flt.targetCoords.s, flt.targetCoords.p);
     if (!universe.galaxyDeltas) universe.galaxyDeltas = {};
 
+    // Normalizza flt.fleet e flt.ships per compatibilità con siege-missions.js
+    if (!flt.fleet && flt.ships) flt.fleet = Object.assign({}, flt.ships);
+    if (!flt.ships && flt.fleet) flt.ships = Object.assign({}, flt.fleet);
+
     // 1. SPIONAGGIO
     if (flt.mission === 'spy') {
       const slot = generateProceduralSlot(universe, flt.targetCoords.g, flt.targetCoords.s, flt.targetCoords.p);
@@ -1022,6 +997,7 @@
         const catchChance = Math.min(0.85, Math.max(0.02, (defProbes / (probes * 8)) * 0.25 - diff * 0.03));
         const probesLost = Math.random() < catchChance ? Math.min(probes, Math.ceil(probes * 0.5)) : 0;
         flt.fleet.espionageProbe = Math.max(0, probes - probesLost);
+        flt.ships = Object.assign({}, flt.fleet);
 
         if (!Array.isArray(universe.spyReports)) universe.spyReports = [];
         const prevScans = universe.spyReports.filter((r) => r.key === key).length;
@@ -1057,17 +1033,26 @@
       return;
     }
 
-    // 2. COLONIZZAZIONE
+    // 2. COLONIZZAZIONE (FIX: controlla sia 'empty' che 'none' + verifica presenza Colonizzatrice)
     if (flt.mission === 'colonize') {
       const slot = generateProceduralSlot(universe, flt.targetCoords.g, flt.targetCoords.s, flt.targetCoords.p);
-      if (slot.ownerType !== 'empty') {
-        addMessage(universe, 'fleet', `Colonizzazione Fallita [${key}]`, 'Lo slot non è vuoto. La flotta torna alla base.');
+      const isSlotFree = slot.ownerType === 'empty' || slot.ownerType === 'none' || slot.type === 'empty';
+      if (!isSlotFree) {
+        addMessage(universe, 'fleet', `Colonizzazione Fallita [${key}]`, 'Lo slot è già occupato da un altro pianeta. La flotta torna alla base.');
+        flt.status = 'returning';
+        return;
+      }
+
+      if ((flt.fleet.colonyShip || 0) < 1) {
+        addMessage(universe, 'fleet', `Colonizzazione Fallita [${key}]`, 'Nessuna Colonizzatrice presente nella flotta.');
         flt.status = 'returning';
         return;
       }
 
       // Consuma 1 Colonizzatrice
       flt.fleet.colonyShip = Math.max(0, (flt.fleet.colonyShip || 1) - 1);
+      flt.ships = Object.assign({}, flt.fleet);
+
       const colNum = universe.planets.length + 1;
       const colName = `Colonia ${colNum}`;
       const newPlanet = {
@@ -1078,9 +1063,9 @@
         maxTemp: slot.maxTemp,
         fieldsMax: slot.fieldsMax,
         resources: {
-          metal: 1000 + flt.cargo.metal,
-          crystal: 1000 + flt.cargo.crystal,
-          deuterium: 500 + flt.cargo.deuterium
+          metal: 1000 + (flt.cargo.metal || 0),
+          crystal: 1000 + (flt.cargo.crystal || 0),
+          deuterium: 500 + (flt.cargo.deuterium || 0)
         },
         buildings: {
           metalMine: 0, crystalMine: 0, deuteriumSynth: 0, solarPlant: 0, fusionReactor: 0,
@@ -1105,6 +1090,10 @@
         planetId: newPlanet.id
       });
 
+      if (window.UniversumUI?.refreshPlanetSelector) {
+        window.UniversumUI.refreshPlanetSelector();
+      }
+
       flt.cargo = { metal: 0, crystal: 0, deuterium: 0 };
       flt.status = 'returning';
       addMessage(universe, 'fleet', `Nuova Colonia Fondata [${key}]`, `${colName} (${slot.fieldsMax} campi) è ora parte del tuo Impero!`);
@@ -1127,7 +1116,7 @@
             destPlanet.fleet[id] = (destPlanet.fleet[id] || 0) + qty;
           }
           addMessage(universe, 'fleet', `Flotta Schierata su ${destPlanet.name}`, 'Navi e risorse trasferite con successo.');
-          return 'remove'; // Non torna indietro
+          return 'remove';
         }
         addMessage(universe, 'fleet', `Trasporto Consegnato su ${destPlanet.name}`, 'Risorse scaricate. La flotta rientra.');
       }
@@ -1174,10 +1163,10 @@
           flt.cargo.deuterium += 200000;
           addMessage(universe, 'expedition', `🌌 SINGOLARITÀ SUPERATA [${key}]!`, 'La flotta emerge dall’orizzonte degli eventi con 1.000.000 di risorse esotiche!');
         } else if (roll < 0.35) {
-          // Perdita 30% flotta per gravità estrema
           for (const id of Object.keys(flt.fleet)) {
             flt.fleet[id] = Math.floor(flt.fleet[id] * 0.7);
           }
+          flt.ships = Object.assign({}, flt.fleet);
           addMessage(universe, 'expedition', `⚠️ Anomalia Gravitazionale [${key}]`, 'Il Buco Nero ha danneggiato il 30% della flotta esplorativa.');
         } else {
           flt.cargo.deuterium += 25000;
@@ -1193,21 +1182,21 @@
         } else if (roll < 0.55) {
           flt.fleet.lightFighter = (flt.fleet.lightFighter || 0) + 5;
           flt.fleet.cruiser = (flt.fleet.cruiser || 0) + 1;
+          flt.ships = Object.assign({}, flt.fleet);
           addMessage(universe, 'expedition', `Relitto Flotta Abbandonata [${key}]`, 'Recuperati 5 Caccia Leggeri e 1 Incrociatore ancora funzionanti!');
         } else if (roll < 0.62) {
-          // Relitto Antico con Morte Nera danneggiata riparabile
           const originP = universe.planets.find((p) => p.id === flt.originPlanetId) || universe.planets[0];
           if (originP && originP.resources.metal >= 250000 && originP.resources.crystal >= 125000) {
             originP.resources.metal -= 250000;
             originP.resources.crystal -= 125000;
             flt.fleet.deathStar = (flt.fleet.deathStar || 0) + 1;
+            flt.ships = Object.assign({}, flt.fleet);
             addMessage(universe, 'expedition', `☠️ RELITTO ANTICO RIPARATO [${key}]!`, 'I tuoi ingegneri hanno riparato una Morte Nera antica usando 250k Metallo e 125k Cristallo!');
           } else {
             flt.cargo.metal += 80000;
             addMessage(universe, 'expedition', `Relitto Antico [${key}]`, 'Trovato scafo di Morte Nera irrecuperabile senza 250k M / 125k C: smantellati 80.000 Metallo.');
           }
         } else if (roll < 0.80) {
-          // Scontro con Pirati Spaziali
           const pirateCombat = resolveCombat(flt.fleet, universe.researches, {
             fleet: { lightFighter: 12, cruiser: 3 },
             defenses: {},
@@ -1215,6 +1204,7 @@
             resources: { metal: 12000, crystal: 8000, deuterium: 2000 }
           });
           flt.fleet = pirateCombat.attackerSurvivors;
+          flt.ships = Object.assign({}, flt.fleet);
           flt.cargo.metal += pirateCombat.loot.metal;
           flt.cargo.crystal += pirateCombat.loot.crystal;
           addMessage(universe, 'combat', `Imboscata Pirata [${key}]`, `Esito: ${pirateCombat.result}. Bottino recuperato: ${pirateCombat.loot.metal} M / ${pirateCombat.loot.crystal} C.`);
@@ -1237,11 +1227,11 @@
 
       const combat = resolveCombat(flt.fleet, universe.researches, slot);
       flt.fleet = combat.attackerSurvivors;
+      flt.ships = Object.assign({}, flt.fleet);
       flt.cargo.metal += combat.loot.metal;
       flt.cargo.crystal += combat.loot.crystal;
       flt.cargo.deuterium += combat.loot.deuterium;
 
-      // Aggiorna detriti in orbita
       const prevDebris = slot.debris || { metal: 0, crystal: 0 };
       const newDebris = {
         metal: prevDebris.metal + combat.debris.metal,
@@ -1274,9 +1264,9 @@
           Object.keys(combat.repairedDefenses).length === 0;
         const hasConquestShip = (flt.fleet.colonyShip || 0) >= 1 || (flt.fleet.mothership || 0) >= 1;
 
-        // CONQUISTA PIANETA BOT
         if (flt.mission === 'attack' && combat.result === 'attacker_win' && noDefendersLeft && hasConquestShip) {
           if (flt.fleet.colonyShip >= 1) flt.fleet.colonyShip -= 1;
+          flt.ships = Object.assign({}, flt.fleet);
 
           const conqueredPlanet = {
             id: 'planet_conq_' + now + '_' + Math.random().toString(36).substring(2, 5),
@@ -1316,6 +1306,10 @@
             debris: newDebris
           };
 
+          if (window.UniversumUI?.refreshPlanetSelector) {
+            window.UniversumUI.refreshPlanetSelector();
+          }
+
           addMessage(
             universe,
             'combat',
@@ -1323,7 +1317,6 @@
             `Hai spazzato via le difese di ${slot.emperor} e annesso ${slot.name} con tutti i suoi edifici al tuo Impero!`
           );
         } else {
-          // Salva stato post-battaglia del BOT nei delta
           universe.galaxyDeltas[key] = Object.assign({}, universe.galaxyDeltas[key], {
             lootedAt: now,
             resourcesOverride: remResources,
@@ -1353,10 +1346,10 @@
 
     const now = Date.now();
     const intervalsMs = {
-      1: 3 * 3600 * 1000, // 3 ore
-      2: 1 * 3600 * 1000, // 1 ora
-      3: 20 * 60 * 1000,  // 20 minuti
-      4: 5 * 60 * 1000    // 5 minuti (INFERNO)
+      1: 3 * 3600 * 1000,
+      2: 1 * 3600 * 1000,
+      3: 20 * 60 * 1000,
+      4: 5 * 60 * 1000
     };
     const interval = intervalsMs[universe.botLevel || 2] || intervalsMs[2];
     if (!universe.nextBotRaidAt) {
@@ -1364,7 +1357,6 @@
       return;
     }
 
-    // Controlla attacchi in arrivo giunti all'impatto
     for (let i = universe.incomingAttacks.length - 1; i >= 0; i--) {
       const atk = universe.incomingAttacks[i];
       if (now >= atk.arrivalTime) {
@@ -1392,7 +1384,6 @@
           if (combat.moonDestroyed && targetPlanet.moon) {
             targetPlanet.moon = null;
           }
-          // Livello 4 INFERNO: rischio distruzione pianeta se non è l'unico rimasto
           if (combat.planetDestroyed && universe.planets.length > 1) {
             const idx = universe.planets.findIndex((p) => p.id === targetPlanet.id);
             if (idx !== -1) universe.planets.splice(idx, 1);
@@ -1415,7 +1406,6 @@
       }
     }
 
-    // Schedula nuovo attacco BOT
     if (now >= universe.nextBotRaidAt && universe.planets.length > 0) {
       universe.nextBotRaidAt = now + interval;
       const targetP = universe.planets[Math.floor(Math.random() * universe.planets.length)];
@@ -1459,6 +1449,9 @@
 
     for (let i = universe.fleetsInFlight.length - 1; i >= 0; i--) {
       const flt = universe.fleetsInFlight[i];
+      if (!flt.fleet && flt.ships) flt.fleet = Object.assign({}, flt.ships);
+      if (!flt.ships && flt.fleet) flt.ships = Object.assign({}, flt.fleet);
+
       if (flt.status === 'outbound' && now >= flt.arrivalTime) {
         const action = handleMissionArrival(universe, flt);
         if (action === 'remove') {
@@ -1469,13 +1462,16 @@
 
       if (flt.status === 'returning' && now >= flt.returnTime) {
         const homeP = universe.planets.find((p) => p.id === flt.originPlanetId) || universe.planets[0];
+        const returningFleet = flt.fleet || flt.ships || {};
         if (homeP) {
-          for (const [id, qty] of Object.entries(flt.fleet || {})) {
-            homeP.fleet[id] = (homeP.fleet[id] || 0) + qty;
+          for (const [id, qty] of Object.entries(returningFleet)) {
+            if (qty > 0) {
+              homeP.fleet[id] = (homeP.fleet[id] || 0) + qty;
+            }
           }
-          homeP.resources.metal += flt.cargo.metal || 0;
-          homeP.resources.crystal += flt.cargo.crystal || 0;
-          homeP.resources.deuterium += flt.cargo.deuterium || 0;
+          homeP.resources.metal += flt.cargo?.metal || 0;
+          homeP.resources.crystal += flt.cargo?.crystal || 0;
+          homeP.resources.deuterium += flt.cargo?.deuterium || 0;
         }
         universe.fleetsInFlight.splice(i, 1);
       }
@@ -1501,7 +1497,6 @@
     }
 
     const rates = slot.tradeRates || { metal: 3.0, crystal: 2.0, deuterium: 1.0 };
-    // Converte giveAmount in valore base (deuterio) e poi nella risorsa richiesta
     const valueInBase = amount / rates[giveRes];
     const receivedAmount = Math.floor(valueInBase * rates[getRes]);
 
@@ -1532,7 +1527,6 @@
       throw new Error('Risorse insufficienti per il Mercato Nero.');
     }
 
-    // Tasso fisso Mercato Nero (3:2:1 con tassa contrabbando 15%)
     const baseWeights = { metal: 3.0, crystal: 2.0, deuterium: 1.0 };
     const receivedAmount = Math.floor((amount / baseWeights[giveRes]) * baseWeights[getRes] * 0.85);
 
