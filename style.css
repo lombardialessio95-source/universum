@@ -916,6 +916,14 @@ h1, h2, h3, .font-display {
     height: calc(100dvh - 86px);
     overflow-y: auto;
   }
+  /* Nasconde la scrollbar nativa nella sidebar desktop mantenendo lo scroll fluido */
+.desktop-sidebar {
+  scrollbar-width: none;       /* Firefox */
+  -ms-overflow-style: none;    /* Edge / IE */
+}
+.desktop-sidebar::-webkit-scrollbar {
+  display: none;               /* Chrome, Safari, Edge moderno */
+}
 
   .sidebar-btn {
     display: flex;
