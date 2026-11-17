@@ -74,6 +74,69 @@ h1, h2, h3, .font-display {
 .text-energy { color: var(--res-energy); }
 .text-muted { color: var(--text-muted); }
 
+/* =========================================================
+   ILLUSTRAZIONI PROCEDURALI, ICONE RISORSE & SVG HUD
+   ========================================================= */
+.unit-art {
+  width: 64px;
+  height: 64px;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 210, 255, 0.4);
+  box-shadow: inset 0 0 10px rgba(0, 210, 255, 0.16), 0 3px 10px rgba(0, 0, 0, 0.55);
+  object-fit: cover;
+  flex-shrink: 0;
+  background: #050814;
+  display: block;
+}
+
+@media (min-width: 768px) {
+  .unit-art {
+    width: 76px;
+    height: 76px;
+  }
+}
+
+.unit-art-sm {
+  width: 36px;
+  height: 36px;
+  border-radius: 7px;
+  border: 1px solid rgba(0, 210, 255, 0.35);
+  object-fit: cover;
+  flex-shrink: 0;
+  background: #050814;
+  vertical-align: middle;
+}
+
+.res-icon {
+  width: 18px;
+  height: 18px;
+  vertical-align: -3px;
+  margin-right: 4px;
+  display: inline-block;
+  object-fit: contain;
+  flex-shrink: 0;
+  filter: drop-shadow(0 0 3px rgba(0, 210, 255, 0.3));
+}
+
+.nav-svg {
+  width: 16px;
+  height: 16px;
+  vertical-align: -3px;
+  margin-right: 5px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex-shrink: 0;
+}
+
+.cost-item {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 10px;
+}
+
 /* PANNELLI GLASSMORPHISM */
 .glass-panel {
   background: var(--bg-panel);
@@ -316,6 +379,10 @@ h1, h2, h3, .font-display {
 }
 
 .mode-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   min-height: 56px;
   padding: 12px 14px;
   background: rgba(10, 14, 32, 0.88);
@@ -389,7 +456,7 @@ h1, h2, h3, .font-display {
   }
 }
 
-/* =========================================
+/* =========================================================
    SLOT GALASSIA MULTIPLAYER
    ========================================================= */
 .galaxy-slot-player {
@@ -410,7 +477,7 @@ h1, h2, h3, .font-display {
   border-color: rgba(0, 210, 255, 0.22);
 }
 
-/* =========================================
+/* =========================================================
    COMUNICAZIONI: CHAT GALATTICA (50) & PRIVATI (15)
    ========================================================= */
 .comm-tabs-bar {
@@ -655,7 +722,7 @@ h1, h2, h3, .font-display {
   min-width: 88px;
 }
 
-/* =========================================
+/* =========================================================
    SCHERMATA 2: PLANCIA DI COMANDO (GAME)
    ========================================================= */
 #screen-game {
@@ -729,11 +796,14 @@ h1, h2, h3, .font-display {
 }
 
 .res-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font-size: 0.68rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  opacity: 0.85;
+  opacity: 0.9;
 }
 
 .res-val {
@@ -816,6 +886,9 @@ h1, h2, h3, .font-display {
 .nav-tab-btn .nav-icon {
   font-size: 1.25rem;
   line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .nav-tab-btn.active {
@@ -926,6 +999,9 @@ h1, h2, h3, .font-display {
 
 .drawer-item span.icon {
   font-size: 1.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .table-responsive {
