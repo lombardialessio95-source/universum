@@ -1,7 +1,7 @@
 /**
  * UNIVERSUM — Service Worker PWA (Offline-First + Network-First per Firebase)
  */
-const CACHE_NAME = 'universum-v10';
+const CACHE_NAME = 'universum-v11';
 
 const ASSETS = [
   './',
