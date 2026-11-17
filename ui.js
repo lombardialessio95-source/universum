@@ -40,6 +40,28 @@
   };
 
   // =========================================================
+  // HELPER GRAFICI & SVG VETTORIALI (ZERO EMOJI)
+  // =========================================================
+  function artTag(id, cls = 'unit-art', alt = '') {
+    const src = window.UniversumGraphics?.getArt ? window.UniversumGraphics.getArt(id) : '';
+    if (!src) return '';
+    return `<img src="${src}" class="${cls}" alt="${escapeHTML(alt)}" loading="lazy">`;
+  }
+
+  function resIconTag(type) {
+    const src = window.UniversumGraphics?.getResourceIcon ? window.UniversumGraphics.getResourceIcon(type) : '';
+    if (!src) return '';
+    return `<img src="${src}" class="res-icon" alt="">`;
+  }
+
+  function svgIcon(name) {
+    if (window.UniversumGraphics?.svg) {
+      return window.UniversumGraphics.svg(name);
+    }
+    return '';
+  }
+
+  // =========================================================
   // 1. ICONA PWA DINAMICA (CANVAS 512x512) E WEB AUDIO API
   // =========================================================
   function generateDynamicPWAIcon() {
@@ -432,7 +454,7 @@
             <label for="mp-uni-passcode">Codice Stanza (Opzionale per partita privata)</label>
             <input type="text" id="mp-uni-passcode" class="form-control" placeholder="Lascia vuoto per universo pubblico" maxlength="20">
           </div>
-          <button type="submit" class="btn btn-green" style="width:100%; margin-top:8px;">🌐 FONDA E ENTRA NELL'UNIVERSO</button>
+          <button type="submit" class="btn btn-green" style="width:100%; margin-top:8px;">${svgIcon('globe')} FONDA E ENTRA NELL'UNIVERSO</button>
         </form>
       `);
 
@@ -510,7 +532,7 @@
               <div style="display:flex; gap:6px; flex-wrap:wrap;">
                 ${npcBadge}
                 <span class="badge badge-green">${u.speed}x</span>
-                ${u.hasPasscode ? '<span class="badge badge-blue">🔒 PRIVATO</span>' : ''}
+                ${u.hasPasscode ? `<span class="badge badge-blue">${svgIcon('lock')} PRIVATO</span>` : ''}
               </div>
             </div>
             <div class="universe-meta">
@@ -518,7 +540,7 @@
               <span>Mappa: <strong>${u.galaxies}G × ${u.systemsPerGalaxy}S</strong></span>
             </div>
             <button type="button" class="btn btn-green btn-sm btn-join-online-uni" data-uid="${u.id}" data-locked="${u.hasPasscode ? '1' : '0'}">
-              🌐 ENTRA NELL'UNIVERSO
+              ${svgIcon('globe')} ENTRA NELL'UNIVERSO
             </button>
           </article>
         `;
@@ -770,7 +792,7 @@
     if (!select || !currentUniverse) return;
     const activeIdx = getActivePlanetIndex();
     select.innerHTML = currentUniverse.planets.map((p, idx) =>
-      `<option value="${p.id}" ${idx === activeIdx ? 'selected' : ''}>${escapeHTML(p.name)} [${p.coords.g}:${p.coords.s}:${p.coords.p}]${p.moon ? ' 🌑' : ''}</option>`
+      `<option value="${p.id}" ${idx === activeIdx ? 'selected' : ''}>${escapeHTML(p.name)} [${p.coords.g}:${p.coords.s}:${p.coords.p}]${p.moon ? ' [LUNA]' : ''}</option>`
     ).join('');
   }
 
@@ -806,10 +828,10 @@
       const remTurbo = Math.max(0, Math.ceil(((currentUniverse.turboUntil || 0) - Date.now()) / 1000));
       if (remTurbo > 0) {
         turboBtn.classList.add('active');
-        turboBtn.textContent = `⚡ ${formatDuration(remTurbo)}`;
+        turboBtn.innerHTML = `${svgIcon('bolt')} ${formatDuration(remTurbo)}`;
       } else {
         turboBtn.classList.remove('active');
-        turboBtn.textContent = '⚡ TURBO';
+        turboBtn.innerHTML = `${svgIcon('bolt')} TURBO`;
       }
     }
   }
@@ -888,7 +910,7 @@
         ${incoming.length > 0 ? `
           <div class="glass-panel" style="padding:14px; border-color:var(--btn-red); background:rgba(255,23,68,0.18);">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
-              <strong style="color:#ff5252; font-family:var(--font-display);">🚨 ALLARME ATTACCO OSTILE IN ARRIVO (${incoming.length})</strong>
+              <strong style="color:#ff5252; font-family:var(--font-display);">${svgIcon('alert')} ALLARME ATTACCO OSTILE IN ARRIVO (${incoming.length})</strong>
               <span class="badge badge-red live-timer" data-end="${incoming[0].arrivalTime}">--:--</span>
             </div>
             <p style="font-size:0.95rem; margin-top:6px;">${escapeHTML(incoming[0].attackerName)} diretto verso [${incoming[0].targetCoords.g}:${incoming[0].targetCoords.s}:${incoming[0].targetCoords.p}]</p>
@@ -901,7 +923,7 @@
             <div style="flex:1; min-width:220px;">
               <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
                 <h2 style="font-size:1.3rem; color:#fff;">${escapeHTML(planet.name)}</h2>
-                <button type="button" id="btn-rename-active-planet" class="btn btn-blue btn-sm" style="min-width:44px; min-height:44px;">✏️ Rinomina</button>
+                <button type="button" id="btn-rename-active-planet" class="btn btn-blue btn-sm" style="min-width:44px; min-height:44px;">${svgIcon('edit')} Rinomina</button>
               </div>
               <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; font-size:0.95rem;">
                 <div>Coordinate: <strong class="text-crystal">[${planet.coords.g}:${planet.coords.s}:${planet.coords.p}]</strong></div>
@@ -911,12 +933,12 @@
               </div>
               ${!isMultiplayerMode ? `
                 <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:12px;">
-                  <button type="button" id="btn-overview-turbo" class="btn btn-creative btn-sm">⚡ TURBO (2x VELOCITÀ)</button>
-                  <button type="button" id="btn-overview-event" class="btn btn-blue btn-sm">🎲 SCANSIONE EVENTO</button>
+                  <button type="button" id="btn-overview-turbo" class="btn btn-creative btn-sm">${svgIcon('bolt')} TURBO (2x VELOCITÀ)</button>
+                  <button type="button" id="btn-overview-event" class="btn btn-blue btn-sm">${svgIcon('radar')} SCANSIONE EVENTO</button>
                 </div>
               ` : `
                 <div style="margin-top:12px;">
-                  <button type="button" id="btn-overview-open-chat" class="btn btn-blue btn-sm">💬 APRI COMUNICAZIONI</button>
+                  <button type="button" id="btn-overview-open-chat" class="btn btn-blue btn-sm">${svgIcon('chat')} APRI COMUNICAZIONI</button>
                 </div>
               `}
             </div>
@@ -927,15 +949,15 @@
           <h3 style="font-size:0.95rem; color:var(--res-crystal); margin-bottom:10px;">PRODUZIONE ORARIA PIANETA</h3>
           <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; text-align:center;">
             <div style="background:rgba(0,0,0,0.35); padding:8px; border-radius:8px;">
-              <div class="text-muted" style="font-size:0.8rem;">METALLO/H</div>
+              <div class="text-muted" style="font-size:0.8rem; display:inline-flex; align-items:center;">${resIconTag('metal')} METALLO/H</div>
               <div class="font-display text-metal" style="font-size:0.95rem;">+${formatNum(prod.metalPerHour)}</div>
             </div>
             <div style="background:rgba(0,0,0,0.35); padding:8px; border-radius:8px;">
-              <div class="text-muted" style="font-size:0.8rem;">CRISTALLO/H</div>
+              <div class="text-muted" style="font-size:0.8rem; display:inline-flex; align-items:center;">${resIconTag('crystal')} CRISTALLO/H</div>
               <div class="font-display text-crystal" style="font-size:0.95rem;">+${formatNum(prod.crystalPerHour)}</div>
             </div>
             <div style="background:rgba(0,0,0,0.35); padding:8px; border-radius:8px;">
-              <div class="text-muted" style="font-size:0.8rem;">DEUTERIO/H</div>
+              <div class="text-muted" style="font-size:0.8rem; display:inline-flex; align-items:center;">${resIconTag('deuterium')} DEUTERIO/H</div>
               <div class="font-display text-deuterium" style="font-size:0.95rem;">${prod.deuteriumPerHour >= 0 ? '+' : ''}${formatNum(prod.deuteriumPerHour)}</div>
             </div>
           </div>
@@ -1018,7 +1040,7 @@
       const name = Data.BUILDINGS[b.id]?.name || b.id;
       rows.push(`
         <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(0,0,0,0.35); padding:10px; border-radius:8px;">
-          <span>🏗️ <strong>${escapeHTML(name)}</strong> → Lv.${b.targetLevel}</span>
+          <span style="display:inline-flex; align-items:center; gap:8px;">${artTag(b.id, 'unit-art-sm', name)} <strong>${escapeHTML(name)}</strong> → Lv.${b.targetLevel}</span>
           <span class="font-display text-metal live-timer" data-end="${b.endTime}">${formatDuration((b.endTime - Date.now()) / 1000)}</span>
         </div>
       `);
@@ -1028,7 +1050,7 @@
       const name = Data.RESEARCHES[r.id]?.name || r.id;
       rows.push(`
         <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(0,0,0,0.35); padding:10px; border-radius:8px;">
-          <span>🔬 <strong>${escapeHTML(name)}</strong> → Lv.${r.targetLevel}</span>
+          <span style="display:inline-flex; align-items:center; gap:8px;">${artTag(r.id, 'unit-art-sm', name)} <strong>${escapeHTML(name)}</strong> → Lv.${r.targetLevel}</span>
           <span class="font-display text-crystal live-timer" data-end="${r.endTime}">${formatDuration((r.endTime - Date.now()) / 1000)}</span>
         </div>
       `);
@@ -1038,7 +1060,7 @@
       const name = Data.SHIPS[sq.id]?.name || sq.id;
       rows.push(`
         <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(0,0,0,0.35); padding:10px; border-radius:8px;">
-          <span>🚀 <strong>${escapeHTML(name)}</strong> (Rimanenti: ${sq.remaining})</span>
+          <span style="display:inline-flex; align-items:center; gap:8px;">${artTag(sq.id, 'unit-art-sm', name)} <strong>${escapeHTML(name)}</strong> (Rimanenti: ${sq.remaining})</span>
           <span class="font-display text-energy live-timer" data-end="${sq.endTime}">${formatDuration((sq.endTime - Date.now()) / 1000)}</span>
         </div>
       `);
@@ -1048,7 +1070,7 @@
       const name = Data.DEFENSES[dq.id]?.name || dq.id;
       rows.push(`
         <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(0,0,0,0.35); padding:10px; border-radius:8px;">
-          <span>🛡️ <strong>${escapeHTML(name)}</strong> (Rimanenti: ${dq.remaining})</span>
+          <span style="display:inline-flex; align-items:center; gap:8px;">${artTag(dq.id, 'unit-art-sm', name)} <strong>${escapeHTML(name)}</strong> (Rimanenti: ${dq.remaining})</span>
           <span class="font-display text-energy live-timer" data-end="${dq.endTime}">${formatDuration((dq.endTime - Date.now()) / 1000)}</span>
         </div>
       `);
@@ -1080,19 +1102,24 @@
 
       return `
         <div class="glass-panel" style="padding:14px; display:flex; flex-direction:column; gap:10px;">
-          <div style="display:flex; justify-content:space-between; align-items:center;">
-            <strong style="font-size:1.05rem;">${b.icon} ${escapeHTML(b.name)}</strong>
-            <span class="badge badge-blue">Livello ${curLv}</span>
+          <div style="display:flex; gap:12px; align-items:flex-start;">
+            ${artTag(b.id, 'unit-art', b.name)}
+            <div style="flex:1; min-width:0;">
+              <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:6px; margin-bottom:4px;">
+                <strong style="font-size:1.05rem;">${escapeHTML(b.name)}</strong>
+                <span class="badge badge-blue">Lv.${curLv}</span>
+              </div>
+              <p class="text-muted" style="font-size:0.88rem;">${escapeHTML(b.description)}</p>
+            </div>
           </div>
-          <p class="text-muted" style="font-size:0.9rem;">${escapeHTML(b.description)}</p>
-          ${!req.met && !isCreative ? `<div style="color:#ff5252; font-size:0.85rem;">🔒 Richiede: ${escapeHTML(req.missing.join(', '))}</div>` : ''}
+          ${!req.met && !isCreative ? `<div style="color:#ff5252; font-size:0.85rem;">${svgIcon('lock')} Richiede: ${escapeHTML(req.missing.join(', '))}</div>` : ''}
           <div style="display:flex; flex-wrap:wrap; gap:10px; font-size:0.9rem; font-weight:700;">
-            ${cost.metal > 0 ? `<span style="color:${hasM ? 'var(--res-metal)' : 'var(--btn-red)'};">M: ${formatNum(cost.metal)}</span>` : ''}
-            ${cost.crystal > 0 ? `<span style="color:${hasC ? 'var(--res-crystal)' : 'var(--btn-red)'};">C: ${formatNum(cost.crystal)}</span>` : ''}
-            ${cost.deuterium > 0 ? `<span style="color:${hasD ? 'var(--res-deuterium)' : 'var(--btn-red)'};">D: ${formatNum(cost.deuterium)}</span>` : ''}
+            ${cost.metal > 0 ? `<span class="cost-item" style="color:${hasM ? 'var(--res-metal)' : 'var(--btn-red)'};">${resIconTag('metal')} ${formatNum(cost.metal)}</span>` : ''}
+            ${cost.crystal > 0 ? `<span class="cost-item" style="color:${hasC ? 'var(--res-crystal)' : 'var(--btn-red)'};">${resIconTag('crystal')} ${formatNum(cost.crystal)}</span>` : ''}
+            ${cost.deuterium > 0 ? `<span class="cost-item" style="color:${hasD ? 'var(--res-deuterium)' : 'var(--btn-red)'};">${resIconTag('deuterium')} ${formatNum(cost.deuterium)}</span>` : ''}
           </div>
           <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-top:auto;">
-            <span style="font-size:0.88rem;">⏱️ ${isCreative ? '<strong class="text-metal">ISTANTANEO (0s)</strong>' : formatDuration(buildSec)}</span>
+            <span style="font-size:0.88rem; display:inline-flex; align-items:center;">${svgIcon('clock')} ${isCreative ? '<strong class="text-metal">ISTANTANEO (0s)</strong>' : formatDuration(buildSec)}</span>
             <button type="button" class="btn btn-green btn-sm btn-build-structure" data-bid="${b.id}" ${canBuild ? '' : 'disabled'}>
               ${b.maxLevel && curLv >= b.maxLevel ? 'MAX' : `COSTRUISCI LV.${nextLv}`}
             </button>
@@ -1103,7 +1130,7 @@
 
     viewport.innerHTML = `
       <h2 style="font-size:1.1rem; color:var(--res-crystal); margin-bottom:12px;">EDIFICI PLANETARI — ${escapeHTML(planet.name)}</h2>
-      <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(290px, 1fr)); gap:12px;">
+      <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(305px, 1fr)); gap:12px;">
         ${cards}
       </div>
     `;
@@ -1149,19 +1176,24 @@
 
       return `
         <div class="glass-panel" style="padding:14px; display:flex; flex-direction:column; gap:10px;">
-          <div style="display:flex; justify-content:space-between; align-items:center;">
-            <strong style="font-size:1.05rem;">${r.icon} ${escapeHTML(r.name)}</strong>
-            <span class="badge badge-blue">Livello ${curLv}</span>
+          <div style="display:flex; gap:12px; align-items:flex-start;">
+            ${artTag(r.id, 'unit-art', r.name)}
+            <div style="flex:1; min-width:0;">
+              <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:6px; margin-bottom:4px;">
+                <strong style="font-size:1.05rem;">${escapeHTML(r.name)}</strong>
+                <span class="badge badge-blue">Lv.${curLv}</span>
+              </div>
+              <p class="text-muted" style="font-size:0.88rem;">${escapeHTML(r.description)}</p>
+            </div>
           </div>
-          <p class="text-muted" style="font-size:0.9rem;">${escapeHTML(r.description)}</p>
-          ${!req.met && !isCreative ? `<div style="color:#ff5252; font-size:0.85rem;">🔒 Richiede: ${escapeHTML(req.missing.join(', '))}</div>` : ''}
+          ${!req.met && !isCreative ? `<div style="color:#ff5252; font-size:0.85rem;">${svgIcon('lock')} Richiede: ${escapeHTML(req.missing.join(', '))}</div>` : ''}
           <div style="display:flex; flex-wrap:wrap; gap:10px; font-size:0.9rem; font-weight:700;">
-            ${cost.metal > 0 ? `<span style="color:${hasM ? 'var(--res-metal)' : 'var(--btn-red)'};">M: ${formatNum(cost.metal)}</span>` : ''}
-            ${cost.crystal > 0 ? `<span style="color:${hasC ? 'var(--res-crystal)' : 'var(--btn-red)'};">C: ${formatNum(cost.crystal)}</span>` : ''}
-            ${cost.deuterium > 0 ? `<span style="color:${hasD ? 'var(--res-deuterium)' : 'var(--btn-red)'};">D: ${formatNum(cost.deuterium)}</span>` : ''}
+            ${cost.metal > 0 ? `<span class="cost-item" style="color:${hasM ? 'var(--res-metal)' : 'var(--btn-red)'};">${resIconTag('metal')} ${formatNum(cost.metal)}</span>` : ''}
+            ${cost.crystal > 0 ? `<span class="cost-item" style="color:${hasC ? 'var(--res-crystal)' : 'var(--btn-red)'};">${resIconTag('crystal')} ${formatNum(cost.crystal)}</span>` : ''}
+            ${cost.deuterium > 0 ? `<span class="cost-item" style="color:${hasD ? 'var(--res-deuterium)' : 'var(--btn-red)'};">${resIconTag('deuterium')} ${formatNum(cost.deuterium)}</span>` : ''}
           </div>
           <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-top:auto;">
-            <span style="font-size:0.88rem;">⏱️ ${isCreative ? '<strong class="text-metal">ISTANTANEO (0s)</strong>' : formatDuration(resSec)}</span>
+            <span style="font-size:0.88rem; display:inline-flex; align-items:center;">${svgIcon('clock')} ${isCreative ? '<strong class="text-metal">ISTANTANEO (0s)</strong>' : formatDuration(resSec)}</span>
             <button type="button" class="btn btn-blue btn-sm btn-start-research" data-rid="${r.id}" ${canResearch ? '' : 'disabled'}>
               RICERCA LV.${nextLv}
             </button>
@@ -1172,7 +1204,7 @@
 
     viewport.innerHTML = `
       <h2 style="font-size:1.1rem; color:var(--res-crystal); margin-bottom:12px;">LABORATORIO DI RICERCA GALATTICO</h2>
-      <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(290px, 1fr)); gap:12px;">
+      <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(305px, 1fr)); gap:12px;">
         ${cards}
       </div>
     `;
@@ -1221,23 +1253,29 @@
 
       return `
         <div class="glass-panel" style="padding:14px; display:flex; flex-direction:column; gap:10px;">
-          <div style="display:flex; justify-content:space-between; align-items:center;">
-            <strong style="font-size:1.05rem;">${u.icon} ${escapeHTML(u.name)}</strong>
-            <span class="badge badge-green">In orbita: ${formatNum(owned)}</span>
+          <div style="display:flex; gap:12px; align-items:flex-start;">
+            ${artTag(u.id, 'unit-art', u.name)}
+            <div style="flex:1; min-width:0;">
+              <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:6px; margin-bottom:4px;">
+                <strong style="font-size:1.05rem;">${escapeHTML(u.name)}</strong>
+                <span class="badge badge-green">In orbita: ${formatNum(owned)}</span>
+              </div>
+              <p class="text-muted" style="font-size:0.86rem;">${escapeHTML(u.description)}</p>
+            </div>
           </div>
-          <p class="text-muted" style="font-size:0.88rem;">${escapeHTML(u.description)}</p>
-          <div style="display:flex; gap:10px; font-size:0.85rem; color:var(--res-crystal);">
-            <span>⚔️ ${formatNum(u.attack)}</span>
-            <span>🛡️ ${formatNum(u.shield)}</span>
-            <span>🔩 ${formatNum(u.hull)}</span>
-            ${u.cargo > 0 ? `<span>📦 ${formatNum(u.cargo)}</span>` : ''}
+
+          <div style="display:flex; flex-wrap:wrap; gap:10px; font-size:0.84rem; color:var(--res-crystal);">
+            <span style="display:inline-flex; align-items:center;">${svgIcon('sword')} ${formatNum(u.attack)}</span>
+            <span style="display:inline-flex; align-items:center;">${svgIcon('shield')} ${formatNum(u.shield)}</span>
+            <span style="display:inline-flex; align-items:center;">${svgIcon('hull')} ${formatNum(u.hull)}</span>
+            ${u.cargo > 0 ? `<span style="display:inline-flex; align-items:center;">${svgIcon('cargo')} ${formatNum(u.cargo)}</span>` : ''}
           </div>
-          ${!req.met && !isCreative ? `<div style="color:#ff5252; font-size:0.85rem;">🔒 Richiede: ${escapeHTML(req.missing.join(', '))}</div>` : ''}
+          ${!req.met && !isCreative ? `<div style="color:#ff5252; font-size:0.85rem;">${svgIcon('lock')} Richiede: ${escapeHTML(req.missing.join(', '))}</div>` : ''}
           <div style="display:flex; flex-wrap:wrap; gap:10px; font-size:0.88rem; font-weight:700;">
-            ${cost.metal > 0 ? `<span class="text-metal">M: ${formatNum(cost.metal)}</span>` : ''}
-            ${cost.crystal > 0 ? `<span class="text-crystal">C: ${formatNum(cost.crystal)}</span>` : ''}
-            ${cost.deuterium > 0 ? `<span class="text-deuterium">D: ${formatNum(cost.deuterium)}</span>` : ''}
-            <span>⏱️ ${isCreative ? '<strong class="text-metal">ISTANTANEO (0s)</strong>' : formatDuration(unitSec)}</span>
+            ${cost.metal > 0 ? `<span class="cost-item text-metal">${resIconTag('metal')} ${formatNum(cost.metal)}</span>` : ''}
+            ${cost.crystal > 0 ? `<span class="cost-item text-crystal">${resIconTag('crystal')} ${formatNum(cost.crystal)}</span>` : ''}
+            ${cost.deuterium > 0 ? `<span class="cost-item text-deuterium">${resIconTag('deuterium')} ${formatNum(cost.deuterium)}</span>` : ''}
+            <span style="display:inline-flex; align-items:center;">${svgIcon('clock')} ${isCreative ? '<strong class="text-metal">ISTANTANEO (0s)</strong>' : formatDuration(unitSec)}</span>
           </div>
 
           <div style="display:flex; gap:6px; align-items:center; margin-top:auto;">
@@ -1256,10 +1294,10 @@
 
     viewport.innerHTML = `
       <div style="display:flex; gap:10px; margin-bottom:14px;">
-        <button type="button" id="tab-btn-ships" class="btn ${!isDef ? 'btn-blue' : 'btn-ghost'}" style="flex:1;">🚀 CANTIERE NAVALE</button>
-        <button type="button" id="tab-btn-defense" class="btn ${isDef ? 'btn-blue' : 'btn-ghost'}" style="flex:1;">🛡️ DIFESA PLANETARIA</button>
+        <button type="button" id="tab-btn-ships" class="btn ${!isDef ? 'btn-blue' : 'btn-ghost'}" style="flex:1;">${svgIcon('rocket')} CANTIERE NAVALE</button>
+        <button type="button" id="tab-btn-defense" class="btn ${isDef ? 'btn-blue' : 'btn-ghost'}" style="flex:1;">${svgIcon('shield')} DIFESA PLANETARIA</button>
       </div>
-      <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:12px;">
+      <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(310px, 1fr)); gap:12px;">
         ${cards}
       </div>
     `;
@@ -1339,9 +1377,12 @@
               const sel = Number(uiState.fleetSelection[s.id] || 0);
               return `
                 <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; background:rgba(0,0,0,0.35); padding:8px 10px; border-radius:8px;">
-                  <div style="min-width:0; flex:1;">
-                    <strong>${s.icon} ${escapeHTML(s.name)}</strong>
-                    <div class="text-muted" style="font-size:0.85rem;">Disp: ${formatNum(avail)}</div>
+                  <div style="min-width:0; flex:1; display:flex; align-items:center; gap:10px;">
+                    ${artTag(s.id, 'unit-art-sm', s.name)}
+                    <div style="min-width:0;">
+                      <strong>${escapeHTML(s.name)}</strong>
+                      <div class="text-muted" style="font-size:0.85rem;">Disp: ${formatNum(avail)}</div>
+                    </div>
                   </div>
                   <div style="display:flex; gap:6px; align-items:center;">
                     <input type="number" class="form-control fleet-ship-input" data-sid="${s.id}" min="0" max="${avail}" value="${sel}" style="width:82px; text-align:center;" ${avail === 0 ? 'disabled' : ''}>
@@ -1373,14 +1414,14 @@
           <div class="form-group">
             <label>Tipo Missione</label>
             <select id="flt-mission-select" class="form-control">
-              <option value="attack" ${uiState.fleetMission === 'attack' ? 'selected' : ''}>⚔️ Attacca Bersaglio</option>
-              <option value="spy" ${uiState.fleetMission === 'spy' ? 'selected' : ''}>👁️ Spionaggio</option>
-              <option value="colonize" ${uiState.fleetMission === 'colonize' ? 'selected' : ''}>🌍 Colonizza Pianeta Vuoto</option>
-              <option value="transport" ${uiState.fleetMission === 'transport' ? 'selected' : ''}>📦 Trasporta Risorse</option>
-              <option value="deploy" ${uiState.fleetMission === 'deploy' ? 'selected' : ''}>🛸 Schiera Flotta su Tuo Pianeta</option>
-              <option value="explore" ${uiState.fleetMission === 'explore' ? 'selected' : ''}>🌌 Esplora Spazio Profondo (Pos. 16)</option>
-              <option value="recycle" ${uiState.fleetMission === 'recycle' ? 'selected' : ''}>♻️ Ricicla Campo Detriti</option>
-              <option value="destroyMoon" ${uiState.fleetMission === 'destroyMoon' ? 'selected' : ''}>🌑 Distruggi Luna (Morte Nera)</option>
+              <option value="attack" ${uiState.fleetMission === 'attack' ? 'selected' : ''}>Attacca Bersaglio</option>
+              <option value="spy" ${uiState.fleetMission === 'spy' ? 'selected' : ''}>Spionaggio</option>
+              <option value="colonize" ${uiState.fleetMission === 'colonize' ? 'selected' : ''}>Colonizza Pianeta Vuoto</option>
+              <option value="transport" ${uiState.fleetMission === 'transport' ? 'selected' : ''}>Trasporta Risorse</option>
+              <option value="deploy" ${uiState.fleetMission === 'deploy' ? 'selected' : ''}>Schiera Flotta su Tuo Pianeta</option>
+              <option value="explore" ${uiState.fleetMission === 'explore' ? 'selected' : ''}>Esplora Spazio Profondo (Pos. 16)</option>
+              <option value="recycle" ${uiState.fleetMission === 'recycle' ? 'selected' : ''}>Ricicla Campo Detriti</option>
+              <option value="destroyMoon" ${uiState.fleetMission === 'destroyMoon' ? 'selected' : ''}>Distruggi Luna (Morte Nera)</option>
             </select>
           </div>
 
@@ -1412,7 +1453,7 @@
             <span>Consumo Carburante: <strong class="text-deuterium">${formatNum(flightStats.fuelCost)} D</strong></span>
           </div>
 
-          <button type="button" id="btn-launch-fleet" class="btn btn-green" style="width:100%;">🚀 INVIA FLOTTA IN MISSIONE</button>
+          <button type="button" id="btn-launch-fleet" class="btn btn-green" style="width:100%;">${svgIcon('rocket')} INVIA FLOTTA IN MISSIONE</button>
         </div>
       </div>
     `;
@@ -1506,7 +1547,7 @@
   }
 
   // ---------------------------------------------------------
-  // 6. GALASSIA (CON PULSANTE ✉️ PER CHAT PRIVATA PvP)
+  // 6. GALASSIA (CON PULSANTE CHAT PRIVATA PvP)
   // ---------------------------------------------------------
   async function renderGalaxy(viewport) {
     const Galaxy = window.UniversumGalaxy;
@@ -1593,10 +1634,10 @@
               badgeHTML = '<span class="badge badge-green">TUO PIANETA</span>';
             } else if (isRealEnemy) {
               cardClass = 'galaxy-slot-enemy-pvp';
-              badgeHTML = '<span class="badge badge-red">⚔️ GIOCATORE REALE</span>';
+              badgeHTML = `<span class="badge badge-red">${svgIcon('sword')} GIOCATORE REALE</span>`;
             } else if (isNeutralOutpost) {
               cardClass = 'galaxy-slot-outpost';
-              badgeHTML = '<span class="badge badge-neutral">🛰️ AVAMPOSTO NEUTRALE</span>';
+              badgeHTML = `<span class="badge badge-neutral">${svgIcon('radar')} AVAMPOSTO NEUTRALE</span>`;
             } else if (isOfflineBot) {
               cardClass = 'galaxy-slot-enemy-pvp';
               badgeHTML = `<span class="badge badge-red">${escapeHTML(slot.tier)} • ${escapeHTML(slot.personality)}</span>`;
@@ -1607,11 +1648,11 @@
             return `
               <div class="glass-panel ${cardClass}" style="padding:12px; display:flex; flex-direction:column; gap:8px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
-                  <div>
+                  <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
                     <strong class="font-display text-crystal">[${slot.coords.p}]</strong>
-                    <strong style="font-size:1.05rem; margin-left:6px;">${escapeHTML(slot.planetName || slot.name || 'Slot Colonizzabile')}</strong>
-                    ${slot.moon ? `<span title="${escapeHTML(slot.moon.name || 'Luna')}"> 🌑</span>` : ''}
-                    ${hasDebris ? `<span class="badge badge-creative" style="margin-left:4px;">♻️ Detriti</span>` : ''}
+                    <strong style="font-size:1.05rem;">${escapeHTML(slot.planetName || slot.name || 'Slot Colonizzabile')}</strong>
+                    ${slot.moon ? `<span class="badge badge-blue" title="${escapeHTML(slot.moon.name || 'Luna')}">${svgIcon('moon')} LUNA</span>` : ''}
+                    ${hasDebris ? `<span class="badge badge-creative">${svgIcon('recycle')} Detriti</span>` : ''}
                   </div>
                   ${badgeHTML}
                 </div>
@@ -1619,26 +1660,26 @@
                 <div class="text-muted" style="font-size:0.88rem; display:flex; align-items:center; flex-wrap:wrap; gap:6px;">
                   ${ownerLabel ? `<span>Comandante: <strong style="color:#fff;">${escapeHTML(ownerLabel)}</strong></span>` : ''}
                   ${isRealEnemy ? `
-                    <button type="button" class="btn btn-blue btn-sm btn-gal-pm" data-uid="${escapeHTML(slot.ownerUid)}" data-nick="${escapeHTML(ownerLabel)}" style="min-width:44px; min-height:44px; padding:4px 10px;" title="Messaggio Privato">✉️</button>
+                    <button type="button" class="btn btn-blue btn-sm btn-gal-pm" data-uid="${escapeHTML(slot.ownerUid)}" data-nick="${escapeHTML(ownerLabel)}" style="min-width:44px; min-height:44px; padding:4px 10px;" title="Messaggio Privato">${svgIcon('mail')}</button>
                   ` : ''}
                   <span>• Temp: ${slot.minTemp ?? -10}°/${slot.maxTemp ?? 35}°C • Campi: ${slot.fieldsMax || 200}</span>
                 </div>
 
                 <div style="display:flex; flex-wrap:wrap; gap:6px;">
                   ${isMine ? `
-                    <button type="button" class="btn btn-green btn-sm btn-gal-action" data-act="manage" data-pid="${slot.planetId || slot.id}">🛰️ Gestisci</button>
-                    <button type="button" class="btn btn-blue btn-sm btn-gal-action" data-act="rename-player" data-p="${slot.coords.p}">✏️ Rinomina</button>
+                    <button type="button" class="btn btn-green btn-sm btn-gal-action" data-act="manage" data-pid="${slot.planetId || slot.id}">${svgIcon('radar')} Gestisci</button>
+                    <button type="button" class="btn btn-blue btn-sm btn-gal-action" data-act="rename-player" data-p="${slot.coords.p}">${svgIcon('edit')} Rinomina</button>
                   ` : ''}
                   ${(isRealEnemy || isNeutralOutpost || isOfflineBot) ? `
-                    <button type="button" class="btn btn-blue btn-sm btn-gal-action" data-act="quick-spy" data-p="${slot.coords.p}">👁️ Spia</button>
-                    <button type="button" class="btn btn-red btn-sm btn-gal-action" data-act="prep-attack" data-p="${slot.coords.p}">⚔️ Attacca</button>
-                    <button type="button" class="btn btn-ghost btn-sm btn-gal-action" data-act="trade" data-p="${slot.coords.p}">🤝 Commercia</button>
+                    <button type="button" class="btn btn-blue btn-sm btn-gal-action" data-act="quick-spy" data-p="${slot.coords.p}">${svgIcon('eye')} Spia</button>
+                    <button type="button" class="btn btn-red btn-sm btn-gal-action" data-act="prep-attack" data-p="${slot.coords.p}">${svgIcon('sword')} Attacca</button>
+                    <button type="button" class="btn btn-ghost btn-sm btn-gal-action" data-act="trade" data-p="${slot.coords.p}">${svgIcon('handshake')} Commercia</button>
                   ` : ''}
                   ${isEmpty ? `
-                    <button type="button" class="btn btn-green btn-sm btn-gal-action" data-act="prep-colonize" data-p="${slot.coords.p}">🌍 Colonizza</button>
+                    <button type="button" class="btn btn-green btn-sm btn-gal-action" data-act="prep-colonize" data-p="${slot.coords.p}">${svgIcon('globe')} Colonizza</button>
                   ` : ''}
                   ${hasDebris ? `
-                    <button type="button" class="btn btn-creative btn-sm btn-gal-action" data-act="prep-recycle" data-p="${slot.coords.p}">♻️ Ricicla</button>
+                    <button type="button" class="btn btn-creative btn-sm btn-gal-action" data-act="prep-recycle" data-p="${slot.coords.p}">${svgIcon('recycle')} Ricicla</button>
                   ` : ''}
                 </div>
               </div>
@@ -1650,7 +1691,7 @@
               <strong class="font-display" style="color:var(--btn-gold);">[16] SPAZIO PROFONDO & BUCO NERO</strong>
               <div class="text-muted" style="font-size:0.88rem;">Invia flotte esplorative alla ricerca di relitti e anomalie.</div>
             </div>
-            <button type="button" class="btn btn-creative btn-sm btn-gal-action" data-act="prep-explore" data-p="16">🌌 Esplora</button>
+            <button type="button" class="btn btn-creative btn-sm btn-gal-action" data-act="prep-explore" data-p="16">${svgIcon('globe')} Esplora</button>
           </div>
         </div>
       </div>
@@ -1762,7 +1803,7 @@
                 return `
                   <div style="background:rgba(0,0,0,0.35); padding:8px 10px; border-radius:8px;">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                      <span>${s.icon} <strong>${escapeHTML(s.name)}</strong> (Disp: ${formatNum(planet.fleet[s.id] || 0)})</span>
+                      <span style="display:inline-flex; align-items:center; gap:8px;">${artTag(s.id, 'unit-art-sm', s.name)} <strong>${escapeHTML(s.name)}</strong> (Disp: ${formatNum(planet.fleet[s.id] || 0)})</span>
                       <span class="font-display text-crystal" id="sim-lbl-${s.id}">${curVal}</span>
                     </div>
                     <div style="display:flex; align-items:center; gap:8px;">
@@ -1774,7 +1815,7 @@
                 `;
               }).join('')}
             </div>
-            <button type="button" id="btn-sim-real-attack" class="btn btn-red" style="width:100%;">⚔️ INVIA FLOTTA VERA CONTRO [${selectedReport.key}]</button>
+            <button type="button" id="btn-sim-real-attack" class="btn btn-red" style="width:100%;">${svgIcon('sword')} INVIA FLOTTA VERA CONTRO [${selectedReport.key}]</button>
           </div>
         ` : ''}
 
@@ -1788,12 +1829,13 @@
                     <strong>${escapeHTML(r.targetName)} [${r.key}] — ${escapeHTML(r.emperor || r.ownerName || '')}</strong>
                     <span class="badge badge-blue">Scansioni: ${r.scanCount || 1}</span>
                   </div>
-                  <div style="font-size:0.9rem; margin-bottom:8px;">
-                    Risorse: <span class="text-metal">${formatNum(r.resources?.metal || 0)} M</span> |
-                    <span class="text-crystal">${formatNum(r.resources?.crystal || 0)} C</span> |
-                    <span class="text-deuterium">${formatNum(r.resources?.deuterium || 0)} D</span>
+                  <div style="font-size:0.9rem; margin-bottom:8px; display:flex; flex-wrap:wrap; gap:10px;">
+                    <span>Risorse:</span>
+                    <span class="cost-item text-metal">${resIconTag('metal')} ${formatNum(r.resources?.metal || 0)}</span>
+                    <span class="cost-item text-crystal">${resIconTag('crystal')} ${formatNum(r.resources?.crystal || 0)}</span>
+                    <span class="cost-item text-deuterium">${resIconTag('deuterium')} ${formatNum(r.resources?.deuterium || 0)}</span>
                   </div>
-                  <button type="button" class="btn btn-creative btn-sm btn-open-sim" data-rid="${r.id}">🧮 SIMULA BATTAGLIA</button>
+                  <button type="button" class="btn btn-creative btn-sm btn-open-sim" data-rid="${r.id}">${svgIcon('radar')} SIMULA BATTAGLIA</button>
                 </div>
               `).join('')}
             </div>
@@ -1938,13 +1980,15 @@
       const cost = Galaxy.getMoonCreationCost(currentUniverse);
       viewport.innerHTML = `
         <div class="glass-panel" style="padding:20px; text-align:center;">
-          <div style="font-size:3rem; margin-bottom:8px;">🌑</div>
+          <div style="margin-bottom:12px; display:flex; justify-content:center;">${artTag('lunarBase', 'unit-art', 'Base Lunare')}</div>
           <h2 style="font-size:1.15rem; color:var(--res-crystal); margin-bottom:8px;">NESSUNA LUNA IN ORBITA SU ${escapeHTML(planet.name)}</h2>
           <p class="text-muted" style="margin-bottom:14px;">Richiede Ingegneria Lunare Lv.1.</p>
-          <div style="margin-bottom:16px; font-weight:700;">
-            Costo: <span class="text-metal">${formatNum(cost.metal)} M</span> • <span class="text-crystal">${formatNum(cost.crystal)} C</span> • <span class="text-deuterium">${formatNum(cost.deuterium)} D</span>
+          <div style="margin-bottom:16px; font-weight:700; display:flex; justify-content:center; flex-wrap:wrap; gap:12px;">
+            <span class="cost-item text-metal">${resIconTag('metal')} ${formatNum(cost.metal)}</span>
+            <span class="cost-item text-crystal">${resIconTag('crystal')} ${formatNum(cost.crystal)}</span>
+            <span class="cost-item text-deuterium">${resIconTag('deuterium')} ${formatNum(cost.deuterium)}</span>
           </div>
-          <button type="button" id="btn-create-moon" class="btn btn-green">🌑 CREA LUNA ORA</button>
+          <button type="button" id="btn-create-moon" class="btn btn-green">${svgIcon('moon')} CREA LUNA ORA</button>
         </div>
       `;
 
@@ -1977,33 +2021,38 @@
         <div class="glass-panel" style="padding:14px;">
           <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
             <div style="display:flex; align-items:center; gap:10px;">
-              <h2 style="font-size:1.2rem; color:#fff;">🌑 ${escapeHTML(moon.name || 'Luna')}</h2>
-              <button type="button" id="btn-rename-moon" class="btn btn-blue btn-sm" style="min-width:44px; min-height:44px;">✏️ Rinomina Luna</button>
+              <h2 style="font-size:1.2rem; color:#fff; display:inline-flex; align-items:center; gap:6px;">${svgIcon('moon')} ${escapeHTML(moon.name || 'Luna')}</h2>
+              <button type="button" id="btn-rename-moon" class="btn btn-blue btn-sm" style="min-width:44px; min-height:44px;">${svgIcon('edit')} Rinomina Luna</button>
             </div>
             <span class="badge badge-blue">Campi Lunari: ${usedFields} / ${maxFields}</span>
           </div>
         </div>
 
-        <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:12px;">
+        <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(305px, 1fr)); gap:12px;">
           ${Object.values(Data.MOON_BUILDINGS).map((mb) => {
             const curLv = Number(moon.buildings?.[mb.id] || 0);
             const nextLv = curLv + 1;
             const cost = Data.getBuildingCost(mb.id, nextLv, true);
             const buildSec = Engine.getBuildingBuildTime(currentUniverse, planet, mb.id, nextLv, true);
             return `
-              <div class="glass-panel" style="padding:14px; display:flex; flex-direction:column; gap:8px;">
-                <div style="display:flex; justify-content:space-between;">
-                  <strong>${mb.icon} ${escapeHTML(mb.name)}</strong>
-                  <span class="badge badge-blue">Lv.${curLv}</span>
+              <div class="glass-panel" style="padding:14px; display:flex; flex-direction:column; gap:10px;">
+                <div style="display:flex; gap:12px; align-items:flex-start;">
+                  ${artTag(mb.id, 'unit-art', mb.name)}
+                  <div style="flex:1; min-width:0;">
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:6px; margin-bottom:4px;">
+                      <strong>${escapeHTML(mb.name)}</strong>
+                      <span class="badge badge-blue">Lv.${curLv}</span>
+                    </div>
+                    <p class="text-muted" style="font-size:0.86rem;">${escapeHTML(mb.description)}</p>
+                  </div>
                 </div>
-                <p class="text-muted" style="font-size:0.88rem;">${escapeHTML(mb.description)}</p>
-                <div style="font-size:0.88rem; font-weight:700;">
-                  <span class="text-metal">M: ${formatNum(cost.metal)}</span> •
-                  <span class="text-crystal">C: ${formatNum(cost.crystal)}</span> •
-                  <span class="text-deuterium">D: ${formatNum(cost.deuterium)}</span>
+                <div style="font-size:0.88rem; font-weight:700; display:flex; flex-wrap:wrap; gap:10px;">
+                  <span class="cost-item text-metal">${resIconTag('metal')} ${formatNum(cost.metal)}</span>
+                  <span class="cost-item text-crystal">${resIconTag('crystal')} ${formatNum(cost.crystal)}</span>
+                  <span class="cost-item text-deuterium">${resIconTag('deuterium')} ${formatNum(cost.deuterium)}</span>
                 </div>
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-top:auto;">
-                  <span>⏱️ ${isCreative ? '<strong class="text-metal">ISTANTANEO (0s)</strong>' : formatDuration(buildSec)}</span>
+                  <span style="display:inline-flex; align-items:center;">${svgIcon('clock')} ${isCreative ? '<strong class="text-metal">ISTANTANEO (0s)</strong>' : formatDuration(buildSec)}</span>
                   <button type="button" class="btn btn-green btn-sm btn-build-moon" data-mbid="${mb.id}">COSTRUISCI</button>
                 </div>
               </div>
@@ -2012,7 +2061,7 @@
         </div>
 
         <div class="glass-panel" style="padding:14px;">
-          <h3 style="font-size:1rem; color:var(--btn-gold); margin-bottom:8px;">🌀 PORTALE IPERSPAZIALE</h3>
+          <h3 style="font-size:1rem; color:var(--btn-gold); margin-bottom:8px;">PORTALE IPERSPAZIALE</h3>
           ${otherMoons.length === 0 ? '<p class="text-muted">Crea almeno un’altra Luna su una colonia per attivare i salti tra Portali.</p>' : `
             <div class="form-group">
               <label>Luna di Destinazione</label>
@@ -2020,7 +2069,7 @@
                 ${otherMoons.map((m) => `<option value="${m.i}">${escapeHTML(m.pl.moon.name || 'Luna')} (${escapeHTML(m.pl.name)} [${m.pl.coords.g}:${m.pl.coords.s}:${m.pl.coords.p}])</option>`).join('')}
               </select>
             </div>
-            <button type="button" id="btn-trigger-jumpgate" class="btn btn-creative" style="width:100%;">🌀 TELETRASPORTA TUTTA LA FLOTTA (10.000 D)</button>
+            <button type="button" id="btn-trigger-jumpgate" class="btn btn-creative" style="width:100%;">${svgIcon('bolt')} TELETRASPORTA TUTTA LA FLOTTA (10.000 D)</button>
           `}
         </div>
       </div>
@@ -2072,13 +2121,13 @@
       viewport.innerHTML = `
         <div style="display:flex; flex-direction:column; gap:14px;">
           <div class="glass-panel" style="padding:14px;">
-            <h2 style="font-size:1.05rem; color:var(--res-crystal); margin-bottom:8px;">🤝 TRASPORTO & SCAMBIO DIRETTO PvP</h2>
+            <h2 style="font-size:1.05rem; color:var(--res-crystal); margin-bottom:8px;">TRASPORTO & SCAMBIO DIRETTO PvP</h2>
             <p class="text-muted" style="margin-bottom:12px;">In modalità Multiplayer PvP puoi inviare carichi di risorse direttamente ai pianeti di altri giocatori reali o agli Avamposti Neutrali utilizzando la missione <strong>Trasporta</strong> dalla sezione Flotta.</p>
-            <button type="button" id="btn-mp-goto-transport" class="btn btn-blue" style="width:100%;">📦 PREPARA CONVOGLIO MERCANTILE</button>
+            <button type="button" id="btn-mp-goto-transport" class="btn btn-blue" style="width:100%;">${svgIcon('cargo')} PREPARA CONVOGLIO MERCANTILE</button>
           </div>
 
           <div class="glass-panel" style="padding:14px;">
-            <h3 style="font-size:1rem; color:var(--btn-gold); margin-bottom:10px;">🕶️ MERCATO NERO GALATTICO (TASSO 3:2:1 -15%)</h3>
+            <h3 style="font-size:1rem; color:var(--btn-gold); margin-bottom:10px;">MERCATO NERO GALATTICO (TASSO 3:2:1 -15%)</h3>
             <div class="form-grid-3">
               <div class="form-group">
                 <label>Offri</label>
@@ -2135,7 +2184,7 @@
     viewport.innerHTML = `
       <div style="display:flex; flex-direction:column; gap:14px;">
         <div class="glass-panel" style="padding:14px;">
-          <h2 style="font-size:1.05rem; color:var(--res-crystal); margin-bottom:10px;">🤝 SCAMBIO COMMERCIALE CON BOT</h2>
+          <h2 style="font-size:1.05rem; color:var(--res-crystal); margin-bottom:10px;">SCAMBIO COMMERCIALE CON BOT</h2>
           <div class="form-grid-3">
             <div class="form-group">
               <label>Galassia BOT</label>
@@ -2174,12 +2223,12 @@
           </div>
           <div style="display:flex; flex-wrap:wrap; gap:10px;">
             <button type="button" id="btn-exec-bot-trade" class="btn btn-green" style="flex:1;">SCAMBIA CON BOT</button>
-            <button type="button" id="btn-sign-bot-contract" class="btn btn-blue" style="flex:1;">🛡️ PATTO DIFESA (10k M)</button>
+            <button type="button" id="btn-sign-bot-contract" class="btn btn-blue" style="flex:1;">${svgIcon('shield')} PATTO DIFESA (10k M)</button>
           </div>
         </div>
 
         <div class="glass-panel" style="padding:14px;">
-          <h3 style="font-size:1rem; color:var(--btn-gold); margin-bottom:10px;">🕶️ MERCATO NERO GALATTICO (TASSO 3:2:1 -15%)</h3>
+          <h3 style="font-size:1rem; color:var(--btn-gold); margin-bottom:10px;">MERCATO NERO GALATTICO (TASSO 3:2:1 -15%)</h3>
           <div class="form-grid-3">
             <div class="form-group">
               <label>Offri</label>
@@ -2299,11 +2348,11 @@
         <tr>
           <td>
             <div style="display:flex; align-items:center; gap:6px;">
-              <button type="button" class="btn btn-ghost btn-sm btn-emp-rename" data-idx="${idx}" style="min-width:40px; min-height:40px; padding:4px 8px;" title="Rinomina">✏️</button>
+              <button type="button" class="btn btn-ghost btn-sm btn-emp-rename" data-idx="${idx}" style="min-width:40px; min-height:40px; padding:4px 8px;" title="Rinomina">${svgIcon('edit')}</button>
               <button type="button" class="btn btn-blue btn-sm btn-emp-select" data-pid="${p.id}">${escapeHTML(p.name)}</button>
             </div>
           </td>
-          <td class="font-display">[${p.coords.g}:${p.coords.s}:${p.coords.p}]${p.moon ? ' 🌑' : ''}</td>
+          <td class="font-display">[${p.coords.g}:${p.coords.s}:${p.coords.p}]${p.moon ? ' <span class="badge badge-blue">LUNA</span>' : ''}</td>
           <td class="text-metal">${formatNum(p.resources.metal)} (+${formatNum(prod.metalPerHour)}/h)</td>
           <td class="text-crystal">${formatNum(p.resources.crystal)} (+${formatNum(prod.crystalPerHour)}/h)</td>
           <td class="text-deuterium">${formatNum(p.resources.deuterium)} (+${formatNum(prod.deuteriumPerHour)}/h)</td>
@@ -2314,7 +2363,7 @@
 
     viewport.innerHTML = `
       <div class="glass-panel" style="padding:14px;">
-        <h2 style="font-size:1.1rem; color:var(--res-crystal); margin-bottom:8px;">👑 RIEPILOGO IMPERIALE (${currentUniverse.planets.length} PIANETI)</h2>
+        <h2 style="font-size:1.1rem; color:var(--res-crystal); margin-bottom:8px;">RIEPILOGO IMPERIALE (${currentUniverse.planets.length} PIANETI)</h2>
         <p style="margin-bottom:12px; font-size:0.95rem;">
           Produzione Totale Impero:
           <strong class="text-metal">+${formatNum(totM)} M/h</strong> •
@@ -2354,7 +2403,7 @@
   }
 
   // ---------------------------------------------------------
-  // 11. CLASSIFICA (CON PULSANTE ✉️ PER MESSAGGI PRIVATI)
+  // 11. CLASSIFICA (CON PULSANTE MESSAGGI PRIVATI)
   // ---------------------------------------------------------
   async function renderHighscoreAndQuests(viewport) {
     if (isMultiplayerMode && window.UniversumMP?.getLeaderboard) {
@@ -2366,7 +2415,7 @@
         viewport.innerHTML = `
           <div class="glass-panel" style="padding:14px;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
-              <h2 style="font-size:1.1rem; color:var(--btn-gold);">🏆 CLASSIFICA PvP GIOCATORI REALI</h2>
+              <h2 style="font-size:1.1rem; color:var(--btn-gold);">CLASSIFICA PvP GIOCATORI REALI</h2>
               <span class="badge badge-red">ZERO BOT</span>
             </div>
             <div style="display:flex; flex-direction:column; gap:8px;">
@@ -2379,7 +2428,7 @@
                       <strong class="font-display">#${idx + 1}</strong>
                       <strong>${escapeHTML(nick)}</strong>
                       ${isMe ? '<span class="badge badge-green">TU</span>' : `
-                        <button type="button" class="btn btn-blue btn-sm btn-hs-pm" data-uid="${escapeHTML(p.uid)}" data-nick="${escapeHTML(nick)}" style="min-width:44px; min-height:44px; padding:4px 10px;" title="Messaggio Privato">✉️</button>
+                        <button type="button" class="btn btn-blue btn-sm btn-hs-pm" data-uid="${escapeHTML(p.uid)}" data-nick="${escapeHTML(nick)}" style="min-width:44px; min-height:44px; padding:4px 10px;" title="Messaggio Privato">${svgIcon('mail')}</button>
                       `}
                       <span class="text-muted" style="font-size:0.82rem;">(${p.planetCount || 1} pianeti)</span>
                     </div>
@@ -2428,7 +2477,7 @@
 
     viewport.innerHTML = `
       <div class="glass-panel" style="padding:14px;">
-        <h2 style="font-size:1.1rem; color:var(--btn-gold); margin-bottom:10px;">🏆 CLASSIFICA GALATTICA</h2>
+        <h2 style="font-size:1.1rem; color:var(--btn-gold); margin-bottom:10px;">CLASSIFICA GALATTICA</h2>
         <div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:12px; font-size:0.9rem;">
           <span>Edifici: <strong>${formatNum(buildingPts)}</strong></span>
           <span>Ricerche: <strong>${formatNum(researchPts)}</strong></span>
@@ -2451,7 +2500,7 @@
   }
 
   // ---------------------------------------------------------
-  // 12. COMUNICAZIONI (TAB 1: CHAT GALATTICA 50 | TAB 2: PRIVATI 15)
+  // 12. COMUNICAZIONI (TAB 1: CHAT GALATTICA 100 | TAB 2: PRIVATI 15)
   // ---------------------------------------------------------
   async function renderCommunications(viewport) {
     if (!isMultiplayerMode) {
@@ -2465,10 +2514,10 @@
       <div style="display:flex; flex-direction:column; gap:12px;">
         <div class="comm-tabs-bar">
           <button type="button" id="comm-tab-galactic" class="comm-tab-btn ${isGalactic ? 'active' : ''}">
-            🌌 Chat Galattica (50)
+            ${svgIcon('globe')} Chat Galattica (100)
           </button>
           <button type="button" id="comm-tab-private" class="comm-tab-btn ${!isGalactic ? 'active' : ''}">
-            ✉️ Messaggi Privati (15)
+            ${svgIcon('mail')} Messaggi Privati (15)
             <span id="tab-private-unread-badge" class="badge badge-red ${unreadPrivateCount > 0 ? '' : 'hidden'}">${unreadPrivateCount}</span>
           </button>
         </div>
@@ -2504,7 +2553,7 @@
       <div class="glass-panel chat-panel-wrapper">
         <div style="display:flex; justify-content:space-between; align-items:center;">
           <span class="text-muted" style="font-size:0.88rem;">Tocca il nickname di un imperatore per aprire una chat privata</span>
-          <span class="badge badge-green">ULTIMI 50</span>
+          <span class="badge badge-green">ULTIMI 100</span>
         </div>
         <div id="chat-messages-box" class="chat-messages-box"></div>
         <form id="form-send-chat" class="chat-input-bar">
@@ -2554,7 +2603,7 @@
           <div class="chat-msg-header">
             ${isMine
               ? `<span class="chat-msg-sender">${escapeHTML(nick)} (Tu)</span>`
-              : `<button type="button" class="chat-sender-link" data-uid="${escapeHTML(m.uid)}" data-nick="${escapeHTML(nick)}" title="Apri chat privata">${escapeHTML(nick)} ✉️</button>`
+              : `<button type="button" class="chat-sender-link" data-uid="${escapeHTML(m.uid)}" data-nick="${escapeHTML(nick)}" title="Apri chat privata">${escapeHTML(nick)} [PM]</button>`
             }
             <span class="chat-msg-time">${timeStr}</span>
           </div>
@@ -2767,16 +2816,16 @@
   function renderSavesMenu(viewport) {
     viewport.innerHTML = `
       <div class="glass-panel" style="padding:18px; display:flex; flex-direction:column; gap:12px;">
-        <h2 style="font-size:1.1rem; color:var(--res-crystal);">💾 GESTIONE PARTITA & SISTEMA</h2>
+        <h2 style="font-size:1.1rem; color:var(--res-crystal);">GESTIONE PARTITA & SISTEMA</h2>
         <p class="text-muted">Universo attivo: <strong style="color:#fff;">${escapeHTML(currentUniverse.name)}</strong> (${isMultiplayerMode ? 'ONLINE PvP' : 'OFFLINE'})</p>
 
-        <button type="button" id="btn-save-now" class="btn btn-green">💾 SINCRONIZZA / SALVA ORA</button>
+        <button type="button" id="btn-save-now" class="btn btn-green">${svgIcon('save')} SINCRONIZZA / SALVA ORA</button>
         ${!isMultiplayerMode ? `
-          <button type="button" id="btn-export-download" class="btn btn-blue">⬇ SCARICA BACKUP JSON</button>
-          <button type="button" id="btn-export-copy" class="btn btn-ghost">📋 COPIA JSON NEGLI APPUNTI</button>
+          <button type="button" id="btn-export-download" class="btn btn-blue">SCARICA BACKUP JSON</button>
+          <button type="button" id="btn-export-copy" class="btn btn-ghost">COPIA JSON NEGLI APPUNTI</button>
         ` : ''}
-        <button type="button" id="btn-toggle-sound" class="btn btn-ghost">${soundMuted ? '🔇 SUONI: DISATTIVATI (ATTIVA)' : '🔊 SUONI: ATTIVI (DISATTIVA)'}</button>
-        <button type="button" id="btn-return-lobby-view" class="btn btn-red">🏠 TORNA ALLA LOBBY PRINCIPALE</button>
+        <button type="button" id="btn-toggle-sound" class="btn btn-ghost">${soundMuted ? 'SUONI: DISATTIVATI (ATTIVA)' : 'SUONI: ATTIVI (DISATTIVA)'}</button>
+        <button type="button" id="btn-return-lobby-view" class="btn btn-red">${svgIcon('home')} TORNA ALLA LOBBY PRINCIPALE</button>
       </div>
     `;
 
@@ -2909,7 +2958,7 @@
       const atkCount = (currentUniverse.incomingAttacks || []).length;
       if (atkCount > uiState.lastAlertCount) {
         playSound('alarm');
-        toast('🚨 ALLARME RADAR: Flotta ostile in arrivo sul tuo pianeta!', 'error');
+        toast('ALLARME RADAR: Flotta ostile in arrivo sul tuo pianeta!', 'error');
       }
       uiState.lastAlertCount = atkCount;
 
@@ -2937,17 +2986,17 @@
       creativeBar.classList.toggle('hidden', isMultiplayerMode || !currentUniverse.creativeMode);
     }
 
-    // Aggiorna etichetta "💬 Comunicazioni" e visibilità voci solo Multiplayer
+    // Aggiorna etichetta "Comunicazioni" (con SVG) e visibilità voci solo Multiplayer
     const sbComm = document.querySelector('.sidebar-btn[data-view="chat"]');
     if (sbComm) {
       sbComm.classList.toggle('hidden', !isMultiplayerMode);
-      sbComm.innerHTML = `<span>💬 Comunicazioni</span> <span id="sidebar-chat-badge" class="badge badge-red ${unreadPrivateCount > 0 ? '' : 'hidden'}">${unreadPrivateCount}</span>`;
+      sbComm.innerHTML = `${svgIcon('chat')}<span>Comunicazioni</span> <span id="sidebar-chat-badge" class="badge badge-red ${unreadPrivateCount > 0 ? '' : 'hidden'}">${unreadPrivateCount}</span>`;
     }
 
     const drComm = document.querySelector('.drawer-item[data-view="chat"]');
     if (drComm) {
       drComm.classList.toggle('hidden', !isMultiplayerMode);
-      drComm.innerHTML = `<span class="icon">💬</span><span>Comunicazioni</span> <span id="drawer-chat-badge" class="badge badge-red ${unreadPrivateCount > 0 ? '' : 'hidden'}" style="position:absolute; top:6px; right:6px;">${unreadPrivateCount}</span>`;
+      drComm.innerHTML = `<span class="icon">${svgIcon('chat')}</span><span>Comunicazioni</span> <span id="drawer-chat-badge" class="badge badge-red ${unreadPrivateCount > 0 ? '' : 'hidden'}" style="position:absolute; top:6px; right:6px;">${unreadPrivateCount}</span>`;
     }
   }
 
@@ -2985,9 +3034,9 @@
           <div>Cristallo estratto: <strong class="text-crystal">+${formatNum(offlineReport.gained.crystal)}</strong></div>
           <div>Deuterio estratto: <strong class="text-deuterium">+${formatNum(offlineReport.gained.deuterium)}</strong></div>
         </div>
-        ${offlineReport.completedBuildings.length > 0 ? `<p style="font-size:0.9rem; margin-bottom:6px;">🏗️ Edifici completati: <strong>${escapeHTML(offlineReport.completedBuildings.join(', '))}</strong></p>` : ''}
-        ${offlineReport.completedResearches.length > 0 ? `<p style="font-size:0.9rem; margin-bottom:6px;">🔬 Ricerche completate: <strong>${escapeHTML(offlineReport.completedResearches.join(', '))}</strong></p>` : ''}
-        ${unitNames ? `<p style="font-size:0.9rem;">🚀 Unità costruite: <strong>${escapeHTML(unitNames)}</strong></p>` : ''}
+        ${offlineReport.completedBuildings.length > 0 ? `<p style="font-size:0.9rem; margin-bottom:6px;">Edifici completati: <strong>${escapeHTML(offlineReport.completedBuildings.join(', '))}</strong></p>` : ''}
+        ${offlineReport.completedResearches.length > 0 ? `<p style="font-size:0.9rem; margin-bottom:6px;">Ricerche completate: <strong>${escapeHTML(offlineReport.completedResearches.join(', '))}</strong></p>` : ''}
+        ${unitNames ? `<p style="font-size:0.9rem;">Unità costruite: <strong>${escapeHTML(unitNames)}</strong></p>` : ''}
       `);
     }
   }
@@ -3025,7 +3074,7 @@
 
           if (unreadCount > prevUnread && currentView !== 'chat') {
             playSound('click');
-            toast('✉️ Nuovo messaggio privato ricevuto!', 'info');
+            toast('Nuovo messaggio privato ricevuto!', 'info');
           }
 
           if (currentView === 'chat' && uiState.commTab === 'private') {
@@ -3040,7 +3089,7 @@
         currentUniverse.incomingAttacks = incomingList;
         if (incomingList.length > uiState.lastAlertCount) {
           playSound('alarm');
-          toast('🚨 RADAR PvP: Un giocatore ha lanciato una flotta verso di te!', 'error');
+          toast('RADAR PvP: Un giocatore ha lanciato una flotta verso di te!', 'error');
         }
         uiState.lastAlertCount = incomingList.length;
         if (currentView === 'overview') renderCurrentView();
