@@ -519,7 +519,7 @@
   };
 
   // =========================================================
-  // RENDERERS: 18 RICERCHE (Stile Olografico Blueprint)
+  // RENDERERS: 19 RICERCHE (Stile Olografico Blueprint)
   // =========================================================
   const RESEARCH_TECHS = {
     energyTech(c) {
@@ -706,6 +706,39 @@
         c.moveTo(86, i); c.lineTo(96, i);
         c.stroke();
       }
+    },
+
+    expeditionTech(c) {
+      _drawBlueprintBg(c, '#ffd700');
+      // Anello esterno bussola astronomica
+      c.strokeStyle = '#ffd700';
+      c.lineWidth = 2;
+      c.beginPath();
+      c.arc(64, 64, 36, 0, Math.PI * 2);
+      c.stroke();
+
+      // Orbita inclinata sonda profonda
+      c.save();
+      c.translate(64, 64);
+      c.rotate(-0.45);
+      c.strokeStyle = '#00e5ff';
+      c.lineWidth = 1.6;
+      c.beginPath();
+      c.ellipse(0, 0, 44, 15, 0, 0, Math.PI * 2);
+      c.stroke();
+      c.restore();
+
+      // Rosa dei venti a 4 punte
+      c.strokeStyle = '#84ffff';
+      c.lineWidth = 1.8;
+      c.beginPath();
+      c.moveTo(64, 24); c.lineTo(70, 58); c.lineTo(104, 64);
+      c.lineTo(70, 70); c.lineTo(64, 104); c.lineTo(58, 70);
+      c.lineTo(24, 64); c.lineTo(58, 58);
+      c.closePath();
+      c.stroke();
+
+      _drawEngineGlow(c, 64, 64, 12, '#ffd700');
     },
 
     astrophysics(c) {
