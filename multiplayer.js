@@ -1,3 +1,7 @@
+/**
+ * UNIVERSUM — Modulo Multiplayer PvP (Firebase Auth + Firestore)
+ * Supporta: Spinta Motori 10-100%, Esplorazioni Profonde, Embargo & Occupazione Planetaria PvP
+ */
 (function () {
   'use strict';
 
@@ -87,6 +91,8 @@
       defenseQueue: [],
       moon: null,
       debris: { metal: 0, crystal: 0 },
+      embargo: null,
+      occupation: null,
       lastUpdated: Date.now()
     };
   }
@@ -171,7 +177,7 @@
 
     const usedKeys = new Set();
     const batch = db.batch();
-    const count = 8 + Math.floor(Math.random() * 3); // 8 - 10 avamposti fissi
+    const count = 8 + Math.floor(Math.random() * 3);
 
     for (let i = 0; i < count; i++) {
       let coords;
@@ -330,7 +336,16 @@
       myPlanets = planetsSnap.docs.map((d) => calculateLiveResources(d.data(), uniData.speed || 10));
     }
 
-    // Carica ultimi messaggi di combattimento / spionaggio per il giocatore
+    // Carica flotte attive del giocatore
+    const activeFleetsSnap = await uniRef.collection('fleets')
+      .where('attackerUid', '==', user.uid)
+      .where('resolved', '==', false)
+      .get()
+      .catch(() => ({ docs: [] }));
+
+    const fleetsInFlight = activeFleetsSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+
+    // Carica ultimi messaggi di combattimento / spionaggio / assedio per il giocatore
     const msgSnap = await uniRef.collection('messages')
       .where('recipientUid', '==', user.uid)
       .orderBy('timestamp', 'desc')
@@ -353,7 +368,7 @@
       activePlanetId: myPlanets[0]?.id,
       researches: playerState.researches || {},
       researchQueue: playerState.researchQueue || null,
-      fleetsInFlight: [],
+      fleetsInFlight,
       incomingAttacks: [],
       spyReports: [],
       messages
@@ -517,7 +532,7 @@
   }
 
   // =========================================================
-  // 5. FLOTTE PvP, SPIONAGGIO, BATTAGLIE E RADAR REAL-TIME
+  // 5. FLOTTE PvP, SPINTA MOTORI, ESPLORAZIONI, EMBARGO & OCCUPAZIONE
   // =========================================================
   async function launchOnlineFleet(universeObj, originPlanetIndex, targetCoords, mission, shipsSelected, cargo = {}, options = {}) {
     const auth = getAuth();
@@ -527,6 +542,27 @@
 
     const planet = universeObj.planets[originPlanetIndex];
     if (!planet) throw new Error('Pianeta di partenza non valido.');
+
+    // Verifica embargo o occupazione sul pianeta di origine
+    const originKey = coordsToKey(planet.coords);
+    const uniRef = db.collection('online_universes').doc(universeObj.id);
+    const freshOriginSnap = await uniRef.collection('planets').doc(originKey).get();
+    if (freshOriginSnap.exists) {
+      const freshOrigin = freshOriginSnap.data();
+      if (freshOrigin.embargo && freshOrigin.embargo.attackerUid !== user.uid) {
+        throw new Error(`Impossibile lanciare flotte: pianeta sotto embargo da ${freshOrigin.embargo.attackerName}!`);
+      }
+      if (freshOrigin.occupation && freshOrigin.occupation.occupierUid !== user.uid) {
+        throw new Error(`Impossibile lanciare flotte: pianeta occupato da ${freshOrigin.occupation.occupierName}!`);
+      }
+    }
+
+    // Controllo limite Slot Flotta (1 + Tecnologia Informatica)
+    const maxSlots = 1 + (universeObj.researches?.computerTech || 0);
+    const activeCount = (universeObj.fleetsInFlight || []).filter((f) => !f.resolved).length;
+    if (activeCount >= maxSlots) {
+      throw new Error(`Slot flotta esauriti (${activeCount}/${maxSlots}). Potenzia Tecnologia Informatica.`);
+    }
 
     const cleanShips = {};
     let totalShips = 0;
@@ -542,8 +578,10 @@
     }
     if (totalShips === 0) throw new Error('Seleziona almeno una nave.');
 
+    const speedPct = Math.min(100, Math.max(10, Number(options.speedPct) || 100));
+    const expeditionHours = Math.min(24, Math.max(1, Number(options.expeditionHours) || 1));
     const dist = window.UniversumGalaxy.calculateDistance(planet.coords, targetCoords);
-    const flightStats = window.UniversumGalaxy.getFleetSpeedAndFuel(universeObj, cleanShips, dist);
+    const flightStats = window.UniversumGalaxy.getFleetSpeedAndFuel(universeObj, cleanShips, dist, speedPct);
 
     const cargoM = Math.max(0, Math.floor(Number(cargo.metal) || 0));
     const cargoC = Math.max(0, Math.floor(Number(cargo.crystal) || 0));
@@ -565,13 +603,21 @@
 
     // Determina eventuale proprietario del pianeta bersaglio per notifiche radar
     const targetKey = coordsToKey(targetCoords);
-    const uniRef = db.collection('online_universes').doc(universeObj.id);
     const targetSnap = await uniRef.collection('planets').doc(targetKey).get();
     const defenderUid = targetSnap.exists ? (targetSnap.data().ownerUid || null) : null;
 
     const now = Date.now();
-    const arrivalTime = now + flightStats.durationSec * 1000;
+    const holdDurationSec = mission === 'expedition'
+      ? Math.max(5, Math.round((expeditionHours * 3600) / Math.max(1, universeObj.speed || 10)))
+      : 0;
+    const arrivalTime = now + (flightStats.durationSec + holdDurationSec) * 1000;
     const returnTime = arrivalTime + flightStats.durationSec * 1000;
+
+    const ransom = options.ransom ? {
+      metal: Math.max(0, Math.floor(Number(options.ransom.metal) || 0)),
+      crystal: Math.max(0, Math.floor(Number(options.ransom.crystal) || 0)),
+      deuterium: Math.max(0, Math.floor(Number(options.ransom.deuterium) || 0))
+    } : { metal: 50000, crystal: 25000, deuterium: 10000 };
 
     const fleetDoc = {
       attackerUid: user.uid,
@@ -579,13 +625,17 @@
       attackerTech: {
         weaponsTech: universeObj.researches?.weaponsTech || 0,
         shieldingTech: universeObj.researches?.shieldingTech || 0,
-        armourTech: universeObj.researches?.armourTech || 0
+        armourTech: universeObj.researches?.armourTech || 0,
+        expeditionTech: universeObj.researches?.expeditionTech || 0
       },
       defenderUid,
       originCoords: Object.assign({}, planet.coords),
       targetCoords: { g: Number(targetCoords.g), s: Number(targetCoords.s), p: Number(targetCoords.p) },
       targetKey,
       mission,
+      speedPct,
+      expeditionHours,
+      ransom,
       ships: cleanShips,
       cargo: { metal: cargoM, crystal: cargoC, deuterium: cargoD },
       blackHole: Boolean(options.blackHole),
@@ -603,11 +653,50 @@
     return fleetDoc;
   }
 
+  async function recallOnlineFleet(universeObj, fleetId) {
+    const auth = getAuth();
+    const db = getDB();
+    const user = auth.currentUser;
+    if (!user || !universeObj?.id) throw new Error('Utente non autenticato.');
+
+    const uniRef = db.collection('online_universes').doc(universeObj.id);
+    const fleetRef = uniRef.collection('fleets').doc(fleetId);
+    const snap = await fleetRef.get();
+    if (!snap.exists) throw new Error('Flotta non trovata.');
+
+    const fleet = snap.data();
+    if (fleet.attackerUid !== user.uid) throw new Error('Non puoi richiamare una flotta non tua.');
+    if (fleet.resolved || fleet.status !== 'outbound') {
+      throw new Error('La flotta sta già rientrando o ha completato la missione.');
+    }
+
+    const now = Date.now();
+    const elapsedMs = Math.max(2000, now - Number(fleet.departureTime || now));
+    const newArrival = now + elapsedMs;
+
+    await fleetRef.update({
+      status: 'returning',
+      mission: 'recall',
+      arrivalTime: newArrival,
+      returnTime: newArrival
+    });
+
+    const local = (universeObj.fleetsInFlight || []).find((f) => f.id === fleetId);
+    if (local) {
+      local.status = 'returning';
+      local.mission = 'recall';
+      local.arrivalTime = newArrival;
+      local.returnTime = newArrival;
+    }
+  }
+
   function listenIncomingFleets(universeObj, callback) {
     const auth = getAuth();
     const db = getDB();
     const user = auth.currentUser;
     if (!user || !universeObj?.id) return () => {};
+
+    const hostileMissions = new Set(['attack', 'spy', 'destroyMoon', 'blockade', 'occupy']);
 
     return db.collection('online_universes').doc(universeObj.id).collection('fleets')
       .where('defenderUid', '==', user.uid)
@@ -615,7 +704,7 @@
       .onSnapshot((snap) => {
         const list = snap.docs
           .map((d) => Object.assign({ id: d.id }, d.data()))
-          .filter((f) => f.attackerUid !== user.uid && (f.mission === 'attack' || f.mission === 'spy' || f.mission === 'destroyMoon'));
+          .filter((f) => f.attackerUid !== user.uid && hostileMissions.has(f.mission));
         callback(list);
       }, (err) => {
         console.warn('[MP Radar] Errore listener flotte in arrivo:', err);
@@ -628,8 +717,8 @@
     const now = Date.now();
 
     const arrivedSnap = await uniRef.collection('fleets')
-      .where('status', '==', 'outbound')
       .where('arrivalTime', '<=', now)
+      .where('resolved', '==', false)
       .limit(10)
       .get();
 
@@ -657,17 +746,35 @@
 
           let reportTitle = `Missione ${fleet.mission.toUpperCase()} [${fleet.targetKey}]`;
           let reportBody = 'Missione completata.';
+          let returnShips = Object.assign({}, fleet.ships || {});
+          let returnCargo = Object.assign({ metal: 0, crystal: 0, deuterium: 0 }, fleet.cargo || {});
 
-          if (fleet.mission === 'spy' && targetPlanet) {
+          if (fleet.status === 'returning' || fleet.mission === 'recall') {
+            reportTitle = `↩️ Flotta Richiamata Rientrata [${coordsToKey(fleet.originCoords)}]`;
+            reportBody = 'Le navi sono rientrate alla base con il carico integro.';
+          } else if (fleet.mission === 'spy' && targetPlanet) {
             reportTitle = `👁️ Rapporto Spionaggio su ${targetPlanet.name} [${fleet.targetKey}]`;
             reportBody = `Risorse rilevate — Metallo: ${Math.floor(targetPlanet.resources.metal)}, Cristallo: ${Math.floor(targetPlanet.resources.crystal)}, Deuterio: ${Math.floor(targetPlanet.resources.deuterium)}.`;
           } else if (fleet.mission === 'transport' && targetPlanet) {
-            targetPlanet.resources.metal += fleet.cargo.metal || 0;
-            targetPlanet.resources.crystal += fleet.cargo.crystal || 0;
-            targetPlanet.resources.deuterium += fleet.cargo.deuterium || 0;
+            targetPlanet.resources.metal += returnCargo.metal;
+            targetPlanet.resources.crystal += returnCargo.crystal;
+            targetPlanet.resources.deuterium += returnCargo.deuterium;
+            returnCargo = { metal: 0, crystal: 0, deuterium: 0 };
             tx.set(targetPlanetRef, targetPlanet, { merge: true });
             reportTitle = `📦 Consegna Risorse su ${targetPlanet.name}`;
             reportBody = `Consegnati ${fleet.cargo.metal} M, ${fleet.cargo.crystal} C, ${fleet.cargo.deuterium} D.`;
+          } else if (fleet.mission === 'deploy' && targetPlanet && targetPlanet.ownerUid === fleet.attackerUid) {
+            for (const [sId, qty] of Object.entries(returnShips)) {
+              targetPlanet.fleet[sId] = (targetPlanet.fleet[sId] || 0) + qty;
+            }
+            targetPlanet.resources.metal += returnCargo.metal;
+            targetPlanet.resources.crystal += returnCargo.crystal;
+            targetPlanet.resources.deuterium += returnCargo.deuterium;
+            returnShips = {};
+            returnCargo = { metal: 0, crystal: 0, deuterium: 0 };
+            tx.set(targetPlanetRef, targetPlanet, { merge: true });
+            reportTitle = `⚓ Schieramento Completato su ${targetPlanet.name}`;
+            reportBody = 'La flotta si è unita alla guarnigione locale.';
           } else if (fleet.mission === 'colonize' && !targetPlanet) {
             const newColony = createStarterPlanetDoc(
               uniId,
@@ -677,10 +784,44 @@
               `Colonia ${fleet.targetKey}`,
               false
             );
+            newColony.resources.metal += returnCargo.metal;
+            newColony.resources.crystal += returnCargo.crystal;
+            newColony.resources.deuterium += returnCargo.deuterium;
+            returnCargo = { metal: 0, crystal: 0, deuterium: 0 };
+            if (returnShips.colonyShip) {
+              returnShips.colonyShip = Math.max(0, returnShips.colonyShip - 1);
+            }
             tx.set(targetPlanetRef, newColony);
             reportTitle = `🌍 Nuova Colonia Fondata [${fleet.targetKey}]`;
             reportBody = `Il pianeta in coordinate [${fleet.targetKey}] è ora sotto il tuo comando.`;
-          } else if (fleet.mission === 'attack' && targetPlanet && window.UniversumGalaxy?.resolveCombat) {
+          } else if (fleet.mission === 'expedition') {
+            const expLv = fleet.attackerTech?.expeditionTech || 0;
+            const hrs = fleet.expeditionHours || 1;
+            const mult = (1 + expLv * 0.25) * (1 + (hrs - 1) * 0.22);
+            const roll = Math.random();
+            if (roll < 0.55) {
+              const foundM = Math.floor((8000 + Math.random() * 14000) * mult);
+              const foundC = Math.floor((5000 + Math.random() * 9000) * mult);
+              const foundD = Math.floor((2000 + Math.random() * 5000) * mult);
+              returnCargo.metal += foundM;
+              returnCargo.crystal += foundC;
+              returnCargo.deuterium += foundD;
+              reportTitle = `🧭 Esplorazione Profonda [${fleet.targetKey}] (${hrs}h)`;
+              reportBody = `Relitti recuperati nello spazio profondo: +${foundM} M, +${foundC} C, +${foundD} D.`;
+            } else if (roll < 0.78) {
+              const bonusShips = Math.max(1, Math.floor((1 + Math.random() * 3) * (1 + expLv * 0.15)));
+              returnShips.lightFighter = (returnShips.lightFighter || 0) + bonusShips;
+              reportTitle = `🧭 Esplorazione Profonda [${fleet.targetKey}] (${hrs}h)`;
+              reportBody = `La spedizione ha riattivato ${bonusShips} Caccia Leggeri abbandonati alla deriva!`;
+            } else {
+              reportTitle = `🧭 Esplorazione Profonda [${fleet.targetKey}] (${hrs}h)`;
+              reportBody = 'Nessuna anomalia rilevata nel settore esplorato. Flotta rientrata alla base.';
+            }
+          } else if (
+            (fleet.mission === 'attack' || fleet.mission === 'blockade' || fleet.mission === 'occupy') &&
+            targetPlanet &&
+            window.UniversumGalaxy?.resolveCombat
+          ) {
             const combat = window.UniversumGalaxy.resolveCombat(
               fleet.ships,
               fleet.attackerTech,
@@ -696,35 +837,73 @@
 
             targetPlanet.fleet = combat.defenderSurvivors;
             targetPlanet.defenses = combat.defenderDefenseSurvivors;
-            targetPlanet.resources.metal = Math.max(0, targetPlanet.resources.metal - combat.loot.metal);
-            targetPlanet.resources.crystal = Math.max(0, targetPlanet.resources.crystal - combat.loot.crystal);
-            targetPlanet.resources.deuterium = Math.max(0, targetPlanet.resources.deuterium - combat.loot.deuterium);
             targetPlanet.debris = {
               metal: (targetPlanet.debris?.metal || 0) + combat.debris.metal,
               crystal: (targetPlanet.debris?.crystal || 0) + combat.debris.crystal
             };
-            tx.set(targetPlanetRef, targetPlanet, { merge: true });
 
-            if (originPlanet) {
-              for (const [sId, surv] of Object.entries(combat.attackerSurvivors)) {
-                originPlanet.fleet[sId] = (originPlanet.fleet[sId] || 0) + surv;
+            if (fleet.mission === 'attack') {
+              targetPlanet.resources.metal = Math.max(0, targetPlanet.resources.metal - combat.loot.metal);
+              targetPlanet.resources.crystal = Math.max(0, targetPlanet.resources.crystal - combat.loot.crystal);
+              targetPlanet.resources.deuterium = Math.max(0, targetPlanet.resources.deuterium - combat.loot.deuterium);
+              returnShips = combat.attackerSurvivors;
+              returnCargo.metal += combat.loot.metal;
+              returnCargo.crystal += combat.loot.crystal;
+              returnCargo.deuterium += combat.loot.deuterium;
+              reportTitle = `⚔️ Battaglia PvP su ${targetPlanet.name} [${fleet.targetKey}]`;
+              reportBody = `Esito: ${combat.result}. Bottino: ${combat.loot.metal} M, ${combat.loot.crystal} C, ${combat.loot.deuterium} D.`;
+            } else if (fleet.mission === 'blockade') {
+              if (combat.result === 'attacker_win') {
+                targetPlanet.embargo = {
+                  attackerUid: fleet.attackerUid,
+                  attackerName: fleet.attackerName,
+                  originCoords: fleet.originCoords,
+                  ships: combat.attackerSurvivors,
+                  ransom: fleet.ransom,
+                  startedAt: now
+                };
+                returnShips = {}; // Le navi restano in orbita a mantenere l'embargo
+                reportTitle = `🚧 Embargo Stabilito su ${targetPlanet.name} [${fleet.targetKey}]`;
+                reportBody = `Spazio aereo bloccato. Riscatto richiesto: ${fleet.ransom.metal} M, ${fleet.ransom.crystal} C, ${fleet.ransom.deuterium} D.`;
+              } else {
+                returnShips = combat.attackerSurvivors;
+                reportTitle = `🚧 Tentativo di Embargo Respinto [${fleet.targetKey}]`;
+                reportBody = `Le difese di ${targetPlanet.name} hanno respinto il blocco navale.`;
               }
-              originPlanet.resources.metal += combat.loot.metal;
-              originPlanet.resources.crystal += combat.loot.crystal;
-              originPlanet.resources.deuterium += combat.loot.deuterium;
-              tx.set(originPlanetRef, originPlanet, { merge: true });
+            } else if (fleet.mission === 'occupy') {
+              if (combat.result === 'attacker_win') {
+                targetPlanet.occupation = {
+                  occupierUid: fleet.attackerUid,
+                  occupierName: fleet.attackerName,
+                  originCoords: fleet.originCoords,
+                  garrisonShips: combat.attackerSurvivors,
+                  ransom: fleet.ransom,
+                  startedAt: now,
+                  lastTributeAt: now
+                };
+                returnShips = {}; // Guarnigione stazionata sul pianeta occupato
+                reportTitle = `🏴 Pianeta Occupato: ${targetPlanet.name} [${fleet.targetKey}]`;
+                reportBody = `Guarnigione schierata. Tributi automatici del 5% ogni 24h attivi. Riscatto: ${fleet.ransom.metal} M, ${fleet.ransom.crystal} C, ${fleet.ransom.deuterium} D.`;
+              } else {
+                returnShips = combat.attackerSurvivors;
+                reportTitle = `🏴 Occupazione Respinta [${fleet.targetKey}]`;
+                reportBody = `Assalto fallito su ${targetPlanet.name}.`;
+              }
             }
 
-            reportTitle = `⚔️ Battaglia PvP su ${targetPlanet.name} [${fleet.targetKey}]`;
-            reportBody = `Esito: ${combat.result}. Bottino: ${combat.loot.metal} M, ${combat.loot.crystal} C, ${combat.loot.deuterium} D.`;
+            tx.set(targetPlanetRef, targetPlanet, { merge: true });
           }
 
-          // Ritorno immediato navi superstiti per missioni non di combattimento
-          if (fleet.mission !== 'attack' && originPlanet) {
-            for (const [sId, qty] of Object.entries(fleet.ships)) {
-              if (fleet.mission === 'colonize' && sId === 'colonyShip') continue;
-              originPlanet.fleet[sId] = (originPlanet.fleet[sId] || 0) + qty;
+          // Rientro navi e carico sul pianeta di partenza
+          if (originPlanet) {
+            for (const [sId, surv] of Object.entries(returnShips)) {
+              if (surv > 0) {
+                originPlanet.fleet[sId] = (originPlanet.fleet[sId] || 0) + surv;
+              }
             }
+            originPlanet.resources.metal += returnCargo.metal || 0;
+            originPlanet.resources.crystal += returnCargo.crystal || 0;
+            originPlanet.resources.deuterium += returnCargo.deuterium || 0;
             tx.set(originPlanetRef, originPlanet, { merge: true });
           }
 
@@ -743,7 +922,7 @@
             tx.set(msgDefRef, {
               recipientUid: fleet.defenderUid,
               title: `🚨 ${reportTitle}`,
-              body: `Attaccante: ${fleet.attackerName}. ${reportBody}`,
+              body: `Comandante: ${fleet.attackerName}. ${reportBody}`,
               timestamp: now
             });
           }
@@ -752,6 +931,179 @@
         console.warn('[MP Transaction] Risoluzione flotta rinviata:', err);
       }
     }
+  }
+
+  // =========================================================
+  // 5B. GESTIONE EMBARGO, OCCUPAZIONE & RISCATTI ONLINE
+  // =========================================================
+  async function processOnlineOccupations(uniId) {
+    const auth = getAuth();
+    const db = getDB();
+    const user = auth.currentUser;
+    if (!user || !uniId) return;
+
+    const uniRef = db.collection('online_universes').doc(uniId);
+    const snap = await uniRef.collection('planets')
+      .where('occupation.occupierUid', '==', user.uid)
+      .get()
+      .catch(() => ({ docs: [] }));
+
+    if (snap.empty) return;
+
+    const now = Date.now();
+    const DAY_MS = 24 * 3600 * 1000;
+
+    for (const pDoc of snap.docs) {
+      const pl = pDoc.data();
+      const occ = pl.occupation;
+      if (!occ) continue;
+
+      const elapsed = now - Number(occ.lastTributeAt || occ.startedAt || now);
+      const cycles = Math.floor(elapsed / DAY_MS);
+      if (cycles < 1) continue;
+
+      const rate = Math.min(0.5, 0.05 * cycles);
+      const tribM = Math.floor((pl.resources?.metal || 0) * rate);
+      const tribC = Math.floor((pl.resources?.crystal || 0) * rate);
+      const tribD = Math.floor((pl.resources?.deuterium || 0) * rate);
+
+      const originKey = coordsToKey(occ.originCoords);
+      const originRef = uniRef.collection('planets').doc(originKey);
+
+      await db.runTransaction(async (tx) => {
+        const freshTarget = await tx.get(pDoc.ref);
+        const freshOrigin = await tx.get(originRef);
+        if (!freshTarget.exists || !freshOrigin.exists) return;
+
+        const tData = freshTarget.data();
+        const oData = freshOrigin.data();
+        if (!tData.occupation || tData.occupation.occupierUid !== user.uid) return;
+
+        tx.update(pDoc.ref, {
+          'resources.metal': Math.max(0, (tData.resources?.metal || 0) - tribM),
+          'resources.crystal': Math.max(0, (tData.resources?.crystal || 0) - tribC),
+          'resources.deuterium': Math.max(0, (tData.resources?.deuterium || 0) - tribD),
+          'occupation.lastTributeAt': Number(occ.lastTributeAt || occ.startedAt) + cycles * DAY_MS
+        });
+
+        tx.update(originRef, {
+          'resources.metal': (oData.resources?.metal || 0) + tribM,
+          'resources.crystal': (oData.resources?.crystal || 0) + tribC,
+          'resources.deuterium': (oData.resources?.deuterium || 0) + tribD
+        });
+      }).catch(() => {});
+    }
+  }
+
+  async function payOnlineSiegeRansom(uniId, targetCoords) {
+    const auth = getAuth();
+    const db = getDB();
+    const user = auth.currentUser;
+    if (!user) throw new Error('Utente non autenticato.');
+
+    const uniRef = db.collection('online_universes').doc(uniId);
+    const key = coordsToKey(targetCoords);
+    const planetRef = uniRef.collection('planets').doc(key);
+
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(planetRef);
+      if (!snap.exists) throw new Error('Pianeta non trovato.');
+      const pl = snap.data();
+      if (pl.ownerUid !== user.uid) throw new Error('Non sei il proprietario di questo pianeta.');
+
+      const siege = pl.occupation || pl.embargo;
+      const isOcc = Boolean(pl.occupation);
+      if (!siege) throw new Error('Nessun embargo o occupazione attiva su questo pianeta.');
+
+      const ransom = siege.ransom || { metal: 0, crystal: 0, deuterium: 0 };
+      if (
+        (pl.resources?.metal || 0) < ransom.metal ||
+        (pl.resources?.crystal || 0) < ransom.crystal ||
+        (pl.resources?.deuterium || 0) < ransom.deuterium
+      ) {
+        throw new Error('Risorse insufficienti sul pianeta per pagare il riscatto.');
+      }
+
+      const attackerOriginKey = coordsToKey(siege.originCoords);
+      const attackerOriginRef = uniRef.collection('planets').doc(attackerOriginKey);
+      const attackerOriginSnap = await tx.get(attackerOriginRef);
+
+      tx.update(planetRef, {
+        'resources.metal': pl.resources.metal - ransom.metal,
+        'resources.crystal': pl.resources.crystal - ransom.crystal,
+        'resources.deuterium': pl.resources.deuterium - ransom.deuterium,
+        embargo: null,
+        occupation: null
+      });
+
+      if (attackerOriginSnap.exists) {
+        const attPl = attackerOriginSnap.data();
+        const updatedFleet = Object.assign({}, attPl.fleet || {});
+        const returningShips = siege.garrisonShips || siege.ships || {};
+        for (const [sId, qty] of Object.entries(returningShips)) {
+          updatedFleet[sId] = (updatedFleet[sId] || 0) + qty;
+        }
+        tx.update(attackerOriginRef, {
+          'resources.metal': (attPl.resources?.metal || 0) + ransom.metal,
+          'resources.crystal': (attPl.resources?.crystal || 0) + ransom.crystal,
+          'resources.deuterium': (attPl.resources?.deuterium || 0) + ransom.deuterium,
+          fleet: updatedFleet
+        });
+      }
+
+      const attackerUid = isOcc ? siege.occupierUid : siege.attackerUid;
+      if (attackerUid) {
+        const msgRef = uniRef.collection('messages').doc();
+        tx.set(msgRef, {
+          recipientUid: attackerUid,
+          title: `💰 Riscatto Pagato [${key}]`,
+          body: `${pl.ownerName} ha pagato ${ransom.metal} M, ${ransom.crystal} C, ${ransom.deuterium} D. Le tue navi stanno rientrando.`,
+          timestamp: Date.now()
+        });
+      }
+    });
+  }
+
+  async function liftOnlineSiege(uniId, targetCoords) {
+    const auth = getAuth();
+    const db = getDB();
+    const user = auth.currentUser;
+    if (!user) throw new Error('Utente non autenticato.');
+
+    const uniRef = db.collection('online_universes').doc(uniId);
+    const key = coordsToKey(targetCoords);
+    const planetRef = uniRef.collection('planets').doc(key);
+
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(planetRef);
+      if (!snap.exists) throw new Error('Pianeta non trovato.');
+      const pl = snap.data();
+
+      const isMyEmbargo = pl.embargo && pl.embargo.attackerUid === user.uid;
+      const isMyOccupation = pl.occupation && pl.occupation.occupierUid === user.uid;
+      if (!isMyEmbargo && !isMyOccupation) {
+        throw new Error('Non hai assedi attivi su questo pianeta.');
+      }
+
+      const siege = isMyOccupation ? pl.occupation : pl.embargo;
+      const originRef = uniRef.collection('planets').doc(coordsToKey(siege.originCoords));
+      const originSnap = await tx.get(originRef);
+
+      tx.update(planetRef, {
+        embargo: isMyEmbargo ? null : pl.embargo,
+        occupation: isMyOccupation ? null : pl.occupation
+      });
+
+      if (originSnap.exists) {
+        const oPl = originSnap.data();
+        const updatedFleet = Object.assign({}, oPl.fleet || {});
+        const returningShips = siege.garrisonShips || siege.ships || {};
+        for (const [sId, qty] of Object.entries(returningShips)) {
+          updatedFleet[sId] = (updatedFleet[sId] || 0) + qty;
+        }
+        tx.update(originRef, { fleet: updatedFleet });
+      }
+    });
   }
 
   // =========================================================
@@ -849,7 +1201,6 @@
       .collection('private_chats').doc(chatId);
     const messagesColRef = chatDocRef.collection('messages');
 
-    // 1. Aggiunge il nuovo messaggio nella sottoraccolta
     await messagesColRef.add({
       senderUid: myUid,
       senderName: myName,
@@ -857,7 +1208,6 @@
       timestamp: now
     });
 
-    // 2. Aggiorna i metadati della stanza padre
     await chatDocRef.set({
       participants: [myUid, targetUid],
       participantNames: {
@@ -869,7 +1219,6 @@
       unreadFor: targetUid
     }, { merge: true });
 
-    // 3. Pulizia in background dei messaggi oltre il 15° più recente
     messagesColRef.orderBy('timestamp', 'desc').get().then((snap) => {
       if (snap.size > 15) {
         const batch = db.batch();
@@ -924,7 +1273,6 @@
       .orderBy('timestamp', 'desc')
       .limit(15)
       .onSnapshot(async (snap) => {
-        // Azzera il flag unreadFor se la chat era non letta dall'utente corrente
         chatDocRef.get().then((roomSnap) => {
           if (roomSnap.exists && roomSnap.data().unreadFor === myUid) {
             chatDocRef.update({ unreadFor: null }).catch(() => {});
@@ -951,8 +1299,12 @@
     renameOnlineMoon,
     getOnlineSystem,
     launchOnlineFleet,
+    recallOnlineFleet,
     listenIncomingFleets,
     resolveArrivedOnlineFleets,
+    processOnlineOccupations,
+    payOnlineSiegeRansom,
+    liftOnlineSiege,
     getLeaderboard,
     sendChatMessage,
     listenChat,
