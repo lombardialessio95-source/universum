@@ -1,10 +1,11 @@
-const CACHE_NAME = 'universum-v3';
+const CACHE_NAME = 'universum-v4';
 const STATIC_ASSETS = [
   './',
   './index.html',
   './style.css',
   './db.js',
   './data.js',
+  './graphics.js',
   './engine.js',
   './galaxy.js',
   './firebase-config.js',
