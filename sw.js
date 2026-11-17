@@ -1,7 +1,7 @@
 /**
  * UNIVERSUM — Service Worker PWA (Offline-First + Network-First per Firebase)
  */
-const CACHE_NAME = 'universum-v5';
+const CACHE_NAME = 'universum-v6';
 
 const ASSETS = [
   './',
@@ -18,7 +18,10 @@ const ASSETS = [
   './engine-core.js',
   './engine-actions.js',
   './galaxy.js',
-  './ui.js'
+  './ui-core.js',
+  './ui-economy.js',
+  './ui-tactical.js',
+  './ui-social.js'
 ];
 
 self.addEventListener('install', (event) => {
