@@ -1,27 +1,33 @@
 /**
  * UNIVERSUM — Service Worker PWA (Offline-First + Network-First per Firebase)
  */
-const CACHE_NAME = 'universum-v8';
+const CACHE_NAME = 'universum-v9';
 
 const ASSETS = [
   './',
   './index.html',
   './manifest.json',
   './style.css',
-  './firebase-config.js',
-  './multiplayer.js',
-  './graphics-core.js',
-  './graphics-ships.js',
-  './graphics-structures.js',
-  './db.js',
-  './data.js',
-  './engine-core.js',
-  './engine-actions.js',
-  './galaxy.js',
-  './ui-core.js',
-  './ui-economy.js',
-  './ui-tactical.js',
-  './ui-social.js'
+
+  // Moduli Core Applicazione
+  './db.js',                  // Database locale IndexedDB
+  './data.js',                // Enciclopedia: edifici, ricerche, navi e difese
+  './graphics-core.js',       // Nucleo grafico Canvas/SVG
+  './graphics-ships.js',      // Ritratti procedurali navi e difese
+  './graphics-structures.js', // Ritratti procedurali edifici, luna e ricerche
+  './engine-core.js',         // Motore matematico, produzione e tick
+  './engine-actions.js',      // Azioni giocatore, turbo, creative e autosave
+  './galaxy.js',              // Galassia procedurale, combattimenti e IA BOT
+  './firebase-config.js',     // Configurazione Firebase Auth + Firestore
+  './multiplayer.js',         // Logica PvP online, chat e classifica
+  './ui-core.js',             // Regia UI, loop 1s, Panoramica e salvataggi
+  './ui-economy.js',          // UI Edifici, Ricerche, Cantiere, Difese e Luna
+  './ui-tactical.js',         // UI Flotta, Galassia, Spionaggio e Simulatore
+  './ui-social.js',           // UI Commercio, Classifica e Comunicazioni
+
+  // Moduli Plugin Espansione
+  './missions-core.js',       // Ricerca Esplorazione, spinta 10-100%, slot e richiamo
+  './ui-fleet-movements.js'   // Schermata UI Movimento Flotta e stato assedi
 ];
 
 self.addEventListener('install', (event) => {
@@ -49,6 +55,7 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(req.url);
 
+  // Escludi le chiamate API di Firebase/Google dalla cache statica
   if (
     url.hostname.includes('firestore.googleapis.com') ||
     url.hostname.includes('identitytoolkit.googleapis.com') ||
@@ -57,6 +64,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // Strategia Network-First con fallback istantaneo alla Cache
   event.respondWith(
     fetch(req)
       .then((networkRes) => {
