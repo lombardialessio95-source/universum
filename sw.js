@@ -1,7 +1,7 @@
 /**
  * UNIVERSUM — Service Worker PWA (Offline-First + Network-First per Firebase)
  */
-const CACHE_NAME = 'universum-v6';
+const CACHE_NAME = 'universum-v8';
 
 const ASSETS = [
   './',
@@ -49,7 +49,6 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(req.url);
 
-  // Escludi le chiamate API di Firebase/Google dalla cache statica
   if (
     url.hostname.includes('firestore.googleapis.com') ||
     url.hostname.includes('identitytoolkit.googleapis.com') ||
@@ -58,7 +57,6 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Strategia Network-First con fallback istantaneo alla Cache
   event.respondWith(
     fetch(req)
       .then((networkRes) => {
