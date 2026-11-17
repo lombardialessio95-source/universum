@@ -43,15 +43,19 @@
   // HELPER GRAFICI & SVG VETTORIALI (ZERO EMOJI)
   // =========================================================
   function artTag(id, cls = 'unit-art', alt = '') {
-    const src = window.UniversumGraphics?.getArt ? window.UniversumGraphics.getArt(id) : '';
-    if (!src) return '';
-    return `<img src="${src}" class="${cls}" alt="${escapeHTML(alt)}" loading="lazy">`;
+    const res = window.UniversumGraphics?.getArt ? window.UniversumGraphics.getArt(id) : '';
+    if (!res) return '';
+    if (String(res).trim().startsWith('<')) return res;
+    return `<img src="${res}" class="${cls}" alt="${escapeHTML(alt)}" loading="lazy">`;
   }
 
   function resIconTag(type) {
-    const src = window.UniversumGraphics?.getResourceIcon ? window.UniversumGraphics.getResourceIcon(type) : '';
-    if (!src) return '';
-    return `<img src="${src}" class="res-icon" alt="">`;
+    const res = window.UniversumGraphics?.getResourceIcon
+      ? window.UniversumGraphics.getResourceIcon(type, 'res-icon')
+      : '';
+    if (!res) return '';
+    if (String(res).trim().startsWith('<')) return res;
+    return `<img src="${res}" class="res-icon" alt="">`;
   }
 
   function svgIcon(name) {
@@ -2500,7 +2504,7 @@
   }
 
   // ---------------------------------------------------------
-  // 12. COMUNICAZIONI (TAB 1: CHAT GALATTICA 100 | TAB 2: PRIVATI 15)
+  // 12. COMUNICAZIONI (TAB 1: CHAT GALATTICA 50 | TAB 2: PRIVATI 15)
   // ---------------------------------------------------------
   async function renderCommunications(viewport) {
     if (!isMultiplayerMode) {
@@ -2514,7 +2518,7 @@
       <div style="display:flex; flex-direction:column; gap:12px;">
         <div class="comm-tabs-bar">
           <button type="button" id="comm-tab-galactic" class="comm-tab-btn ${isGalactic ? 'active' : ''}">
-            ${svgIcon('globe')} Chat Galattica (100)
+            ${svgIcon('globe')} Chat Galattica (50)
           </button>
           <button type="button" id="comm-tab-private" class="comm-tab-btn ${!isGalactic ? 'active' : ''}">
             ${svgIcon('mail')} Messaggi Privati (15)
@@ -2553,7 +2557,7 @@
       <div class="glass-panel chat-panel-wrapper">
         <div style="display:flex; justify-content:space-between; align-items:center;">
           <span class="text-muted" style="font-size:0.88rem;">Tocca il nickname di un imperatore per aprire una chat privata</span>
-          <span class="badge badge-green">ULTIMI 100</span>
+          <span class="badge badge-green">ULTIMI 50</span>
         </div>
         <div id="chat-messages-box" class="chat-messages-box"></div>
         <form id="form-send-chat" class="chat-input-bar">
