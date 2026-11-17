@@ -1,7 +1,7 @@
 /**
  * UNIVERSUM — Service Worker PWA (Offline-First + Network-First per Firebase)
  */
-const CACHE_NAME = 'universum-v4';
+const CACHE_NAME = 'universum-v5';
 
 const ASSETS = [
   './',
@@ -15,7 +15,8 @@ const ASSETS = [
   './graphics-structures.js',
   './db.js',
   './data.js',
-  './engine.js',
+  './engine-core.js',
+  './engine-actions.js',
   './galaxy.js',
   './ui.js'
 ];
@@ -45,7 +46,7 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(req.url);
 
-  // Escludi le chiamate API di Firebase/Google da cache statica
+  // Escludi le chiamate API di Firebase/Google dalla cache statica
   if (
     url.hostname.includes('firestore.googleapis.com') ||
     url.hostname.includes('identitytoolkit.googleapis.com') ||
