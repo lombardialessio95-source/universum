@@ -1223,6 +1223,9 @@
         if (mpTickCounter % 3 === 0 && window.UniversumMP?.resolveArrivedOnlineFleets) {
           window.UniversumMP.resolveArrivedOnlineFleets(uni.id).catch(() => {});
         }
+        if (mpTickCounter % 30 === 0 && window.UniversumMP?.processOnlineOccupations) {
+          window.UniversumMP.processOnlineOccupations(uni.id).catch(() => {});
+        }
         if (mpTickCounter % 15 === 0) {
           UI.persistUniverseState().catch(() => {});
         }
