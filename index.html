@@ -305,19 +305,34 @@
     }
   </script>
 
-  <!-- FIREBASE v10 COMPAT SDK -->
+  <!-- =========================================================
+       MODULI APPLICAZIONE (ORDINE DI CARICAMENTO OBBLIGATORIO)
+       ========================================================= -->
+
+  <!-- 1. INFRASTRUTTURA FIREBASE v10 COMPAT SDK -->
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 
-  <!-- MODULI APPLICAZIONE -->
+  <!-- 2. PERSISTENZA LOCALE, DIZIONARI DI GIOCO & GRAFICA -->
   <script src="./db.js"></script>
   <script src="./data.js"></script>
   <script src="./graphics.js"></script>
+
+  <!-- 3. MOTORE DI SIMULAZIONE, GALASSIA & MULTIPLAYER -->
   <script src="./engine.js"></script>
   <script src="./galaxy.js"></script>
   <script src="./firebase-config.js"></script>
   <script src="./multiplayer.js"></script>
-  <script src="./ui.js"></script>
+
+  <!-- 4. INTERFACCIA UTENTE (DIVISA PER MACROAREE) -->
+  <!-- ui-core.js: stato globale, lobby, loop 1s, audio, canvas pianeta, panoramica, salvataggi -->
+  <script src="./ui-core.js"></script>
+  <!-- ui-economy.js: edifici, ricerche, cantiere navale, difesa, luna, impero -->
+  <script src="./ui-economy.js"></script>
+  <!-- ui-tactical.js: flotta, galassia, spionaggio/simulatore, commercio -->
+  <script src="./ui-tactical.js"></script>
+  <!-- ui-social.js: classifica, chat galattica (50), messaggi privati (15) -->
+  <script src="./ui-social.js"></script>
 </body>
 </html>
