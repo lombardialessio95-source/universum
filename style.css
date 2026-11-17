@@ -1109,3 +1109,146 @@ th {
   from { opacity: 0; transform: translateY(-10px); }
   to { opacity: 1; transform: translateY(0); }
 }
+/* =========================================================
+   CUSTOM SCI-FI DROPDOWN (UNIVERSALE: DESKTOP + MOBILE TOUCH)
+   ========================================================= */
+.uni-select-wrap {
+  position: relative;
+  display: inline-block;
+  width: 100%;
+  vertical-align: middle;
+}
+
+.uni-select-trigger {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 38px 10px 14px;
+  background: linear-gradient(180deg, rgba(16, 26, 56, 0.94), rgba(8, 13, 32, 0.98));
+  border: 1px solid rgba(0, 210, 255, 0.42);
+  border-radius: 10px;
+  color: #e8f4ff;
+  font-family: inherit;
+  font-size: 0.94rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 4px 14px rgba(0, 0, 0, 0.35);
+  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+  position: relative;
+}
+
+.uni-select-trigger::after {
+  content: '';
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid #00d2ff;
+  border-bottom: 2px solid #00d2ff;
+  transform: translateY(-65%) rotate(45deg);
+  transition: transform 0.2s ease;
+  pointer-events: none;
+}
+
+.uni-select-wrap.open .uni-select-trigger::after {
+  transform: translateY(-25%) rotate(-135deg);
+}
+
+.uni-select-trigger:hover,
+.uni-select-wrap.open .uni-select-trigger {
+  border-color: #00d2ff;
+  box-shadow: 0 0 14px rgba(0, 210, 255, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+
+.uni-select-trigger:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Barra superiore selettore pianeta */
+#active-planet-select + .uni-select-wrap .uni-select-trigger {
+  min-height: 40px;
+  padding: 8px 34px 8px 12px;
+  font-size: 0.9rem;
+  border-color: rgba(0, 230, 118, 0.48);
+}
+
+.uni-select-menu {
+  position: fixed;
+  z-index: 99999;
+  max-height: min(300px, 52vh);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  background: rgba(9, 15, 36, 0.98);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(0, 210, 255, 0.6);
+  border-radius: 12px;
+  padding: 6px;
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.82), 0 0 24px rgba(0, 210, 255, 0.25);
+  display: none;
+}
+
+.uni-select-menu.open {
+  display: block;
+  animation: uniSelectFadeIn 0.14s ease-out;
+}
+
+@keyframes uniSelectFadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.uni-select-option {
+  min-height: 42px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  color: #cfe6ff;
+  font-size: 0.94rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.14s, color 0.14s;
+}
+
+.uni-select-option:hover,
+.uni-select-option:active {
+  background: rgba(0, 210, 255, 0.22);
+  color: #ffffff;
+}
+
+.uni-select-option.selected {
+  background: linear-gradient(90deg, rgba(0, 210, 255, 0.28), rgba(0, 230, 118, 0.18));
+  color: #00e676;
+  font-weight: 700;
+}
+
+.uni-select-option.selected::after {
+  content: '✓';
+  font-size: 0.9rem;
+  color: #00e676;
+  flex-shrink: 0;
+}
+
+.uni-select-option.disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.uni-select-menu::-webkit-scrollbar {
+  width: 6px;
+}
+.uni-select-menu::-webkit-scrollbar-thumb {
+  background: rgba(0, 210, 255, 0.45);
+  border-radius: 4px;
+}
