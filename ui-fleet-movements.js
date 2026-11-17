@@ -1,0 +1,242 @@
+/**
+ * UNIVERSUM — Schermata UI: Movimento Flotta, Slot & Stato Assedi
+ */
+(function () {
+  'use strict';
+
+  const UI = window.UniversumUI;
+
+  const MISSION_LABELS = {
+    attack: { label: 'Attacco', badge: 'badge-red' },
+    spy: { label: 'Spionaggio', badge: 'badge-blue' },
+    colonize: { label: 'Colonizzazione', badge: 'badge-green' },
+    transport: { label: 'Trasporto', badge: 'badge-blue' },
+    deploy: { label: 'Schieramento', badge: 'badge-green' },
+    explore: { label: 'Esplorazione', badge: 'badge-creative' },
+    recycle: { label: 'Riciclaggio', badge: 'badge-creative' },
+    destroyMoon: { label: 'Distruzione Luna', badge: 'badge-red' },
+    embargo: { label: 'Embargo Planetario', badge: 'badge-red' },
+    occupy: { label: 'Occupazione Planetaria', badge: 'badge-red' }
+  };
+
+  UI.renderFleetMovements = function (viewport) {
+    const { escapeHTML, formatNum, formatDuration, svgIcon, artTag } = UI;
+    const st = UI.state;
+    const uni = st.currentUniverse;
+    const Data = window.UniversumData;
+    const MCore = window.UniversumMissionsCore;
+
+    const maxSlots = MCore ? MCore.getMaxFleetSlots(uni) : (5 + Number(uni.researches?.computerTech || 0));
+    const usedSlots = MCore ? MCore.getUsedFleetSlots(uni) : (uni.fleetsInFlight || []).length;
+    const maxExpHours = MCore ? MCore.getMaxExploreHours(uni) : (1 + Number(uni.researches?.expeditionTech || 0));
+
+    const flights = uni.fleetsInFlight || [];
+    const activeSieges = uni.activeSieges || [];       // Embarchi/Occupazioni che stai imponendo tu
+    const incomingSieges = uni.incomingSieges || [];   // Embarchi/Occupazioni che stai subendo sui tuoi pianeti
+    const now = Date.now();
+
+    viewport.innerHTML = `
+      <div style="display:flex; flex-direction:column; gap:14px;">
+        <!-- INTESTAZIONE SLOT FLOTTA -->
+        <div class="glass-panel" style="padding:14px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:10px;">
+            <div>
+              <h2 style="font-size:1.1rem; color:var(--res-crystal);">${svgIcon('radar')} MOVIMENTO FLOTTA &amp; CONTROLLO MISSIONI</h2>
+              <p class="text-muted" style="font-size:0.88rem; margin-top:2px;">
+                Tecnologia Informatica Lv.${Number(uni.researches?.computerTech || 0)} • Esplorazione Max: <strong class="text-crystal">${maxExpHours}h</strong>
+              </p>
+            </div>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span class="badge ${usedSlots >= maxSlots ? 'badge-red' : 'badge-green'}" style="font-size:0.95rem; padding:6px 12px;">
+                SLOT FLOTTA: ${usedSlots} / ${maxSlots}
+              </span>
+              <button type="button" id="btn-mov-new-fleet" class="btn btn-green btn-sm" ${usedSlots >= maxSlots ? 'disabled' : ''}>
+                + NUOVA MISSIONE
+              </button>
+            </div>
+          </div>
+
+          <div style="height:8px; background:rgba(0,0,0,0.45); border-radius:6px; overflow:hidden;">
+            <div style="height:100%; width:${Math.min(100, (usedSlots / Math.max(1, maxSlots)) * 100)}%; background:${usedSlots >= maxSlots ? 'var(--btn-red)' : 'var(--btn-green)'}; transition:width 0.3s;"></div>
+          </div>
+        </div>
+
+        <!-- SEZIONE: FLOTTE IN VOLO -->
+        <div class="glass-panel" style="padding:14px;">
+          <h3 style="font-size:0.98rem; color:var(--res-crystal); margin-bottom:10px;">SQUADRONI IN TRANSITO (${flights.length})</h3>
+          ${flights.length === 0 ? `
+            <p class="text-muted">Nessuna flotta attualmente in volo. Tutti gli slot operativi sono disponibili.</p>
+          ` : `
+            <div style="display:flex; flex-direction:column; gap:10px;">
+              ${flights.map((f) => {
+                const mInfo = MISSION_LABELS[f.mission] || { label: f.mission, badge: 'badge-blue' };
+                const isOutbound = f.status === 'outbound';
+                const startTs = Number(f.departureTime || f.returnStartTime || (now - 5000));
+                const endTs = Number(isOutbound ? f.arrivalTime : f.returnTime);
+                const totalMs = Math.max(1000, endTs - startTs);
+                const progressPct = Math.min(100, Math.max(4, Math.round(((now - startTs) / totalMs) * 100)));
+                const fuelPct = Number(f.fuelPercent || 100);
+
+                const shipBadges = Object.entries(f.ships || {})
+                  .filter(([, q]) => Number(q) > 0)
+                  .map(([sid, q]) => {
+                    const sName = Data.SHIPS[sid]?.name || sid;
+                    return `<span style="display:inline-flex; align-items:center; gap:4px; background:rgba(255,255,255,0.06); padding:3px 8px; border-radius:6px; font-size:0.84rem;">${artTag(sid, 'unit-art-sm', sName)} ${escapeHTML(sName)}: <strong>${formatNum(q)}</strong></span>`;
+                  }).join('');
+
+                const hasCargo = (f.cargo?.metal || 0) + (f.cargo?.crystal || 0) + (f.cargo?.deuterium || 0) > 0;
+
+                return `
+                  <div style="background:rgba(0,0,0,0.4); border:1px solid rgba(0,210,255,0.22); border-radius:10px; padding:12px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:8px;">
+                      <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                        <span class="badge ${mInfo.badge}">${escapeHTML(mInfo.label)}</span>
+                        <span class="badge ${isOutbound ? 'badge-green' : 'badge-blue'}">${isOutbound ? 'ANDATA' : (f.recalled ? 'RICHIAMATA • RIENTRO' : 'RIENTRO')}</span>
+                        <span class="badge badge-neutral">Spinta: ${fuelPct}%</span>
+                        ${f.exploreHours ? `<span class="badge badge-creative">Esplorazione: ${f.exploreHours}h</span>` : ''}
+                      </div>
+                      <span class="font-display text-energy live-timer" data-end="${endTs}" style="font-size:1.05rem;">${formatDuration((endTs - now) / 1000)}</span>
+                    </div>
+
+                    <div style="font-size:0.92rem; margin-bottom:8px; display:flex; justify-content:space-between; flex-wrap:wrap; gap:6px;">
+                      <span>Rotta: <strong class="text-crystal">[${f.originCoords.g}:${f.originCoords.s}:${f.originCoords.p}]</strong> → <strong class="text-metal">[${f.targetCoords.g}:${f.targetCoords.s}:${f.targetCoords.p}]</strong></span>
+                      ${f.ransomDemand ? `<span class="text-energy">Riscatto impostato: <strong>${formatNum((f.ransomDemand.metal || 0) + (f.ransomDemand.crystal || 0) + (f.ransomDemand.deuterium || 0))}</strong> ris.</span>` : ''}
+                    </div>
+
+                    <!-- Barra avanzamento rotta -->
+                    <div style="height:6px; background:rgba(255,255,255,0.08); border-radius:4px; overflow:hidden; margin-bottom:10px;">
+                      <div style="height:100%; width:${progressPct}%; background:${isOutbound ? 'var(--res-crystal)' : 'var(--btn-blue)'};"></div>
+                    </div>
+
+                    <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px;">
+                      ${shipBadges}
+                    </div>
+
+                    ${hasCargo ? `
+                      <div class="text-muted" style="font-size:0.84rem; margin-bottom:8px;">
+                        Stiva: <strong class="text-metal">${formatNum(f.cargo.metal || 0)} M</strong> •
+                        <strong class="text-crystal">${formatNum(f.cargo.crystal || 0)} C</strong> •
+                        <strong class="text-deuterium">${formatNum(f.cargo.deuterium || 0)} D</strong>
+                      </div>
+                    ` : ''}
+
+                    ${isOutbound ? `
+                      <div style="display:flex; justify-content:flex-end;">
+                        <button type="button" class="btn btn-red btn-sm btn-recall-fleet" data-fid="${escapeHTML(f.id)}">
+                          ↩ RICHIAMA FLOTTA
+                        </button>
+                      </div>
+                    ` : ''}
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          `}
+        </div>
+
+        <!-- SEZIONE: EMBARCHI & OCCUPAZIONI ORBITALI ATTIVI -->
+        <div class="glass-panel" style="padding:14px;">
+          <h3 style="font-size:0.98rem; color:var(--btn-gold); margin-bottom:10px;">OPERAZIONI ORBITALI (EMBARCHI &amp; OCCUPAZIONI)</h3>
+
+          ${activeSieges.length === 0 && incomingSieges.length === 0 ? `
+            <p class="text-muted">Nessun embargo planetario o occupazione orbitale attiva al momento.</p>
+          ` : `
+            <div style="display:flex; flex-direction:column; gap:10px;">
+              ${activeSieges.map((s) => `
+                <div style="background:rgba(0,230,118,0.08); border:1px solid var(--btn-green); border-radius:10px; padding:12px;">
+                  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px; margin-bottom:6px;">
+                    <strong>${s.type === 'embargo' ? 'EMBARGO IMPOSTO' : 'OCCUPAZIONE ATTIVA'} su [${s.targetCoords.g}:${s.targetCoords.s}:${s.targetCoords.p}]</strong>
+                    <span class="badge badge-green">TUO CONTROLLO</span>
+                  </div>
+                  <p class="text-muted" style="font-size:0.88rem; margin-bottom:8px;">
+                    ${s.type === 'embargo'
+                      ? `Carburante residuo embargo: <strong class="text-deuterium">${formatNum(s.fuelRemaining || 0)} D</strong>`
+                      : `Prelievo automatico: <strong>5% risorse/giorno</strong> • Riscatto richiesto: <strong>${formatNum((s.ransom?.metal || 0) + (s.ransom?.crystal || 0) + (s.ransom?.deuterium || 0))}</strong>`}
+                  </p>
+                  <button type="button" class="btn btn-blue btn-sm btn-withdraw-siege" data-sid="${escapeHTML(s.id)}">RITIRA FLOTTA ALLA BASE</button>
+                </div>
+              `).join('')}
+
+              ${incomingSieges.map((s) => `
+                <div style="background:rgba(255,23,68,0.14); border:1px solid var(--btn-red); border-radius:10px; padding:12px;">
+                  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px; margin-bottom:6px;">
+                    <strong style="color:#ff5252;">${s.type === 'embargo' ? 'PIANETA SOTTO EMBARGO' : 'PIANETA OCCUPATO'} [${s.targetCoords.g}:${s.targetCoords.s}:${s.targetCoords.p}]</strong>
+                    <span class="badge badge-red">OSTILE: ${escapeHTML(s.attackerName || 'Nemico')}</span>
+                  </div>
+                  <p style="font-size:0.88rem; margin-bottom:10px;">
+                    ${s.type === 'embargo'
+                      ? 'Partenze e arrivi su questo pianeta sono bloccati finché la flotta nemica ha carburante o viene distrutta.'
+                      : `La flotta nemica preleva il 5% giornaliero delle tue risorse usando il deuterio locale. Riscatto: <strong>${formatNum(s.ransom?.metal || 0)} M / ${formatNum(s.ransom?.crystal || 0)} C / ${formatNum(s.ransom?.deuterium || 0)} D</strong>`}
+                  </p>
+                  <div style="display:flex; flex-wrap:wrap; gap:8px;">
+                    <button type="button" class="btn btn-red btn-sm btn-break-siege-fight" data-sid="${escapeHTML(s.id)}">${svgIcon('sword')} ATTACCA FLOTTA ORBITALE</button>
+                    ${s.type === 'occupy' ? `
+                      <button type="button" class="btn btn-creative btn-sm btn-pay-siege-ransom" data-sid="${escapeHTML(s.id)}">PAGA RISCATTO</button>
+                    ` : ''}
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          `}
+        </div>
+      </div>
+    `;
+
+    document.getElementById('btn-mov-new-fleet')?.addEventListener('click', () => {
+      UI.switchView('fleet');
+    });
+
+    viewport.querySelectorAll('.btn-recall-fleet').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        try {
+          if (st.isMultiplayerMode && window.UniversumMP?.recallOnlineFleet) {
+            await window.UniversumMP.recallOnlineFleet(uni, btn.dataset.fid);
+          } else {
+            MCore.recallFleet(uni, btn.dataset.fid);
+            await window.UniversumDB.save(uni);
+          }
+          UI.playSound('click');
+          UI.toast('Ordine di rientro trasmesso allo squadrone!', 'info');
+          UI.renderCurrentView();
+        } catch (err) {
+          UI.playSound('error');
+          UI.toast(err.message, 'error');
+        }
+      });
+    });
+
+    viewport.querySelectorAll('.btn-withdraw-siege').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        if (window.UniversumSiege?.withdrawSiege) {
+          await window.UniversumSiege.withdrawSiege(uni, btn.dataset.sid);
+          await UI.persistUniverseState();
+          UI.playSound('click');
+          UI.toast('Flotta orbitale richiamata verso il pianeta madre.', 'info');
+          UI.renderCurrentView();
+        }
+      });
+    });
+
+    viewport.querySelectorAll('.btn-break-siege-fight').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        if (window.UniversumSiege?.attackOrbitingSiege) {
+          await window.UniversumSiege.attackOrbitingSiege(uni, btn.dataset.sid);
+          await UI.persistUniverseState();
+          UI.updateTopBarNumbers();
+          UI.renderCurrentView();
+        }
+      });
+    });
+
+    viewport.querySelectorAll('.btn-pay-siege-ransom').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        if (window.UniversumSiege?.payOccupationRansom) {
+          await window.UniversumSiege.payOccupationRansom(uni, btn.dataset.sid);
+          await UI.persistUniverseState();
+          UI.updateTopBarNumbers();
+          UI.renderCurrentView();
+        }
+      });
+    });
+  };
+})();
