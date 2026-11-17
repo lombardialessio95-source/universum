@@ -31,6 +31,9 @@
     fleetMission: 'attack',
     fleetCargo: { metal: 0, crystal: 0, deuterium: 0 },
     fleetBlackHole: false,
+    fleetFuelPercent: 100,
+    fleetExploreHours: 1,
+    fleetRansom: { metal: 0, crystal: 0, deuterium: 0 },
     selectedSpyReportId: null,
     simFleet: {},
     simDebounceTimer: null,
@@ -891,6 +894,7 @@
         UI.renderShipyardAndDefense(viewport);
         break;
       case 'fleet': UI.renderFleet(viewport); break;
+      case 'movements': UI.renderFleetMovements(viewport); break;
       case 'galaxy': await UI.renderGalaxy(viewport); break;
       case 'espionage': UI.renderEspionageAndSim(viewport); break;
       case 'moon': UI.renderMoon(viewport); break;
