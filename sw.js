@@ -1,19 +1,38 @@
-const CACHE_NAME = 'universum-v5';
+// =========================================================
+// SERVICE WORKER — UNIVERSUM PWA
+// Ricorda: incrementa di +1 la versione qui sotto ogni volta
+// che aggiungi/rinomini file o pubblichi aggiornamenti su GitHub.
+// =========================================================
+const CACHE_NAME = 'universum-v6';
+
 const STATIC_ASSETS = [
+  // 1. Shell & Stile Base
   './',
   './index.html',
   './style.css',
+  './manifest.json',
+
+  // 2. Persistenza Locale, Dizionari & Grafica
   './db.js',
   './data.js',
   './graphics.js',
+
+  // 3. Motore di Simulazione, Galassia & Multiplayer Firebase
   './engine.js',
   './galaxy.js',
   './firebase-config.js',
   './multiplayer.js',
-  './ui.js',
-  './manifest.json'
+
+  // 4. Interfaccia Utente (divisa per macroaree)
+  './ui-core.js',      // Stato globale, lobby, loop 1s, audio, canvas pianeta, panoramica, salvataggi
+  './ui-economy.js',   // Edifici, ricerche, cantiere navale, difesa, luna, impero
+  './ui-tactical.js',  // Flotta, galassia, spionaggio/simulatore, commercio
+  './ui-social.js'     // Classifica, chat galattica (50), messaggi privati (15)
 ];
 
+// =========================================================
+// INSTALLAZIONE E PRE-CACHE DEI FILE STATICI
+// =========================================================
 self.addEventListener('install', (event) => {
   self.skipWaiting();
   event.waitUntil(
@@ -25,6 +44,9 @@ self.addEventListener('install', (event) => {
   );
 });
 
+// =========================================================
+// ATTIVAZIONE E PULIZIA VECCHIE CACHE
+// =========================================================
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) => {
@@ -39,12 +61,14 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Strategia Network-First con fallback su Cache
+// =========================================================
+// INTERCETTAZIONE RICHIESTE (NETWORK-FIRST + FALLBACK CACHE)
+// =========================================================
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   if (!event.request.url.startsWith('http')) return;
 
-  // Non intercettare le richieste API real-time di Firebase / Google APIs
+  // Escludi le API real-time di Firebase / Google Auth
   if (
     event.request.url.includes('firestore.googleapis.com') ||
     event.request.url.includes('identitytoolkit.googleapis.com') ||
