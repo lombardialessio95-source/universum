@@ -19,6 +19,116 @@
     return `${coords.g}_${coords.s}_${coords.p}`;
   }
 
+  // =========================================================
+  // OTTIMIZZAZIONE SPARK + LIMITE SERVER (max 3 per account)
+  // =========================================================
+  const SERVER_LIMIT = 3;
+  const SERVER_LIMIT_MESSAGE = 'Hai già raggiunto il limite di 3 server. Abbandona un server per entrarne in un altro.';
+  const SYNC_MIN_INTERVAL_MS = 60 * 1000;
+  const SYSTEM_CACHE_TTL_MS = 30 * 1000;
+  const LEADERBOARD_CACHE_TTL_MS = 5 * 60 * 1000;
+
+  const _syncLastByUni = new Map();
+  const _systemCache = new Map();
+  const _systemPending = new Set();
+  const _leaderboardCache = new Map();
+  const _playersCache = new Map();
+  const _privateCleanupDone = new Set();
+
+  function _cacheGet(map, key, ttlMs) {
+    const entry = map.get(key);
+    if (!entry) return null;
+    return (Date.now() - entry.at) < ttlMs ? entry.data : null;
+  }
+
+  function _invalidateUniCaches(uniId) {
+    _leaderboardCache.delete(uniId);
+    _playersCache.delete(uniId);
+    for (const key of [..._systemCache.keys()]) {
+      if (key.startsWith(`${uniId}:`)) _systemCache.delete(key);
+    }
+  }
+
+  async function getMembership(db, uid) {
+    const snap = await db.collection('users').doc(uid).get();
+    if (!snap.exists) return { serverIds: [], serverCount: 0 };
+    const data = snap.data() || {};
+    if (Array.isArray(data.serverIds)) {
+      return { serverIds: [...data.serverIds], serverCount: data.serverIds.length };
+    }
+    // Backfill account legacy: ricava le membership dalle schede giocatore esistenti
+    const serverIds = [];
+    try {
+      const unis = await db.collection('online_universes').limit(30).get();
+      for (const uniDoc of unis.docs) {
+        const pSnap = await uniDoc.ref.collection('players').doc(uid).get();
+        if (pSnap.exists) serverIds.push(uniDoc.id);
+      }
+      await db.collection('users').doc(uid).set({ serverIds, serverCount: serverIds.length }, { merge: true });
+    } catch (e) { /* backfill best-effort */ }
+    return { serverIds, serverCount: serverIds.length };
+  }
+
+  // Registra lo slot server su Firestore in transazione: non bypassabile da reload/browser
+  async function claimServerSlot(db, uid, uniId, { alreadyMember = false } = {}) {
+    const userRef = db.collection('users').doc(uid);
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(userRef);
+      const data = snap.exists ? (snap.data() || {}) : {};
+      const ids = Array.isArray(data.serverIds) ? [...data.serverIds] : [];
+      if (ids.includes(uniId)) {
+        if (snap.exists) tx.set(userRef, { serverCount: ids.length }, { merge: true });
+        return;
+      }
+      if (!alreadyMember && ids.length >= SERVER_LIMIT) {
+        throw new Error(SERVER_LIMIT_MESSAGE);
+      }
+      ids.push(uniId);
+      tx.set(userRef, { serverIds: ids, serverCount: ids.length }, { merge: true });
+    });
+  }
+
+  async function releaseServerSlot(db, uid, uniId) {
+    const userRef = db.collection('users').doc(uid);
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(userRef);
+      if (!snap.exists) return;
+      const data = snap.data() || {};
+      const ids = (Array.isArray(data.serverIds) ? data.serverIds : []).filter((id) => id !== uniId);
+      tx.set(userRef, { serverIds: ids, serverCount: ids.length }, { merge: true });
+    }).catch(() => {});
+    _invalidateUniCaches(uniId);
+  }
+
+  async function getMyServerMembership() {
+    const auth = getAuth();
+    const db = getDB();
+    const user = auth.currentUser;
+    if (!user) return { serverIds: [], serverCount: 0, limit: SERVER_LIMIT };
+    const m = await getMembership(db, user.uid);
+    return { serverIds: m.serverIds, serverCount: m.serverCount, limit: SERVER_LIMIT };
+  }
+
+  // Pulizia messaggi privati oltre i 15: solo al login nel server, mai ad ogni invio
+  async function cleanupPrivateMessagesOnce(db, uniId, uid) {
+    const key = `${uid}:${uniId}`;
+    if (_privateCleanupDone.has(key)) return;
+    _privateCleanupDone.add(key);
+    try {
+      const chatsSnap = await db.collection('online_universes').doc(uniId).collection('private_chats')
+        .where('participants', 'array-contains', uid)
+        .get();
+      for (const chatDoc of chatsSnap.docs) {
+        const msgsSnap = await chatDoc.ref.collection('messages').orderBy('timestamp', 'desc').get();
+        if (msgsSnap.size > 15) {
+          const batch = db.batch();
+          msgsSnap.docs.slice(15).forEach((d) => batch.delete(d.ref));
+          await batch.commit();
+        }
+      }
+    } catch (e) { /* pulizia best-effort al login */ }
+  }
+
   function sanitizeNickname(nick) {
     return String(nick || '').trim().slice(0, 20);
   }
@@ -136,7 +246,8 @@
       return {
         id: doc.id,
         name: d.name,
-        founderUid: d.founderUid,
+        founderUid: d.founderUid || d.ownerUid,
+        ownerUid: d.ownerUid || d.founderUid,
         founderName: d.founderName,
         speed: d.speed || 10,
         galaxies: d.galaxies || 3,
@@ -217,9 +328,13 @@
     const uniRef = db.collection('online_universes').doc();
     const uniId = uniRef.id;
 
+    // Limite 3 server: slot riservato su Firestore prima di creare il server
+    await claimServerSlot(db, user.uid, uniId);
+
     await uniRef.set({
       name,
       founderUid: user.uid,
+      ownerUid: user.uid,
       founderName,
       speed,
       galaxies,
@@ -280,6 +395,8 @@
     let myPlanets = [];
 
     if (!playerSnap.exists) {
+      // Limite 3 server: controllo e registrazione slot su Firestore (lato join)
+      await claimServerSlot(db, user.uid, universeId);
       const homeCoords = await findFreeHomeCoords(
         universeId,
         uniData.galaxies || 3,
@@ -342,8 +459,17 @@
 
     const messages = msgSnap.docs.map((d) => d.data());
 
+    // Gia' membro legacy senza slot registrato: allinea il conteggio senza bloccare la rientrata
+    if (playerSnap.exists) {
+      await claimServerSlot(db, user.uid, universeId, { alreadyMember: true }).catch(() => {});
+    }
+    _invalidateUniCaches(universeId);
+    await cleanupPrivateMessagesOnce(db, universeId, user.uid);
+
     return {
       id: universeId,
+      founderUid: uniData.founderUid || uniData.ownerUid || null,
+      ownerUid: uniData.ownerUid || uniData.founderUid || null,
       name: uniData.name,
       emperor: playerName,
       speed: uniData.speed || 10,
@@ -403,11 +529,16 @@
     return pts;
   }
 
-  async function syncPlayerState(universeObj) {
+  async function syncPlayerState(universeObj, { force = false } = {}) {
     const auth = getAuth();
     const db = getDB();
     const user = auth.currentUser;
     if (!user || !universeObj?.id) return;
+
+    // Spark: sync periodica al massimo ogni 60s; immediata solo su azione esplicita (force)
+    const lastSync = _syncLastByUni.get(universeObj.id) || 0;
+    if (!force && Date.now() - lastSync < SYNC_MIN_INTERVAL_MS) return;
+    _syncLastByUni.set(universeObj.id, Date.now());
 
     const uniRef = db.collection('online_universes').doc(universeObj.id);
     const batch = db.batch();
@@ -462,6 +593,25 @@
   }
 
   async function getOnlineSystem(uniId, galaxy, system) {
+    const cacheKey = `${uniId}:${Number(galaxy)}:${Number(system)}`;
+    const cached = _cacheGet(_systemCache, cacheKey, SYSTEM_CACHE_TTL_MS);
+    if (cached) {
+      // Mostra subito la cache e aggiorna in background (una sola refresh alla volta)
+      if (!_systemPending.has(cacheKey)) {
+        _systemPending.add(cacheKey);
+        fetchOnlineSystem(uniId, galaxy, system)
+          .then((fresh) => _systemCache.set(cacheKey, { at: Date.now(), data: fresh }))
+          .catch(() => {})
+          .finally(() => _systemPending.delete(cacheKey));
+      }
+      return cached;
+    }
+    const fresh = await fetchOnlineSystem(uniId, galaxy, system);
+    _systemCache.set(cacheKey, { at: Date.now(), data: fresh });
+    return fresh;
+  }
+
+  async function fetchOnlineSystem(uniId, galaxy, system) {
     const db = getDB();
     const uniRef = db.collection('online_universes').doc(uniId);
     const uniSnap = await uniRef.get();
@@ -540,7 +690,7 @@
     }
 
     const MCore = window.UniversumMissionsCore;
-    const maxSlots = MCore ? MCore.getMaxFleetSlots(universeObj) : (1 + (universeObj.researches?.computerTech || 0));
+    const maxSlots = MCore ? MCore.getMaxFleetSlots(universeObj) : (5 + Number(universeObj.researches?.computerTech || 0));
     const activeCount = (universeObj.fleetsInFlight || []).filter((f) => !f.resolved).length;
     if (activeCount >= maxSlots) {
       throw new Error(`Slot flotta esauriti (${activeCount}/${maxSlots}). Potenzia Tecnologia Informatica.`);
@@ -593,7 +743,7 @@
     planet.resources.crystal -= cargoC;
     planet.resources.deuterium -= (cargoD + flightStats.fuelCost + blackHoleExtra);
 
-    await syncPlayerState(universeObj);
+    await syncPlayerState(universeObj, { force: true });
 
     const defenderUid = targetSnap.exists ? (targetSnap.data().ownerUid || null) : null;
 
@@ -819,13 +969,27 @@
             targetPlanet &&
             window.UniversumGalaxy?.resolveCombat
           ) {
+            const defenderUidForTech = fleet.defenderUid || targetPlanet.ownerUid || null;
+            let defenderTech = { weaponsTech: 0, shieldingTech: 0, armourTech: 0 };
+            if (defenderUidForTech && !targetPlanet.isNpc) {
+              const defenderSnap = await tx.get(uniRef.collection('players').doc(defenderUidForTech));
+              if (defenderSnap.exists) {
+                const defResearches = defenderSnap.data().researches || {};
+                defenderTech = {
+                  weaponsTech: Number(defResearches.weaponsTech || 0),
+                  shieldingTech: Number(defResearches.shieldingTech || 0),
+                  armourTech: Number(defResearches.armourTech || 0)
+                };
+              }
+            }
+
             const combat = window.UniversumGalaxy.resolveCombat(
               fleet.ships,
               fleet.attackerTech,
               {
                 fleet: targetPlanet.fleet || {},
                 defenses: targetPlanet.defenses || {},
-                tech: { weaponsTech: 0, shieldingTech: 0, armourTech: 0 },
+                tech: defenderTech,
                 resources: targetPlanet.resources,
                 buildings: targetPlanet.buildings || {},
                 moon: targetPlanet.moon || null
@@ -887,6 +1051,15 @@
                 reportBody = `Assalto fallito su ${targetPlanet.name}.`;
               }
             }
+
+            const fmtUnits = (map) => {
+              const Data = window.UniversumData;
+              const parts = Object.entries(map || {})
+                .filter(([, cnt]) => Number(cnt) > 0)
+                .map(([id, cnt]) => `${(Data?.SHIPS?.[id] || Data?.DEFENSES?.[id])?.name || id} x${Number(cnt).toLocaleString('it-IT')}`);
+              return parts.length > 0 ? parts.join(', ') : 'nessuna';
+            };
+            reportBody += ` Dettagli battaglia — Round: ${combat.roundsPlayed}. Perdite attaccante: ${fmtUnits(combat.attackerLosses)}. Perdite difensore: ${fmtUnits(combat.defenderLosses)}. Superstiti attaccante: ${fmtUnits(combat.attackerSurvivors)}. Superstiti difensore: ${fmtUnits(combat.defenderFleetSurvivors)} (flotta), ${fmtUnits(combat.repairedDefenses)} (difese). Detriti: ${combat.debris.metal.toLocaleString('it-IT')} M, ${combat.debris.crystal.toLocaleString('it-IT')} C.`;
 
             tx.set(targetPlanetRef, targetPlanet, { merge: true });
           }
@@ -1111,13 +1284,17 @@
   }
 
   async function getLeaderboard(uniId) {
+    const cached = _cacheGet(_leaderboardCache, uniId, LEADERBOARD_CACHE_TTL_MS);
+    if (cached) return [...cached];
     const db = getDB();
     const snap = await db.collection('online_universes').doc(uniId).collection('players')
       .orderBy('points', 'desc')
       .limit(50)
       .get();
 
-    return snap.docs.map((d) => d.data());
+    const data = snap.docs.map((d) => d.data());
+    _leaderboardCache.set(uniId, { at: Date.now(), data });
+    return [...data];
   }
 
   async function sendChatMessage(uniId, text) {
@@ -1142,7 +1319,7 @@
     const db = getDB();
     return db.collection('online_universes').doc(uniId).collection('chat')
       .orderBy('timestamp', 'desc')
-      .limit(50)
+      .limit(20)
       .onSnapshot((snap) => {
         const messages = snap.docs
           .map((d) => Object.assign({ id: d.id }, d.data()))
@@ -1159,21 +1336,26 @@
 
   async function getUniversePlayers(uniId) {
     const auth = getAuth();
-    const db = getDB();
     const myUid = auth.currentUser?.uid;
     if (!myUid) return [];
 
+    const cached = _cacheGet(_playersCache, uniId, LEADERBOARD_CACHE_TTL_MS);
+    if (cached) return cached.filter((p) => p.uid !== myUid).map((p) => ({ ...p }));
+
+    const db = getDB();
     const snap = await db.collection('online_universes').doc(uniId).collection('players')
       .orderBy('nickname', 'asc')
       .get();
 
-    return snap.docs
+    const data = snap.docs
       .map((d) => d.data())
-      .filter((p) => p.uid && p.uid !== myUid)
+      .filter((p) => p.uid)
       .map((p) => ({
         uid: p.uid,
         nickname: p.nickname || 'Comandante'
       }));
+    _playersCache.set(uniId, { at: Date.now(), data });
+    return data.filter((p) => p.uid !== myUid).map((p) => ({ ...p }));
   }
 
   async function sendPrivateMessage(uniId, targetUid, targetName, text) {
@@ -1214,13 +1396,7 @@
       unreadFor: targetUid
     }, { merge: true });
 
-    messagesColRef.orderBy('timestamp', 'desc').get().then((snap) => {
-      if (snap.size > 15) {
-        const batch = db.batch();
-        snap.docs.slice(15).forEach((oldDoc) => batch.delete(oldDoc.ref));
-        return batch.commit();
-      }
-    }).catch(() => {});
+    // Nessuna pulizia qui: i messaggi oltre i 15 vengono rimossi solo al login (cleanupPrivateMessagesOnce)
   }
 
   function listenPrivateConversations(uniId, callback) {
@@ -1283,11 +1459,111 @@
       });
   }
 
+  async function _deleteCollectionDocs(colRef) {
+    let snap = await colRef.limit(400).get();
+    while (!snap.empty) {
+      const batch = getDB().batch();
+      snap.docs.forEach((d) => batch.delete(d.ref));
+      await batch.commit();
+      snap = await colRef.limit(400).get();
+    }
+  }
+
+  async function leaveOnlineUniverse(uniId) {
+    const auth = getAuth();
+    const db = getDB();
+    const user = auth.currentUser;
+    if (!user || !uniId) throw new Error('Utente non autenticato.');
+
+    const uniRef = db.collection('online_universes').doc(uniId);
+    const playerRef = uniRef.collection('players').doc(user.uid);
+    const playerSnap = await playerRef.get();
+    if (!playerSnap.exists) {
+      await releaseServerSlot(db, user.uid, uniId);
+      return;
+    }
+
+    const planetsSnap = await uniRef.collection('planets').where('ownerUid', '==', user.uid).get();
+    const fleetsSnap = await uniRef.collection('fleets').where('attackerUid', '==', user.uid).get().catch(() => ({ docs: [] }));
+
+    const batch = db.batch();
+    planetsSnap.docs.forEach((d) => batch.delete(d.ref));
+    fleetsSnap.docs.forEach((d) => batch.delete(d.ref));
+    batch.delete(playerRef);
+    await batch.commit();
+
+    await uniRef.update({ playerCount: firebase.firestore.FieldValue.increment(-1) }).catch(() => {});
+    await releaseServerSlot(db, user.uid, uniId);
+  }
+
+  async function deleteOnlineUniverse(uniId) {
+    const auth = getAuth();
+    const db = getDB();
+    const user = auth.currentUser;
+    if (!user || !uniId) throw new Error('Utente non autenticato.');
+
+    const uniRef = db.collection('online_universes').doc(uniId);
+    const uniSnap = await uniRef.get();
+    if (!uniSnap.exists) throw new Error('Server non trovato.');
+    const uniData = uniSnap.data() || {};
+    const founderUid = uniData.founderUid || uniData.ownerUid;
+    if (founderUid !== user.uid) {
+      throw new Error("Solo l'utente che ha creato il server puo' eliminarlo.");
+    }
+
+    const playersSnap = await uniRef.collection('players').get();
+    const playerUids = playersSnap.docs.map((d) => d.data()?.uid || d.id);
+
+    // Avvisa tutti i giocatori prima di eliminare i dati
+    for (const uid of playerUids) {
+      await uniRef.collection('messages').add({
+        recipientUid: uid,
+        title: 'Eliminazione Server',
+        body: 'Il server sta per essere eliminato dal creatore.',
+        timestamp: Date.now()
+      }).catch(() => {});
+    }
+
+    // Libera lo slot per creatore e per tutti i giocatori del server
+    for (const uid of playerUids) {
+      if (uid) await releaseServerSlot(db, uid, uniId);
+    }
+    await releaseServerSlot(db, user.uid, uniId);
+
+    // Elimina tutti i dati del solo server indicato (altri server intatti)
+    const privateChatsSnap = await uniRef.collection('private_chats').get().catch(() => ({ docs: [] }));
+    for (const chatDoc of privateChatsSnap.docs) {
+      await _deleteCollectionDocs(chatDoc.ref.collection('messages'));
+    }
+    await _deleteCollectionDocs(uniRef.collection('private_chats'));
+    await _deleteCollectionDocs(uniRef.collection('players'));
+    await _deleteCollectionDocs(uniRef.collection('planets'));
+    await _deleteCollectionDocs(uniRef.collection('fleets'));
+    await _deleteCollectionDocs(uniRef.collection('messages'));
+    await _deleteCollectionDocs(uniRef.collection('chat'));
+    await uniRef.delete();
+
+    _invalidateUniCaches(uniId);
+    _syncLastByUni.delete(uniId);
+  }
+
+  function listenUniverseDeleted(uniId, callback) {
+    const db = getDB();
+    return db.collection('online_universes').doc(uniId)
+      .onSnapshot((snap) => {
+        if (!snap.exists) callback();
+      }, () => {});
+  }
+
   window.UniversumMP = {
     registerOrLogin,
     getOnlineUniverses,
+    getMyServerMembership,
     createOnlineUniverse,
     joinOnlineUniverse,
+    leaveOnlineUniverse,
+    deleteOnlineUniverse,
+    listenUniverseDeleted,
     calculateLiveResources,
     syncPlayerState,
     renameOnlinePlanet,

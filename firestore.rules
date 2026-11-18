@@ -1,0 +1,85 @@
+rules_version = '2';
+
+// UNIVERSUM - Regole Firestore (Spark)
+// Limite server: max 3 per account, conteggio salvato in users/{uid}.serverIds
+// NOTA: file da pubblicare con `firebase deploy --only firestore:rules`.
+// Il controllo applicativo resta anche nella funzione di join (claimServerSlot).
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function myUserDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function myServerIds() {
+      return (exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && 'serverIds' in myUserDoc().data)
+        ? myUserDoc().data.serverIds
+        : [];
+    }
+
+    function underServerLimit(uniId) {
+      return myServerIds().size() < 3 || uniId in myServerIds();
+    }
+
+    function isFounder(uniId) {
+      return exists(/databases/$(database)/documents/online_universes/$(uniId))
+        && (
+          get(/databases/$(database)/documents/online_universes/$(uniId)).data.founderUid == request.auth.uid
+          || get(/databases/$(database)/documents/online_universes/$(uniId)).data.ownerUid == request.auth.uid
+        );
+    }
+
+    match /users/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      // Il conteggio server non puo' mai superare 3 lato server
+      allow create, update: if signedIn() && request.auth.uid == uid
+        && (!('serverIds' in request.resource.data) || request.resource.data.serverIds.size() <= 3)
+        && (!('serverCount' in request.resource.data) || request.resource.data.serverCount <= 3);
+      allow delete: if false;
+    }
+
+    match /online_universes/{uniId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && (request.resource.data.founderUid == request.auth.uid
+          || request.resource.data.ownerUid == request.auth.uid)
+        && underServerLimit(uniId);
+      allow update: if signedIn();
+      // Eliminazione server: solo il creatore (founderUid/ownerUid)
+      allow delete: if signedIn() && isFounder(uniId);
+
+      match /players/{playerId} {
+        allow read: if signedIn();
+        // Join a un 4o server bloccato lato server se non gia' membro
+        allow create: if signedIn() && request.auth.uid == playerId && underServerLimit(uniId);
+        allow update, delete: if signedIn()
+          && (request.auth.uid == playerId || isFounder(uniId));
+      }
+
+      match /planets/{planetId} {
+        allow read, write: if signedIn();
+      }
+      match /fleets/{fleetId} {
+        allow read, write: if signedIn();
+      }
+      match /messages/{messageId} {
+        allow read, write: if signedIn();
+      }
+      match /chat/{messageId} {
+        allow read, write: if signedIn();
+      }
+      match /private_chats/{chatId} {
+        allow read, write: if signedIn();
+        match /messages/{messageId} {
+          allow read, write: if signedIn();
+        }
+      }
+    }
+  }
+}

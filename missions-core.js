@@ -1,5 +1,5 @@
 /**
- * UNIVERSUM — Plugin Core Missioni Avanzate, Carburante Variabile & Slot Flotta
+ * UNIVERSUM â€” Plugin Core Missioni Avanzate, Carburante Variabile & Slot Flotta
  */
 (function () {
   'use strict';
@@ -12,8 +12,8 @@
       Data.RESEARCHES.expeditionTech = {
         id: 'expeditionTech',
         name: 'Esplorazione Spaziale Profonda',
-        icon: '🧭',
-        description: 'Estende l’autonomia delle sonde e delle flotte esplorative: +1 ora massima di durata missione per livello.',
+        icon: 'ðŸ§­',
+        description: 'Estende lâ€™autonomia delle sonde e delle flotte esplorative: +1 ora massima di durata missione per livello.',
         baseCost: { metal: 3000, crystal: 6000, deuterium: 3000 },
         factor: 1.85,
         requirements: {
@@ -35,7 +35,7 @@
       return MissionsCore.BASE_FLEET_SLOTS + compLv;
     },
 
-    // Slot attualmente occupati (flotte in volo + eventuali embarchi/occupazioni attivi)
+    // Slot attualmente occupati (flotte in volo + eventuali embarghi/occupazioni attivi)
     getUsedFleetSlots(universe) {
       if (!universe) return 0;
       const inFlight = Array.isArray(universe.fleetsInFlight) ? universe.fleetsInFlight.length : 0;
@@ -49,7 +49,7 @@
       return 1 + expLv;
     },
 
-    // Calcola velocità, durata e consumo carburante in base alla % potenza/carburante (10% - 100%)
+    // Calcola velocitÃ , durata e consumo carburante in base alla % potenza/carburante (10% - 100%)
     getAdjustedFlightStats(universe, fleetSelection, distance, fuelPercent = 100, exploreHours = 1, mission = 'attack') {
       const Galaxy = window.UniversumGalaxy;
       const pct = Math.min(100, Math.max(10, Math.round(Number(fuelPercent) || 100)));
@@ -71,7 +71,7 @@
         fuelCost += Math.ceil(fuelCost * 0.25 * (validExploreHours - 1));
       }
 
-      // Durata stazionamento in esplorazione scalata sulla velocità universo
+      // Durata stazionamento in esplorazione scalata sulla velocitÃ  universo
       const effSpeed = window.UniversumEngine?.getEffectiveSpeed
         ? window.UniversumEngine.getEffectiveSpeed(universe)
         : Math.max(1, Number(universe?.speed) || 1);
@@ -110,11 +110,11 @@
         throw new Error('Nessuna flotta attiva trovata.');
       }
       const idx = universe.fleetsInFlight.findIndex((f) => f.id === fleetId);
-      if (idx === -1) throw new Error('Missione non più presente.');
+      if (idx === -1) throw new Error('Missione non piÃ¹ presente.');
 
       const fleet = universe.fleetsInFlight[idx];
       if (fleet.status !== 'outbound') {
-        throw new Error('La flotta è già sulla rotta di rientro.');
+        throw new Error('La flotta Ã¨ giÃ  sulla rotta di rientro.');
       }
 
       const now = Date.now();

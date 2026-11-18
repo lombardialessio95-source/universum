@@ -913,7 +913,8 @@ h1, h2, h3, .font-display {
     gap: 6px;
     position: sticky;
     top: 86px;
-    height: calc(100dvh - 86px);
+    align-self: stretch;
+    min-height: calc(100dvh - 86px);
     overflow-y: auto;
   }
   /* Nasconde la scrollbar nativa nella sidebar desktop mantenendo lo scroll fluido */

@@ -863,11 +863,27 @@
     return { minSpeed, durationSec, fuelCost };
   }
 
+  function findEmbargoAt(universe, coords) {
+    if (!universe || !coords) return null;
+    const same = (a) => Number(a?.g) === Number(coords.g) && Number(a?.s) === Number(coords.s) && Number(a?.p) === Number(coords.p);
+    return (universe.activeSieges || []).find((s) => s.type === 'embargo' && same(s.targetCoords)) ||
+      (universe.incomingSieges || []).find((s) => s.type === 'embargo' && same(s.targetCoords)) || null;
+  }
+
   function launchFleet(universe, originPlanetIndex, targetCoords, mission, fleetSelection, cargo = { metal: 0, crystal: 0, deuterium: 0 }, options = {}) {
     const originP = universe.planets[originPlanetIndex];
     if (!originP) throw new Error('Pianeta di partenza non valido.');
 
-    const maxSlots = universe.creativeMode ? 999 : (1 + Number(universe.researches?.computerTech || 0));
+    // Embargo Planetario: blocca partenze/arrivi (solo un Attacco normale di liberazione puo' partire/ingaggiare)
+    if (findEmbargoAt(universe, originP.coords) && mission !== 'attack') {
+      throw new Error(`Partenza bloccata dall'Embargo Planetario su [${originP.coords.g}:${originP.coords.s}:${originP.coords.p}].`);
+    }
+    if (findEmbargoAt(universe, targetCoords) && mission !== 'attack') {
+      throw new Error(`Rotta bloccata dall'Embargo Planetario su [${targetCoords.g}:${targetCoords.s}:${targetCoords.p}].`);
+    }
+
+
+    const maxSlots = universe.creativeMode ? 999 : (5 + Number(universe.researches?.computerTech || 0));
     if ((universe.fleetsInFlight || []).length >= maxSlots) {
       throw new Error(`Slot flotta esauriti (${maxSlots} max). Potenzia Tecnologia Informatica.`);
     }
@@ -957,6 +973,22 @@
     if (!Array.isArray(universe.fleetsInFlight)) universe.fleetsInFlight = [];
     universe.fleetsInFlight.push(missionObj);
     return missionObj;
+  }
+
+  function formatUnitList(map) {
+    const Data = window.UniversumData;
+    const parts = Object.entries(map || {})
+      .filter(([, cnt]) => Number(cnt) > 0)
+      .map(([id, cnt]) => `${(Data.SHIPS[id] || Data.DEFENSES[id])?.name || id} x${Number(cnt).toLocaleString('it-IT')}`);
+    return parts.length > 0 ? parts.join(', ') : 'nessuna';
+  }
+
+  function formatCombatDetails(combat) {
+    if (!combat) return '';
+    return `Perdite attaccante: ${formatUnitList(combat.attackerLosses)}. ` +
+      `Perdite difensore: ${formatUnitList(combat.defenderLosses)}. ` +
+      `Superstiti attaccante: ${formatUnitList(combat.attackerSurvivors)}. ` +
+      `Superstiti difensore: ${formatUnitList(combat.defenderFleetSurvivors)} (flotta), ${formatUnitList(combat.repairedDefenses)} (difese dopo riparazione).`;
   }
 
   function addMessage(universe, type, title, body) {
@@ -1207,7 +1239,7 @@
           flt.ships = Object.assign({}, flt.fleet);
           flt.cargo.metal += pirateCombat.loot.metal;
           flt.cargo.crystal += pirateCombat.loot.crystal;
-          addMessage(universe, 'combat', `Imboscata Pirata [${key}]`, `Esito: ${pirateCombat.result}. Bottino recuperato: ${pirateCombat.loot.metal} M / ${pirateCombat.loot.crystal} C.`);
+          addMessage(universe, 'combat', `Imboscata Pirata [${key}]`, `Esito: ${pirateCombat.result}. Round: ${pirateCombat.roundsPlayed}. Bottino recuperato: ${pirateCombat.loot.metal.toLocaleString()} M / ${pirateCombat.loot.crystal.toLocaleString()} C / ${pirateCombat.loot.deuterium.toLocaleString()} D. Detriti: ${pirateCombat.debris.metal.toLocaleString()} M, ${pirateCombat.debris.crystal.toLocaleString()} C. ${formatCombatDetails(pirateCombat)}`);
         } else {
           addMessage(universe, 'expedition', `Spedizione Tranquilla [${key}]`, 'Nessuna anomalia rilevata nel settore.');
         }
@@ -1216,8 +1248,99 @@
       return;
     }
 
+    // 5b. EMBARGO / OCCUPAZIONE (fallback se il modulo assedi non ha intercettato l'arrivo)
+    if (flt.mission === 'embargo' || flt.mission === 'occupy' || flt.mission === 'blockade') {
+      const siegeType = flt.mission === 'occupy' ? 'occupy' : 'embargo';
+      const slot = generateProceduralSlot(universe, flt.targetCoords.g, flt.targetCoords.s, flt.targetCoords.p);
+      const ownPlanet = universe.planets.find((p) => p.coords.g === flt.targetCoords.g && p.coords.s === flt.targetCoords.s && p.coords.p === flt.targetCoords.p);
+      const defenderData = ownPlanet
+        ? { fleet: ownPlanet.fleet || {}, defenses: ownPlanet.defenses || {}, tech: universe.researches || {}, resources: ownPlanet.resources, buildings: ownPlanet.buildings || {}, moon: ownPlanet.moon || null }
+        : slot;
+      if (!ownPlanet && slot.ownerType !== 'bot') {
+        addMessage(universe, 'combat', `Missione ${siegeType === 'embargo' ? 'Embargo' : 'Occupazione'} annullata [${key}]`, 'Nessun bersaglio ostile alle coordinate.');
+        flt.status = 'returning';
+        return;
+      }
+      const combat = resolveCombat(flt.fleet, universe.researches, defenderData);
+      addMessage(universe, 'combat', `Rapporto Difesa [${key}] — ${combat.result.toUpperCase()} (${siegeType === 'embargo' ? 'Embargo' : 'Occupazione'})`,
+        `Il pianeta attaccato ha affrontato la flotta ${siegeType === 'embargo' ? 'da embargo' : 'di occupazione'}. Round: ${combat.roundsPlayed}. ${formatCombatDetails(combat)}`);
+      if (ownPlanet) {
+        ownPlanet.fleet = { ...combat.defenderFleetSurvivors };
+        ownPlanet.defenses = { ...combat.repairedDefenses };
+      } else {
+        universe.galaxyDeltas[key] = Object.assign({}, universe.galaxyDeltas[key], {
+          fleetOverride: combat.defenderFleetSurvivors,
+          defensesOverride: combat.repairedDefenses,
+          debris: { metal: (slot.debris?.metal || 0) + combat.debris.metal, crystal: (slot.debris?.crystal || 0) + combat.debris.crystal }
+        });
+      }
+      const survivors = combat.attackerSurvivors || {};
+      const survivorCount = Object.values(survivors).reduce((acc, q) => acc + Number(q || 0), 0);
+      if (combat.result !== 'attacker_win' || survivorCount <= 0) {
+        addMessage(universe, 'combat', `Rapporto Battaglia [${key}] — ${combat.result.toUpperCase()} (${siegeType === 'embargo' ? 'Embargo' : 'Occupazione'} respinto)`,
+          `Round: ${combat.roundsPlayed}. ${formatCombatDetails(combat)}`);
+        flt.fleet = { ...survivors };
+        flt.ships = { ...survivors };
+        flt.status = 'returning';
+        return survivorCount <= 0 ? 'remove' : undefined;
+      }
+      if (!Array.isArray(universe.activeSieges)) universe.activeSieges = [];
+      const startFuel = siegeType === 'embargo' ? Number(flt.cargo?.deuterium || 0) : 0;
+      const targetDeut = Number(defenderData.resources?.deuterium || 0);
+      universe.activeSieges.push({
+        id: 'siege_' + now + '_' + Math.random().toString(36).slice(2, 6),
+        type: siegeType,
+        originPlanetId: flt.originPlanetId,
+        originCoords: { ...flt.originCoords },
+        targetCoords: { ...flt.targetCoords },
+        targetName: ownPlanet?.name || slot.name || key,
+        ships: { ...survivors },
+        cargo: { ...(flt.cargo || { metal: 0, crystal: 0, deuterium: 0 }) },
+        fuelRemaining: startFuel,
+        targetDeuterium: targetDeut,
+        deuteriumInitial: siegeType === 'embargo' ? startFuel : targetDeut,
+        ransom: flt.ransomDemand || flt.ransom || { metal: 10000, crystal: 5000, deuterium: 2500 },
+        startedAt: now,
+        lastTickAt: now
+      });
+      addMessage(universe, 'combat', siegeType === 'embargo' ? `Embargo Planetario attivo su [${key}]` : `Occupazione Planetaria avviata su [${key}]`,
+        (siegeType === 'embargo'
+          ? `Battaglia vinta. Rotte da/per il pianeta bloccate finche' resta deuterio in stiva (${Math.floor(startFuel).toLocaleString()} D). `
+          : `Battaglia vinta. Prelievo 5% risorse/giorno, mantenimento dal deuterio del pianeta occupato (${Math.floor(targetDeut).toLocaleString()} D). `) +
+        `Round: ${combat.roundsPlayed}. ${formatCombatDetails(combat)}`);
+      return 'remove';
+    }
+
     // 6. ATTACCO / DISTRUZIONE LUNA
     if (flt.mission === 'attack' || flt.mission === 'destroyMoon') {
+      // Attacco di liberazione: ingaggia la flotta nemica in orbita (Embargo/Occupazione)
+      const siegeIdx = (universe.incomingSieges || []).findIndex(
+        (s) => Number(s.targetCoords?.g) === Number(flt.targetCoords.g) && Number(s.targetCoords?.s) === Number(flt.targetCoords.s) && Number(s.targetCoords?.p) === Number(flt.targetCoords.p)
+      );
+      if (flt.mission === 'attack' && siegeIdx >= 0) {
+        const siege = universe.incomingSieges[siegeIdx];
+        const orbitCombat = resolveCombat(flt.fleet, universe.researches, {
+          fleet: siege.ships || {},
+          defenses: {},
+          tech: siege.tech || { weaponsTech: 2, shieldingTech: 2, armourTech: 2 },
+          resources: { metal: 0, crystal: 0, deuterium: 0 },
+          buildings: {}
+        });
+        addMessage(universe, 'combat', `Rapporto Difesa [${key}] — ${orbitCombat.result.toUpperCase()} (Scaccia Flotta)`,
+          `La flotta in orbita (${siege.type === 'occupy' ? 'Occupazione' : 'Embargo'}) e' stata ingaggiata. Round: ${orbitCombat.roundsPlayed}. Detriti: ${orbitCombat.debris.metal.toLocaleString()} M, ${orbitCombat.debris.crystal.toLocaleString()} C. ${formatCombatDetails(orbitCombat)}`);
+        flt.fleet = { ...orbitCombat.attackerSurvivors };
+        flt.ships = { ...orbitCombat.attackerSurvivors };
+        if (orbitCombat.result === 'attacker_win') {
+          universe.incomingSieges.splice(siegeIdx, 1);
+          addMessage(universe, 'combat', `Flotta Scacciata [${key}] — ${siege.type === 'occupy' ? 'Occupazione' : 'Embargo'} terminato`,
+            `La flotta nemica in orbita e' stata distrutta: ${siege.type === 'occupy' ? "l'Occupazione" : "l'Embargo"} sul pianeta e' finito. ${formatCombatDetails(orbitCombat)}`);
+        } else {
+          siege.ships = { ...orbitCombat.defenderFleetSurvivors };
+        }
+        flt.status = 'returning';
+        return Object.values(flt.fleet).reduce((acc, q) => acc + Number(q || 0), 0) <= 0 ? 'remove' : undefined;
+      }
+
       const slot = generateProceduralSlot(universe, flt.targetCoords.g, flt.targetCoords.s, flt.targetCoords.p);
       if (slot.ownerType !== 'bot') {
         addMessage(universe, 'combat', `Missione Annullata [${key}]`, 'Nessun bersaglio ostile alle coordinate.');
@@ -1226,6 +1349,8 @@
       }
 
       const combat = resolveCombat(flt.fleet, universe.researches, slot);
+      addMessage(universe, 'combat', `Rapporto Difesa [${key}] — ${combat.result.toUpperCase()} (Attacco normale)`,
+        `${slot.name} (${slot.emperor || 'Difensore'}) e' stato attaccato. Round: ${combat.roundsPlayed}. Bottino ceduto: ${combat.loot.metal.toLocaleString()} M, ${combat.loot.crystal.toLocaleString()} C, ${combat.loot.deuterium.toLocaleString()} D. ${formatCombatDetails(combat)}`);
       flt.fleet = combat.attackerSurvivors;
       flt.ships = Object.assign({}, flt.fleet);
       flt.cargo.metal += combat.loot.metal;
@@ -1331,7 +1456,7 @@
             universe,
             'combat',
             `Rapporto Battaglia [${key}] — ${combat.result.toUpperCase()}`,
-            `Round: ${combat.roundsPlayed}. Bottino: ${combat.loot.metal.toLocaleString()} M, ${combat.loot.crystal.toLocaleString()} C, ${combat.loot.deuterium.toLocaleString()} D. Detriti: ${(newDebris.metal + newDebris.crystal).toLocaleString()}.${extraNotes}`
+            `Round: ${combat.roundsPlayed}. Bottino: ${combat.loot.metal.toLocaleString()} M, ${combat.loot.crystal.toLocaleString()} C, ${combat.loot.deuterium.toLocaleString()} D. Detriti: ${newDebris.metal.toLocaleString()} M, ${newDebris.crystal.toLocaleString()} C. ${formatCombatDetails(combat)}${extraNotes}`
           );
         }
       }
@@ -1393,14 +1518,14 @@
             universe,
             'combat',
             `🚨 ATTACCO BOT SUBITO SU ${targetPlanet.name}!`,
-            `${atk.attackerName} ha sfondato le tue difese! Risorse saccheggiate: ${combat.loot.metal.toLocaleString()} M, ${combat.loot.crystal.toLocaleString()} C.`
+            `${atk.attackerName} ha sfondato le tue difese! Round: ${combat.roundsPlayed}. Risorse saccheggiate: ${combat.loot.metal.toLocaleString()} M, ${combat.loot.crystal.toLocaleString()} C, ${combat.loot.deuterium.toLocaleString()} D. Detriti: ${combat.debris.metal.toLocaleString()} M, ${combat.debris.crystal.toLocaleString()} C. ${formatCombatDetails(combat)}`
           );
         } else {
           addMessage(
             universe,
             'combat',
             `🛡️ ATTACCO BOT RESPINTO SU ${targetPlanet.name}!`,
-            `Le tue difese hanno respinto l'incursione di ${atk.attackerName}!`
+            `Le tue difese hanno respinto l'incursione di ${atk.attackerName}! Round: ${combat.roundsPlayed}. Detriti: ${combat.debris.metal.toLocaleString()} M, ${combat.debris.crystal.toLocaleString()} C. ${formatCombatDetails(combat)}`
           );
         }
       }

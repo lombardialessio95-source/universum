@@ -13,6 +13,7 @@
 
     // Listener Firestore attivi per Multiplayer
     unsubChatListener: null,
+    unsubServerListener: null,
     unsubFleetsListener: null,
     unsubPrivateConvsListener: null,
     unsubPrivateMsgsListener: null,
@@ -308,7 +309,8 @@
     if (!uni) return;
     if (UI.state.isMultiplayerMode) {
       if (window.UniversumMP && typeof window.UniversumMP.syncPlayerState === 'function') {
-        await window.UniversumMP.syncPlayerState(uni);
+        // Persist esplicita = azione utente: sincronizza subito (force)
+        await window.UniversumMP.syncPlayerState(uni, { force: true });
       }
     } else {
       await window.UniversumDB.save(uni);
@@ -526,12 +528,34 @@
 
     try {
       const universes = await window.UniversumMP.getOnlineUniverses();
+      const membership = window.UniversumMP.getMyServerMembership
+        ? await window.UniversumMP.getMyServerMembership().catch(() => ({ serverIds: [], serverCount: 0, limit: 3 }))
+        : { serverIds: [], serverCount: 0, limit: 3 };
+      const myUid = window.fbAuth?.currentUser?.uid;
+      const atLimit = membership.serverCount >= (membership.limit || 3);
+
+      const createBtn = document.getElementById('btn-mp-create-uni');
+      if (createBtn) {
+        createBtn.disabled = atLimit;
+        createBtn.textContent = atLimit ? 'LIMITE SERVER RAGGIUNTO (3/3)' : '+ CREA UNIVERSO ONLINE';
+      }
+
+      const limitHeader = `
+        <div class="glass-panel" style="padding:12px 14px; margin-bottom:12px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+          <strong>Server ${membership.serverCount}/${membership.limit || 3}</strong>
+          ${atLimit ? '<span class="badge badge-red">Limite raggiunto: abbandona un server per entrarne in un altro</span>' : '<span class="badge badge-green">Puoi ancora entrare in un nuovo server</span>'}
+        </div>
+      `;
+
       if (!universes || universes.length === 0) {
-        listEl.innerHTML = `<div class="glass-panel" style="padding:20px; text-align:center;"><p class="text-muted">Nessun universo online attivo. Clicca su "+ CREA UNIVERSO ONLINE" qui sopra!</p></div>`;
+        listEl.innerHTML = `${limitHeader}<div class="glass-panel" style="padding:20px; text-align:center;"><p class="text-muted">Nessun universo online attivo. Clicca su "+ CREA UNIVERSO ONLINE" qui sopra!</p></div>`;
         return;
       }
 
-      listEl.innerHTML = universes.map((u) => {
+      listEl.innerHTML = limitHeader + universes.map((u) => {
+        const isMember = membership.serverIds.includes(u.id);
+        const isFounder = myUid && (u.founderUid === myUid || u.ownerUid === myUid);
+        const joinDisabled = !isMember && atLimit;
         const npcBadge = u.npcMode === 'limited'
           ? '<span class="badge badge-neutral">MAX 10 AVAMPOSTI NEUTRALI</span>'
           : '<span class="badge badge-red">100% PvP • ZERO BOT</span>';
@@ -552,9 +576,14 @@
               <span>Giocatori iscritti: <strong>${u.playerCount || 1}</strong></span>
               <span>Mappa: <strong>${u.galaxies}G × ${u.systemsPerGalaxy}S</strong></span>
             </div>
-            <button type="button" class="btn btn-green btn-sm btn-join-online-uni" data-uid="${u.id}" data-locked="${u.hasPasscode ? '1' : '0'}">
-              ${svgIcon('globe')} ENTRA NELL'UNIVERSO
-            </button>
+            ${isMember ? '<span class="badge badge-green">SEI IN QUESTO SERVER</span>' : ''}
+            ${isFounder ? '<span class="badge badge-blue">CREATORE</span>' : ''}
+            <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
+              <button type="button" class="btn btn-green btn-sm btn-join-online-uni" data-uid="${u.id}" data-locked="${u.hasPasscode ? '1' : '0'}" ${joinDisabled ? 'disabled' : ''}>
+                ${svgIcon('globe')} ${joinDisabled ? 'LIMITE 3 SERVER RAGGIUNTO' : (isMember ? "RIENTRA NELL'UNIVERSO" : "ENTRA NELL'UNIVERSO")}
+              </button>
+              ${isMember ? `<button type="button" class="btn btn-red btn-sm btn-leave-online-uni" data-uid="${u.id}">Abbandona Server</button>` : ''}
+            </div>
           </article>
         `;
       }).join('');
@@ -594,6 +623,32 @@
           } else {
             await proceedJoin('');
           }
+        });
+      });
+
+      listEl.querySelectorAll('.btn-leave-online-uni').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const uniId = btn.dataset.uid;
+          openModal('ABBANDONA SERVER', `
+            <p style="margin-bottom:12px;">Abbandonando questo server perderai pianeti e progressi su di esso e liberi uno slot (Server ${membership.serverCount}/${membership.limit || 3}).</p>
+            <div style="display:flex; gap:10px;">
+              <button type="button" id="btn-confirm-leave-server" class="btn btn-red" style="flex:1;">ABBANDONA</button>
+              <button type="button" id="btn-cancel-leave-server" class="btn btn-ghost" style="flex:1;">ANNULLA</button>
+            </div>
+          `);
+          document.getElementById('btn-cancel-leave-server')?.addEventListener('click', closeModal);
+          document.getElementById('btn-confirm-leave-server')?.addEventListener('click', async () => {
+            try {
+              await window.UniversumMP.leaveOnlineUniverse(uniId);
+              closeModal();
+              playSound('success');
+              toast('Server abbandonato: slot liberato.', 'success');
+              await UI.renderOnlineUniversesList();
+            } catch (err) {
+              playSound('error');
+              toast(err.message, 'error');
+            }
+          });
         });
       });
     } catch (err) {
@@ -855,9 +910,54 @@
     }
   };
 
+  // Listener chat attivi solo con la chat aperta (Spark)
+  UI.startChatListeners = function () {
+    const st = UI.state;
+    const uni = st.currentUniverse;
+    if (!st.isMultiplayerMode || !uni) return;
+
+    if (!st.unsubChatListener && window.UniversumMP?.listenChat) {
+      st.unsubChatListener = window.UniversumMP.listenChat(uni.id, (msgs) => {
+        st.chatMessagesCache = msgs;
+        if (st.currentView === 'chat' && st.commTab === 'galactic' && UI.renderGalacticChatMessagesDOM) {
+          UI.renderGalacticChatMessagesDOM();
+        }
+      });
+    }
+
+    if (!st.unsubPrivateConvsListener && window.UniversumMP?.listenPrivateConversations) {
+      st.unsubPrivateConvsListener = window.UniversumMP.listenPrivateConversations(
+        uni.id,
+        (convs, unreadCount) => {
+          const prevUnread = st.unreadPrivateCount;
+          st.privateConversationsCache = convs;
+          st.unreadPrivateCount = unreadCount;
+          UI.updateCommBadges();
+          if (unreadCount > prevUnread && st.currentView !== 'chat') {
+            UI.playSound('click');
+            UI.toast('Nuovo messaggio privato ricevuto!', 'info');
+          }
+        }
+      );
+    }
+  };
+
+  UI.stopChatListeners = function () {
+    const st = UI.state;
+    if (typeof st.unsubChatListener === 'function') {
+      st.unsubChatListener();
+      st.unsubChatListener = null;
+    }
+    if (typeof st.unsubPrivateConvsListener === 'function') {
+      st.unsubPrivateConvsListener();
+      st.unsubPrivateConvsListener = null;
+    }
+    UI.closePrivateMessageStream();
+  };
+
   UI.switchView = function (viewName) {
     if (UI.state.currentView === 'chat' && viewName !== 'chat') {
-      UI.closePrivateMessageStream();
+      UI.stopChatListeners();
     }
 
     UI.state.currentView = viewName;
@@ -890,6 +990,7 @@
       case 'research': UI.renderResearch(viewport); break;
       case 'shipyard':
       case 'defense':
+        if (st.currentView === 'shipyard') st.shipyardTab = 'ships';
         if (st.currentView === 'defense') st.shipyardTab = 'defense';
         UI.renderShipyardAndDefense(viewport);
         break;
@@ -1058,9 +1159,10 @@
           <h3 style="font-size:0.95rem; color:var(--res-crystal); margin-bottom:10px;">DIARIO DI BORDO</h3>
           <div style="display:flex; flex-direction:column; gap:8px;">
             ${messages.map((m) => `
-              <div style="border-left:3px solid var(--btn-blue); padding-left:10px;">
+              <div style="border-left:3px solid ${m.type === 'combat' ? 'var(--btn-red)' : 'var(--btn-blue)'}; padding-left:10px;">
                 <div style="font-weight:700; font-size:0.95rem;">${escapeHTML(m.title)}</div>
-                <div class="text-muted" style="font-size:0.88rem;">${escapeHTML(m.body)}</div>
+                ${m.time ? `<div class="text-muted" style="font-size:0.78rem;">${new Date(m.time).toLocaleString('it-IT')}${m.type ? ` • ${escapeHTML(String(m.type).toUpperCase())}` : ''}</div>` : ''}
+                <div class="text-muted" style="font-size:0.88rem; white-space:pre-line;">${escapeHTML(m.body)}</div>
               </div>
             `).join('')}
           </div>
@@ -1111,9 +1213,63 @@
           <button type="button" id="btn-export-copy" class="btn btn-ghost">COPIA JSON NEGLI APPUNTI</button>
         ` : ''}
         <button type="button" id="btn-toggle-sound" class="btn btn-ghost">${st.soundMuted ? 'SUONI: DISATTIVATI (ATTIVA)' : 'SUONI: ATTIVI (DISATTIVA)'}</button>
+        ${st.isMultiplayerMode ? `
+          <div style="border-top:1px solid rgba(255,82,82,0.35); padding-top:12px; display:flex; flex-direction:column; gap:8px;">
+            <h3 style="font-size:0.95rem; color:#ff5252;">IMPOSTAZIONI SERVER</h3>
+            <button type="button" id="btn-leave-server-view" class="btn btn-ghost">Abbandona Server (libera uno slot)</button>
+            ${(uni.founderUid || uni.ownerUid) && window.fbAuth?.currentUser?.uid && (uni.founderUid === window.fbAuth.currentUser.uid || uni.ownerUid === window.fbAuth.currentUser.uid) ? `
+              <button type="button" id="btn-delete-server-view" class="btn btn-red">Elimina Server (solo creatore)</button>
+            ` : ''}
+          </div>
+        ` : ''}
         <button type="button" id="btn-return-lobby-view" class="btn btn-red">${UI.svgIcon('home')} TORNA ALLA LOBBY PRINCIPALE</button>
       </div>
     `;
+
+    document.getElementById('btn-leave-server-view')?.addEventListener('click', async () => {
+      try {
+        await window.UniversumMP.leaveOnlineUniverse(uni.id);
+        UI.playSound('success');
+        UI.toast('Server abbandonato: slot liberato.', 'success');
+        await UI.exitToLobbyAfterServerRemoval();
+      } catch (err) {
+        UI.playSound('error');
+        UI.toast(err.message, 'error');
+      }
+    });
+
+    document.getElementById('btn-delete-server-view')?.addEventListener('click', () => {
+      UI.openModal('ELIMINA SERVER', `
+        <p style="margin-bottom:10px; color:#ff5252;"><strong>Sei sicuro? Eliminerai il server per TUTTI i giocatori. Questa azione è irreversibile. Scrivi ELIMINA per confermare.</strong></p>
+        <div class="form-group">
+          <label for="input-delete-server-confirm">Conferma testuale (doppia conferma)</label>
+          <input type="text" id="input-delete-server-confirm" class="form-control" placeholder="ELIMINA" autocomplete="off">
+        </div>
+        <div style="display:flex; gap:10px; margin-top:14px;">
+          <button type="button" id="btn-confirm-delete-server" class="btn btn-red" style="flex:1;" disabled>ELIMINA DEFINITIVAMENTE</button>
+          <button type="button" id="btn-cancel-delete-server" class="btn btn-ghost" style="flex:1;">ANNULLA</button>
+        </div>
+      `);
+      const confirmInput = document.getElementById('input-delete-server-confirm');
+      const confirmBtn = document.getElementById('btn-confirm-delete-server');
+      confirmInput?.addEventListener('input', () => {
+        if (confirmBtn) confirmBtn.disabled = confirmInput.value.trim() !== 'ELIMINA';
+      });
+      document.getElementById('btn-cancel-delete-server')?.addEventListener('click', UI.closeModal);
+      confirmBtn?.addEventListener('click', async () => {
+        if (confirmInput?.value.trim() !== 'ELIMINA') return;
+        try {
+          await window.UniversumMP.deleteOnlineUniverse(uni.id);
+          UI.closeModal();
+          UI.playSound('success');
+          UI.toast('Server eliminato per tutti i giocatori. Slot liberati.', 'success');
+          await UI.exitToLobbyAfterServerRemoval();
+        } catch (err) {
+          UI.playSound('error');
+          UI.toast(err.message, 'error');
+        }
+      });
+    });
 
     document.getElementById('btn-save-now')?.addEventListener('click', async () => {
       await UI.persistUniverseState();
@@ -1166,21 +1322,30 @@
     await window.UniversumDB.renderLobbyList();
   };
 
+  // Uscita verso la lista server senza persistere (server abbandonato/eliminato)
+  UI.exitToLobbyAfterServerRemoval = async function () {
+    const st = UI.state;
+    UI.stopGameLoop();
+    UI.cleanupMultiplayerListeners();
+    st.isMultiplayerMode = false;
+    st.currentUniverse = null;
+    document.getElementById('screen-game')?.classList.add('hidden');
+    document.getElementById('screen-lobby')?.classList.remove('hidden');
+    await window.UniversumDB.renderLobbyList();
+    await UI.refreshOnlineLobbyState();
+  };
+
   UI.cleanupMultiplayerListeners = function () {
     const st = UI.state;
-    if (typeof st.unsubChatListener === 'function') {
-      st.unsubChatListener();
-      st.unsubChatListener = null;
+    UI.stopChatListeners();
+    if (typeof st.unsubServerListener === 'function') {
+      st.unsubServerListener();
+      st.unsubServerListener = null;
     }
     if (typeof st.unsubFleetsListener === 'function') {
       st.unsubFleetsListener();
       st.unsubFleetsListener = null;
     }
-    if (typeof st.unsubPrivateConvsListener === 'function') {
-      st.unsubPrivateConvsListener();
-      st.unsubPrivateConvsListener = null;
-    }
-    UI.closePrivateMessageStream();
 
     st.chatMessagesCache = [];
     st.privateConversationsCache = [];
@@ -1226,7 +1391,8 @@
         if (mpTickCounter % 30 === 0 && window.UniversumMP?.processOnlineOccupations) {
           window.UniversumMP.processOnlineOccupations(uni.id).catch(() => {});
         }
-        if (mpTickCounter % 15 === 0) {
+        if (mpTickCounter % 60 === 0) {
+          // Sync periodica Firestore solo ogni 60s (Spark); le azioni sincronizzano subito
           UI.persistUniverseState().catch(() => {});
         }
       } else {
@@ -1254,6 +1420,7 @@
       st.lastAlertCount = atkCount;
 
       UI.updateTopBarNumbers();
+      UI.refreshAffordabilityButtons?.();
       document.querySelectorAll('.live-timer').forEach((el) => {
         const endTs = Number(el.dataset.end || 0);
         const remSec = Math.max(0, Math.ceil((endTs - Date.now()) / 1000));
@@ -1345,30 +1512,14 @@
       st.fleetTarget = { g: home.coords.g, s: home.coords.s, p: home.coords.p };
     }
 
-    if (window.UniversumMP?.listenChat) {
-      st.unsubChatListener = window.UniversumMP.listenChat(universe.id, (msgs) => {
-        st.chatMessagesCache = msgs;
-        if (st.currentView === 'chat' && st.commTab === 'galactic' && UI.renderGalacticChatMessagesDOM) {
-          UI.renderGalacticChatMessagesDOM();
-        }
+    // Listener chat NON avviati qui: partono solo quando si apre la vista chat (startChatListeners)
+
+    if (window.UniversumMP?.listenUniverseDeleted) {
+      st.unsubServerListener = window.UniversumMP.listenUniverseDeleted(universe.id, async () => {
+        if (UI.state.currentUniverse?.id !== universe.id) return;
+        UI.toast('Il server e stato eliminato dal creatore.', 'error');
+        await UI.exitToLobbyAfterServerRemoval();
       });
-    }
-
-    if (window.UniversumMP?.listenPrivateConversations) {
-      st.unsubPrivateConvsListener = window.UniversumMP.listenPrivateConversations(
-        universe.id,
-        (convs, unreadCount) => {
-          const prevUnread = st.unreadPrivateCount;
-          st.privateConversationsCache = convs;
-          st.unreadPrivateCount = unreadCount;
-          UI.updateCommBadges();
-
-          if (unreadCount > prevUnread && st.currentView !== 'chat') {
-            UI.playSound('click');
-            UI.toast('Nuovo messaggio privato ricevuto!', 'info');
-          }
-        }
-      );
     }
 
     if (window.UniversumMP?.listenIncomingFleets) {

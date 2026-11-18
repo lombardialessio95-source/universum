@@ -1,5 +1,5 @@
 /**
- * UNIVERSUM — Schermata UI: Movimento Flotta, Slot & Stato Assedi (Offline + Online PvP)
+ * UNIVERSUM â€” Schermata UI: Movimento Flotta, Slot & Stato Assedi (Offline + Online PvP)
  */
 (function () {
   'use strict';
@@ -29,7 +29,7 @@
     const Data = window.UniversumData;
     const MCore = window.UniversumMissionsCore;
 
-    const maxSlots = MCore ? MCore.getMaxFleetSlots(uni) : (1 + Number(uni.researches?.computerTech || 0));
+    const maxSlots = MCore ? MCore.getMaxFleetSlots(uni) : (5 + Number(uni.researches?.computerTech || 0));
     const flights = (uni.fleetsInFlight || []).filter((f) => !f.resolved);
     const usedSlots = MCore ? MCore.getUsedFleetSlots(uni) : flights.length;
     const maxExpHours = MCore ? MCore.getMaxExploreHours(uni) : (1 + Number(uni.researches?.expeditionTech || 0));
@@ -37,7 +37,7 @@
     let activeSieges = uni.activeSieges || [];
     let incomingSieges = uni.incomingSieges || [];
 
-    // In modalità Online carica anche gli embarchi/occupazioni reali da Firestore
+    // In modalitÃ  Online carica anche gli embarghi/occupazioni reali da Firestore
     if (st.isMultiplayerMode && window.fbDB && window.fbAuth?.currentUser) {
       const myUid = window.fbAuth.currentUser.uid;
       const uniRef = window.fbDB.collection('online_universes').doc(uni.id);
@@ -95,6 +95,23 @@
 
     const now = Date.now();
 
+    const withDeuterium = (s) => {
+      const Siege = window.UniversumSiege;
+      let rem;
+      if (Siege?.getSiegeDeuteriumRemaining) {
+        rem = Siege.getSiegeDeuteriumRemaining(uni, s);
+      } else if (s.type === 'occupy') {
+        const tp = (uni.planets || []).find((p) => Number(p.coords?.g) === Number(s.targetCoords?.g) && Number(p.coords?.s) === Number(s.targetCoords?.s) && Number(p.coords?.p) === Number(s.targetCoords?.p));
+        rem = Number(tp?.resources?.deuterium ?? s.targetDeuterium ?? 0);
+      } else {
+        rem = Number(s.fuelRemaining ?? s.cargo?.deuterium ?? 0);
+      }
+      const init = Siege?.getSiegeDeuteriumInitial ? Siege.getSiegeDeuteriumInitial(s) : Number(s.deuteriumInitial || rem || 0);
+      return { ...s, deutRemain: Math.floor(rem), deutInit: Math.floor(init), deutPct: init > 0 ? Math.max(0, Math.min(100, (rem / init) * 100)) : 0 };
+    };
+    activeSieges = activeSieges.map(withDeuterium);
+    incomingSieges = incomingSieges.map(withDeuterium);
+
     viewport.innerHTML = `
       <div style="display:flex; flex-direction:column; gap:14px;">
         <!-- INTESTAZIONE SLOT FLOTTA -->
@@ -103,7 +120,7 @@
             <div>
               <h2 style="font-size:1.1rem; color:var(--res-crystal);">${svgIcon('radar')} MOVIMENTO FLOTTA &amp; CONTROLLO MISSIONI</h2>
               <p class="text-muted" style="font-size:0.88rem; margin-top:2px;">
-                Tecnologia Informatica Lv.${Number(uni.researches?.computerTech || 0)} • Esplorazione Max: <strong class="text-crystal">${maxExpHours}h</strong>
+                Tecnologia Informatica Lv.${Number(uni.researches?.computerTech || 0)} â€¢ Esplorazione Max: <strong class="text-crystal">${maxExpHours}h</strong>
               </p>
             </div>
             <div style="display:flex; align-items:center; gap:8px;">
@@ -153,7 +170,7 @@
                     <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:8px;">
                       <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
                         <span class="badge ${mInfo.badge}">${escapeHTML(mInfo.label)}</span>
-                        <span class="badge ${isOutbound ? 'badge-green' : 'badge-blue'}">${isOutbound ? 'ANDATA' : (f.recalled || f.mission === 'recall' ? 'RICHIAMATA • RIENTRO' : 'RIENTRO')}</span>
+                        <span class="badge ${isOutbound ? 'badge-green' : 'badge-blue'}">${isOutbound ? 'ANDATA' : (f.recalled || f.mission === 'recall' ? 'RICHIAMATA â€¢ RIENTRO' : 'RIENTRO')}</span>
                         <span class="badge badge-neutral">Spinta: ${fuelPct}%</span>
                         ${expH ? `<span class="badge badge-creative">Esplorazione: ${expH}h</span>` : ''}
                       </div>
@@ -161,7 +178,7 @@
                     </div>
 
                     <div style="font-size:0.92rem; margin-bottom:8px; display:flex; justify-content:space-between; flex-wrap:wrap; gap:6px;">
-                      <span>Rotta: <strong class="text-crystal">[${f.originCoords.g}:${f.originCoords.s}:${f.originCoords.p}]</strong> → <strong class="text-metal">[${f.targetCoords.g}:${f.targetCoords.s}:${f.targetCoords.p}]</strong></span>
+                      <span>Rotta: <strong class="text-crystal">[${f.originCoords.g}:${f.originCoords.s}:${f.originCoords.p}]</strong> â†’ <strong class="text-metal">[${f.targetCoords.g}:${f.targetCoords.s}:${f.targetCoords.p}]</strong></span>
                       ${ransomObj ? `<span class="text-energy">Riscatto impostato: <strong>${formatNum((ransomObj.metal || 0) + (ransomObj.crystal || 0) + (ransomObj.deuterium || 0))}</strong> ris.</span>` : ''}
                     </div>
 
@@ -176,8 +193,8 @@
 
                     ${hasCargo ? `
                       <div class="text-muted" style="font-size:0.84rem; margin-bottom:8px;">
-                        Stiva: <strong class="text-metal">${formatNum(f.cargo.metal || 0)} M</strong> •
-                        <strong class="text-crystal">${formatNum(f.cargo.crystal || 0)} C</strong> •
+                        Stiva: <strong class="text-metal">${formatNum(f.cargo.metal || 0)} M</strong> â€¢
+                        <strong class="text-crystal">${formatNum(f.cargo.crystal || 0)} C</strong> â€¢
                         <strong class="text-deuterium">${formatNum(f.cargo.deuterium || 0)} D</strong>
                       </div>
                     ` : ''}
@@ -185,7 +202,7 @@
                     ${isOutbound ? `
                       <div style="display:flex; justify-content:flex-end;">
                         <button type="button" class="btn btn-red btn-sm btn-recall-fleet" data-fid="${escapeHTML(f.id)}">
-                          ↩ RICHIAMA FLOTTA
+                          â†© RICHIAMA FLOTTA
                         </button>
                       </div>
                     ` : ''}
@@ -196,9 +213,9 @@
           `}
         </div>
 
-        <!-- SEZIONE: EMBARCHI & OCCUPAZIONI ORBITALI ATTIVI -->
+        <!-- SEZIONE: EMBARGHI & OCCUPAZIONI ORBITALI ATTIVI -->
         <div class="glass-panel" style="padding:14px;">
-          <h3 style="font-size:0.98rem; color:var(--btn-gold); margin-bottom:10px;">OPERAZIONI ORBITALI (EMBARCHI &amp; OCCUPAZIONI)</h3>
+          <h3 style="font-size:0.98rem; color:var(--btn-gold); margin-bottom:10px;">OPERAZIONI ORBITALI (EMBARGHI &amp; OCCUPAZIONI)</h3>
 
           ${activeSieges.length === 0 && incomingSieges.length === 0 ? `
             <p class="text-muted">Nessun embargo planetario o occupazione orbitale attiva al momento.</p>
@@ -212,9 +229,18 @@
                   </div>
                   <p class="text-muted" style="font-size:0.88rem; margin-bottom:8px;">
                     ${s.type === 'embargo'
-                      ? `Blocco rotte attivo • Riscatto richiesto: <strong>${formatNum((s.ransom?.metal || 0) + (s.ransom?.crystal || 0) + (s.ransom?.deuterium || 0))}</strong>`
-                      : `Prelievo automatico: <strong>5% risorse/giorno</strong> • Riscatto richiesto: <strong>${formatNum((s.ransom?.metal || 0) + (s.ransom?.crystal || 0) + (s.ransom?.deuterium || 0))}</strong>`}
+                      ? `Blocco rotte attivo â€¢ Riscatto richiesto: <strong>${formatNum((s.ransom?.metal || 0) + (s.ransom?.crystal || 0) + (s.ransom?.deuterium || 0))}</strong>`
+                      : `Prelievo automatico: <strong>5% risorse/giorno</strong> â€¢ Riscatto richiesto: <strong>${formatNum((s.ransom?.metal || 0) + (s.ransom?.crystal || 0) + (s.ransom?.deuterium || 0))}</strong>`}
                   </p>
+                  <div style="margin-bottom:8px;">
+                    <div style="display:flex; justify-content:space-between; font-size:0.84rem; margin-bottom:4px;">
+                      <span class="text-deuterium">${s.type === 'embargo' ? 'Deuterio in stiva (Embargo)' : 'Deuterio pianeta occupato (Occupazione)'}</span>
+                      <strong class="text-deuterium">${formatNum(s.deutRemain)} D${s.deutInit > 0 ? ` / ${formatNum(s.deutInit)} D` : ''}</strong>
+                    </div>
+                    <div style="height:8px; background:rgba(0,0,0,0.45); border-radius:6px; overflow:hidden;">
+                      <div style="height:100%; width:${s.deutPct}%; background:var(--res-deuterium); transition:width 0.3s;"></div>
+                    </div>
+                  </div>
                   <button type="button" class="btn btn-blue btn-sm btn-withdraw-siege"
                     data-sid="${escapeHTML(s.id)}"
                     data-g="${s.targetCoords.g}" data-s="${s.targetCoords.s}" data-p="${s.targetCoords.p}">
@@ -234,6 +260,15 @@
                       ? `Partenze e arrivi su questo pianeta sono bloccati. Riscatto: <strong>${formatNum(s.ransom?.metal || 0)} M / ${formatNum(s.ransom?.crystal || 0)} C / ${formatNum(s.ransom?.deuterium || 0)} D</strong>`
                       : `La flotta nemica preleva il 5% giornaliero delle tue risorse. Riscatto: <strong>${formatNum(s.ransom?.metal || 0)} M / ${formatNum(s.ransom?.crystal || 0)} C / ${formatNum(s.ransom?.deuterium || 0)} D</strong>`}
                   </p>
+                  <div style="margin-bottom:8px;">
+                    <div style="display:flex; justify-content:space-between; font-size:0.84rem; margin-bottom:4px;">
+                      <span class="text-deuterium">${s.type === 'embargo' ? 'Deuterio in stiva nemica (Embargo)' : 'Deuterio tuo pianeta (Occupazione)'}</span>
+                      <strong class="text-deuterium">${formatNum(s.deutRemain)} D${s.deutInit > 0 ? ` / ${formatNum(s.deutInit)} D` : ''}</strong>
+                    </div>
+                    <div style="height:8px; background:rgba(0,0,0,0.45); border-radius:6px; overflow:hidden;">
+                      <div style="height:100%; width:${s.deutPct}%; background:var(--res-deuterium); transition:width 0.3s;"></div>
+                    </div>
+                  </div>
                   <div style="display:flex; flex-wrap:wrap; gap:8px;">
                     ${!st.isMultiplayerMode ? `
                       <button type="button" class="btn btn-red btn-sm btn-break-siege-fight" data-sid="${escapeHTML(s.id)}">${svgIcon('sword')} ATTACCA FLOTTA ORBITALE</button>

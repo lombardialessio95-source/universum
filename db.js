@@ -202,7 +202,7 @@
           buildings: {
             metalMine: 0,
             crystalMine: 0,
-            deuteriumSynthesizer: 0,
+            deuteriumSynth: 0,
             solarPlant: 0,
             fusionReactor: 0,
             roboticsFactory: 0,
@@ -213,7 +213,7 @@
             deuteriumTank: 0,
             researchLab: 0,
             terraformer: 0,
-            missileSilo: 0
+            hiddenBunker: 0
           },
           defenses: {},
           fleet: {},
@@ -235,10 +235,13 @@
         espionageTech: 0,
         computerTech: 0,
         astrophysics: 0,
+        intergalacticNetwork: 0,
         weaponsTech: 0,
         shieldingTech: 0,
         armourTech: 0,
-        gravitonTech: 0
+        lunarTech: 0,
+        jumpGateTech: 0,
+        deathStarTech: 0
       },
       researchQueue: null,
       fleetsInFlight: [],
@@ -648,7 +651,7 @@
         <div class="glass-panel" style="padding:20px;">
           <h2 style="font-size:1.15rem; color:var(--res-crystal); margin-bottom:10px;">PLANCIA DI COMANDO: ${escapeHTML(uni.name)}</h2>
           <p style="margin-bottom:8px;">Imperatore: <strong>${escapeHTML(uni.emperor)}</strong> | Velocità: <strong>${uni.speed}x</strong></p>
-          <p class="text-muted">Architettura DB e PWA inizializzata con successo. Pronto per collegare data.js, engine.js, galaxy.js e ui.js.</p>
+          <p class="text-muted">Architettura DB e PWA inizializzata con successo. Pronto per collegare data.js, engine-core.js, engine-actions.js, galaxy.js e ui-core.js.</p>
         </div>
       `;
     }

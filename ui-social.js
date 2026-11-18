@@ -105,7 +105,7 @@
   };
 
   // =========================================================
-  // COMUNICAZIONI (CHAT GALATTICA 50 | MESSAGGI PRIVATI 15)
+  // COMUNICAZIONI (CHAT GALATTICA 20 | MESSAGGI PRIVATI 15)
   // =========================================================
   UI.renderCommunications = async function (viewport) {
     const st = UI.state;
@@ -114,13 +114,16 @@
       return;
     }
 
+    // Listener chat attivi solo con chat aperta; chiusura vista = unsubscribe (switchView)
+    UI.startChatListeners?.();
+
     const isGalactic = st.commTab === 'galactic';
 
     viewport.innerHTML = `
       <div style="display:flex; flex-direction:column; gap:12px;">
         <div class="comm-tabs-bar">
           <button type="button" id="comm-tab-galactic" class="comm-tab-btn ${isGalactic ? 'active' : ''}">
-            ${UI.svgIcon('globe')} Chat Galattica (50)
+            ${UI.svgIcon('globe')} Chat Galattica (20)
           </button>
           <button type="button" id="comm-tab-private" class="comm-tab-btn ${!isGalactic ? 'active' : ''}">
             ${UI.svgIcon('mail')} Messaggi Privati (15)
@@ -160,7 +163,7 @@
       <div class="glass-panel chat-panel-wrapper">
         <div style="display:flex; justify-content:space-between; align-items:center;">
           <span class="text-muted" style="font-size:0.88rem;">Tocca il nickname di un imperatore per aprire una chat privata</span>
-          <span class="badge badge-green">ULTIMI 50</span>
+          <span class="badge badge-green">ULTIMI 20</span>
         </div>
         <div id="chat-messages-box" class="chat-messages-box"></div>
         <form id="form-send-chat" class="chat-input-bar">

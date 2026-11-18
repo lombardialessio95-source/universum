@@ -21,7 +21,7 @@
     if (!st.fleetExploreHours) st.fleetExploreHours = 1;
     if (!st.fleetRansom) st.fleetRansom = { metal: 10000, crystal: 5000, deuterium: 2500 };
 
-    const maxSlots = MCore ? MCore.getMaxFleetSlots(uni) : 5;
+    const maxSlots = MCore ? MCore.getMaxFleetSlots(uni) : (5 + Number(uni.researches?.computerTech || 0));
     const usedSlots = MCore ? MCore.getUsedFleetSlots(uni) : (uni.fleetsInFlight || []).length;
     const maxExpHours = MCore ? MCore.getMaxExploreHours(uni) : 1;
     if (st.fleetExploreHours > maxExpHours) st.fleetExploreHours = maxExpHours;
@@ -408,6 +408,13 @@
             }
 
             const ownerLabel = slot.ownerName || slot.emperor;
+            const slotSiege = (() => {
+              const inc = (uni.incomingSieges || []).find((s) => Number(s.targetCoords?.g) === Number(slot.coords.g) && Number(s.targetCoords?.s) === Number(slot.coords.s) && Number(s.targetCoords?.p) === Number(slot.coords.p));
+              if (inc) return inc;
+              if (isMine && slot.embargo && slot.embargo.attackerUid !== myUid) return { type: 'embargo' };
+              if (isMine && slot.occupation && slot.occupation.occupierUid !== myUid) return { type: 'occupy' };
+              return null;
+            })();
 
             return `
               <div class="glass-panel ${cardClass}" style="padding:12px; display:flex; flex-direction:column; gap:8px;">
@@ -416,6 +423,7 @@
                     <strong class="font-display text-crystal">[${slot.coords.p}]</strong>
                     <strong style="font-size:1.05rem;">${escapeHTML(slot.planetName || slot.name || 'Slot Colonizzabile')}</strong>
                     ${slot.moon ? `<span class="badge badge-blue" title="${escapeHTML(slot.moon.name || 'Luna')}">${svgIcon('moon')} LUNA</span>` : ''}
+                    ${slotSiege ? `<span class="badge badge-red">${slotSiege.type === 'embargo' ? 'SOTTO EMBARGO' : 'SOTTO OCCUPAZIONE'}</span><button type="button" class="btn btn-red btn-sm btn-gal-expel" data-p="${slot.coords.p}">${svgIcon('sword')} Scaccia Flotta</button>` : ''}
                     ${hasDebris ? `<span class="badge badge-creative">${svgIcon('recycle')} Detriti</span>` : ''}
                   </div>
                   ${badgeHTML}
@@ -487,6 +495,46 @@
     viewport.querySelectorAll('.btn-gal-pm').forEach((btn) => {
       btn.addEventListener('click', () => {
         UI.openPrivateChatWith(btn.dataset.uid, btn.dataset.nick);
+      });
+    });
+
+    viewport.querySelectorAll('.btn-gal-expel').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const pos = Number(btn.dataset.p);
+        const target = { g: sysData.galaxy, s: sysData.system, p: pos };
+        try {
+          if (st.isMultiplayerMode) {
+            st.fleetTarget = target;
+            st.fleetMission = 'attack';
+            UI.switchView('fleet');
+            return;
+          }
+          const Data = window.UniversumData;
+          const planet = UI.getActivePlanet();
+          const selection = {};
+          for (const [sid, qty] of Object.entries(planet?.fleet || {})) {
+            if (Number(qty) > 0 && sid !== 'solarSatellite' && (Data.SHIPS[sid]?.attack || 0) > 0) {
+              selection[sid] = Number(qty);
+            }
+          }
+          if (Object.keys(selection).length === 0) {
+            st.fleetTarget = target;
+            st.fleetMission = 'attack';
+            UI.playSound('error');
+            UI.toast('Nessuna nave da combattimento sul pianeta attivo: seleziona la flotta di liberazione.', 'error');
+            UI.switchView('fleet');
+            return;
+          }
+          if (!window.UniversumSiege?.launchEnhancedFleet) throw new Error('Motore assedi non disponibile.');
+          window.UniversumSiege.launchEnhancedFleet(uni, pIdx, target, 'attack', selection, { metal: 0, crystal: 0, deuterium: 0 }, {});
+          await UI.persistUniverseState();
+          UI.playSound('success');
+          UI.toast(`Flotta di liberazione lanciata verso [${target.g}:${target.s}:${target.p}]: se vince, Embargo/Occupazione finisce!`, 'success');
+          UI.renderCurrentView();
+        } catch (err) {
+          UI.playSound('error');
+          UI.toast(err.message, 'error');
+        }
       });
     });
 

@@ -238,11 +238,11 @@
 
     document.getElementById('tab-btn-ships')?.addEventListener('click', () => {
       st.shipyardTab = 'ships';
-      UI.renderCurrentView();
+      UI.switchView('shipyard');
     });
     document.getElementById('tab-btn-defense')?.addEventListener('click', () => {
       st.shipyardTab = 'defense';
-      UI.renderCurrentView();
+      UI.switchView('defense');
     });
 
     viewport.querySelectorAll('.btn-qty-preset').forEach((btn) => {
@@ -278,6 +278,55 @@
           UI.toast(err.message, 'error');
         }
       });
+    });
+  };
+
+  // Ricontrolla in tempo reale requisiti/risorse e riabilita i bottoni senza re-render
+  UI.refreshAffordabilityButtons = function () {
+    const st = UI.state;
+    const uni = st.currentUniverse;
+    if (!uni || !['buildings', 'research', 'shipyard', 'defense'].includes(st.currentView)) return;
+    const planet = UI.getActivePlanet();
+    if (!planet) return;
+    const Data = window.UniversumData;
+    const Engine = window.UniversumEngine;
+    const isCreative = uni.creativeMode && !st.isMultiplayerMode;
+    const res = planet.resources || {};
+
+    document.querySelectorAll('.btn-build-structure').forEach((btn) => {
+      const b = Data.BUILDINGS[btn.dataset.bid];
+      if (!b) return;
+      const curLv = Number(planet.buildings?.[b.id] || 0);
+      const cost = Data.getBuildingCost(b.id, curLv + 1, false);
+      const req = Data.checkRequirements(b.requirements, planet, uni, false);
+      const canBuild = isCreative || (req.met && res.metal >= cost.metal && res.crystal >= cost.crystal && res.deuterium >= cost.deuterium && (planet.buildQueue || []).length === 0 && (!b.maxLevel || curLv < b.maxLevel));
+      btn.disabled = !canBuild;
+    });
+
+    document.querySelectorAll('.btn-start-research').forEach((btn) => {
+      const r = Data.RESEARCHES[btn.dataset.rid];
+      if (!r) return;
+      const curLv = Number(uni.researches?.[r.id] || 0);
+      const cost = Data.getResearchCost(r.id, curLv + 1);
+      const req = Data.checkRequirements(r.requirements, planet, uni, false);
+      const canResearch = isCreative || (req.met && res.metal >= cost.metal && res.crystal >= cost.crystal && res.deuterium >= cost.deuterium && !uni.researchQueue);
+      btn.disabled = !canResearch;
+    });
+
+    const isDef = st.shipyardTab === 'defense';
+    const dict = isDef ? Data.DEFENSES : Data.SHIPS;
+    document.querySelectorAll('.btn-produce-unit').forEach((btn) => {
+      const u = dict[btn.dataset.uid];
+      if (!u) return;
+      const req = Data.checkRequirements(u.requirements, planet, uni, false);
+      btn.disabled = !isCreative && !req.met;
+    });
+    document.querySelectorAll('.btn-qty-max').forEach((btn) => {
+      const u = dict[btn.dataset.uid];
+      if (!u) return;
+      const cost = Engine.getUnitCostAdjusted(planet, u.id, isDef);
+      const maxBy = (v, c) => (c > 0 ? Math.floor(v / c) : 999999);
+      btn.dataset.max = isCreative ? 100 : Math.max(0, Math.min(maxBy(res.metal, cost.metal), maxBy(res.crystal, cost.crystal), maxBy(res.deuterium, cost.deuterium), u.maxCount ? 1 : 99999));
     });
   };
 

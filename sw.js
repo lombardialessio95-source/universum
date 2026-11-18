@@ -27,7 +27,7 @@ const ASSETS = [
 
   // Moduli Plugin Espansione
   './missions-core.js',       // Ricerca Esplorazione, spinta 10-100%, slot e richiamo
-  './siege-missions.js'       // Motore Assedi: Embargo Planetario (blocco rotte), Occupazione (5%/giorno + riscatto) e tick orbitale
+  './siege-missions.js',      // Motore Assedi: Embargo Planetario (blocco rotte), Occupazione (5%/giorno + riscatto) e tick orbitale
   './ui-fleet-movements.js'   // Schermata UI Movimento Flotta e stato assedi
 ];
 
