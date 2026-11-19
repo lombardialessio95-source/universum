@@ -998,6 +998,7 @@
       case 'movements': UI.renderFleetMovements(viewport); break;
       case 'galaxy': await UI.renderGalaxy(viewport); break;
       case 'espionage': UI.renderEspionageAndSim(viewport); break;
+      case 'reports': await UI.renderReports(viewport); break;
       case 'moon': UI.renderMoon(viewport); break;
       case 'diplomacy': UI.renderDiplomacy(viewport); break;
       case 'empire': UI.renderEmpire(viewport); break;
@@ -1208,6 +1209,12 @@
         <p class="text-muted">Universo attivo: <strong style="color:#fff;">${UI.escapeHTML(uni.name)}</strong> (${st.isMultiplayerMode ? 'ONLINE PvP' : 'OFFLINE'})</p>
 
         <button type="button" id="btn-save-now" class="btn btn-green">${UI.svgIcon('save')} SINCRONIZZA / SALVA ORA</button>
+        ${st.isMultiplayerMode && (uni.fleetsInFlight || []).some((f) => !f.resolved) ? `
+          <div style="background:rgba(255,170,0,0.12); border:1px solid rgba(255,170,0,0.5); border-radius:8px; padding:10px; font-size:0.9rem;">
+            <strong style="color:var(--btn-gold);">Avviso deploy:</strong> Ci sono missioni in corso, il deploy potrebbe bloccarle. Le missioni sono salvate su Firestore (partenza/arrivo/flotta/risorse) e verranno migrate/riprese dopo il deploy.
+          </div>
+        ` : ''}
+        ${st.isMultiplayerMode ? `<button type="button" id="btn-repair-missions" class="btn btn-creative">Ripara missioni bloccate</button>` : ''}
         ${!st.isMultiplayerMode ? `
           <button type="button" id="btn-export-download" class="btn btn-blue">SCARICA BACKUP JSON</button>
           <button type="button" id="btn-export-copy" class="btn btn-ghost">COPIA JSON NEGLI APPUNTI</button>
@@ -1269,6 +1276,20 @@
           UI.toast(err.message, 'error');
         }
       });
+    });
+
+    document.getElementById('btn-repair-missions')?.addEventListener('click', async () => {
+      try {
+        const repaired = window.UniversumMP?.repairStuckMissions
+          ? await window.UniversumMP.repairStuckMissions(uni.id)
+          : 0;
+        UI.playSound('success');
+        UI.toast(repaired > 0 ? `Missioni bloccate riparate: ${repaired}. Flotte restituite ai pianeti di partenza.` : 'Nessuna missione bloccata da riparare.', 'success');
+        UI.renderCurrentView();
+      } catch (err) {
+        UI.playSound('error');
+        UI.toast(err.message, 'error');
+      }
     });
 
     document.getElementById('btn-save-now')?.addEventListener('click', async () => {

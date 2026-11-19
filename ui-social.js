@@ -4,6 +4,123 @@
   const UI = window.UniversumUI;
 
   // =========================================================
+  // PAGINA RAPPORTI (persistente: Firestore online / salvataggio locale offline)
+  // =========================================================
+  UI.renderReports = async function (viewport) {
+    const { escapeHTML, formatNum, svgIcon } = UI;
+    const st = UI.state;
+    const uni = st.currentUniverse;
+    if (!uni) return;
+
+    let reports = [];
+    if (st.isMultiplayerMode && window.UniversumMP?.getReports) {
+      viewport.innerHTML = `<div class="glass-panel" style="padding:20px; text-align:center;"><p class="text-muted">Caricamento rapporti...</p></div>`;
+      try {
+        reports = await window.UniversumMP.getReports(uni.id);
+      } catch (e) {
+        reports = [...(uni.messages || [])];
+      }
+    } else {
+      reports = [...(uni.messages || [])];
+      for (const r of uni.spyReports || []) {
+        reports.push({
+          id: r.id,
+          type: 'spy',
+          title: `Rapporto Spionaggio: ${r.targetName} [${r.key}]`,
+          body: `Risorse: ${formatNum(r.resources?.metal || 0)} M, ${formatNum(r.resources?.crystal || 0)} C, ${formatNum(r.resources?.deuterium || 0)} D. Flotta: ${r.fleet ? 'rilevata' : 'nascosta'}. Difese: ${r.defenses ? 'rilevate' : 'nascoste'}.`,
+          timestamp: r.time || r.timestamp || 0,
+          _spy: true
+        });
+      }
+      reports.sort((a, b) => Number(b.timestamp || b.time || 0) - Number(a.timestamp || a.time || 0));
+    }
+
+    const categoryOf = (r) => {
+      const t = `${r.type || ''} ${r.title || ''}`.toLowerCase();
+      if (t.includes('spion') || t.includes('spy')) return { label: 'SPIONAGGIO', badge: 'badge-blue' };
+      if (t.includes('occup')) return { label: 'OCCUPAZIONE', badge: 'badge-red' };
+      if (t.includes('embargo') || t.includes('blocco')) return { label: 'EMBARGO', badge: 'badge-red' };
+      if (t.includes('battaglia') || t.includes('difesa') || t.includes('combat') || t.includes('attacco')) return { label: 'BATTAGLIA', badge: 'badge-red' };
+      if (t.includes('trasport') || t.includes('consegna') || t.includes('schiera')) return { label: 'TRASPORTO', badge: 'badge-green' };
+      if (t.includes('esplor') || t.includes('expedition') || t.includes('relitto')) return { label: 'ESPLORAZIONE', badge: 'badge-creative' };
+      if (t.includes('colon')) return { label: 'COLONIZZAZIONE', badge: 'badge-green' };
+      return { label: 'RAPPORTO', badge: 'badge-neutral' };
+    };
+
+    viewport.innerHTML = `
+      <div style="display:flex; flex-direction:column; gap:12px;">
+        <div class="glass-panel" style="padding:14px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+            <h2 style="font-size:1.1rem; color:var(--btn-gold);">${svgIcon('mail')} PAGINA RAPPORTI (${reports.length})</h2>
+            <button type="button" id="btn-reports-delete-all" class="btn btn-red btn-sm" ${reports.length === 0 ? 'disabled' : ''}>Elimina tutti</button>
+          </div>
+          ${reports.length === 0 ? '<p class="text-muted">Nessun rapporto salvato. I rapporti di battaglie, spionaggio, trasporti, esplorazioni, embargo e occupazione appariranno qui e restano salvati finche\' non li elimini.</p>' : `
+            <div style="display:flex; flex-direction:column; gap:8px;">
+              ${reports.map((r) => {
+                const cat = categoryOf(r);
+                const when = r.timestamp || r.time;
+                return `
+                  <article style="background:rgba(0,0,0,0.38); border:1px solid rgba(0,210,255,0.22); border-left:4px solid ${cat.badge === 'badge-red' ? 'var(--btn-red)' : 'var(--btn-blue)'}; border-radius:8px; padding:12px;">
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px; flex-wrap:wrap; margin-bottom:6px;">
+                      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                        <span class="badge ${cat.badge}">${cat.label}</span>
+                        <strong style="font-size:0.98rem;">${escapeHTML(r.title || 'Rapporto')}</strong>
+                      </div>
+                      <button type="button" class="btn btn-ghost btn-sm btn-report-delete" data-rid="${escapeHTML(String(r.id || ''))}" data-spy="${r._spy ? '1' : '0'}">Elimina</button>
+                    </div>
+                    ${when ? `<div class="text-muted" style="font-size:0.8rem; margin-bottom:6px;">${new Date(when).toLocaleString('it-IT')}</div>` : ''}
+                    <p style="font-size:0.92rem; line-height:1.45; white-space:pre-line;">${escapeHTML(r.body || '')}</p>
+                  </article>
+                `;
+              }).join('')}
+            </div>
+          `}
+        </div>
+      </div>
+    `;
+
+    viewport.querySelectorAll('.btn-report-delete').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        try {
+          if (st.isMultiplayerMode && window.UniversumMP?.deleteReport) {
+            await window.UniversumMP.deleteReport(uni.id, btn.dataset.rid);
+          } else if (btn.dataset.spy === '1') {
+            uni.spyReports = (uni.spyReports || []).filter((r) => String(r.id) !== btn.dataset.rid);
+            await UI.persistUniverseState();
+          } else {
+            uni.messages = (uni.messages || []).filter((m) => String(m.id) !== btn.dataset.rid);
+            await UI.persistUniverseState();
+          }
+          UI.playSound('click');
+          UI.toast('Rapporto eliminato.', 'success');
+          UI.renderCurrentView();
+        } catch (err) {
+          UI.playSound('error');
+          UI.toast(err.message, 'error');
+        }
+      });
+    });
+
+    document.getElementById('btn-reports-delete-all')?.addEventListener('click', async () => {
+      try {
+        if (st.isMultiplayerMode && window.UniversumMP?.deleteAllReports) {
+          await window.UniversumMP.deleteAllReports(uni.id);
+        } else {
+          uni.messages = [];
+          uni.spyReports = [];
+          await UI.persistUniverseState();
+        }
+        UI.playSound('success');
+        UI.toast('Tutti i rapporti sono stati eliminati.', 'success');
+        UI.renderCurrentView();
+      } catch (err) {
+        UI.playSound('error');
+        UI.toast(err.message, 'error');
+      }
+    });
+  };
+
+  // =========================================================
   // CLASSIFICA (CON PULSANTE MESSAGGI PRIVATI)
   // =========================================================
   UI.renderHighscoreAndQuests = async function (viewport) {

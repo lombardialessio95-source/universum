@@ -118,6 +118,7 @@
           <div id="explore-options-box" class="${st.fleetMission === 'explore' ? '' : 'hidden'}" style="background:rgba(0,210,255,0.08); border:1px solid rgba(0,210,255,0.25); padding:10px; border-radius:8px; margin-bottom:12px;">
             <div class="form-group" style="margin-bottom:8px;">
               <label>Durata Stazionamento Esplorativo (Max ${maxExpHours}h con Esplorazione Profonda Lv.${Number(uni.researches?.expeditionTech || 0)})</label>
+              <p class="text-muted" style="font-size:0.85rem; margin-bottom:8px;">Esplorazione Spaziale Profonda — Livello attuale: <strong class="text-crystal">${Number(uni.researches?.expeditionTech || 0)}</strong> • Max attuale: <strong class="text-crystal">${maxExpHours}h</strong> • Ogni livello aggiunge <strong>+1h</strong> di durata massima (1h base + 1h per livello).</p>
               <select id="flt-explore-hours" class="form-control">
                 ${Array.from({ length: maxExpHours }, (_, idx) => idx + 1).map((h) => `
                   <option value="${h}" ${st.fleetExploreHours === h ? 'selected' : ''}>${h} ${h === 1 ? 'Ora' : 'Ore'} di Esplorazione</option>

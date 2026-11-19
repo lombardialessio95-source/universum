@@ -15,6 +15,8 @@
     const pIdx = UI.getActivePlanetIndex();
     const planet = UI.getActivePlanet();
     const isCreative = uni.creativeMode && !st.isMultiplayerMode;
+    const prod = Engine.getPlanetProduction(planet, uni);
+    const effSpeed = Engine.getEffectiveSpeed ? Engine.getEffectiveSpeed(uni) : Math.max(1, Number(uni.speed) || 1);
 
     const cards = Object.values(Data.BUILDINGS).map((b) => {
       const curLv = Number(planet.buildings[b.id] || 0);
@@ -23,10 +25,23 @@
       const req = Data.checkRequirements(b.requirements, planet, uni, false);
       const buildSec = Engine.getBuildingBuildTime(uni, planet, b.id, nextLv, false);
 
+      // Energia e produzione oraria del livello successivo
+      const energyCur = Data.getBuildingEnergyDelta(b.id, curLv, planet.maxTemp);
+      const energyNext = Data.getBuildingEnergyDelta(b.id, nextLv, planet.maxTemp);
+      const energyDelta = energyNext - energyCur;
+      const energyAfter = prod.energyBalance + energyDelta;
+      const energyInsufficient = !isCreative && energyDelta < 0 && energyAfter < 0;
+      const prodGain = (resId) => {
+        if (!['metalMine', 'crystalMine', 'deuteriumSynth'].includes(b.id)) return 0;
+        const key = b.id === 'metalMine' ? 'metal' : b.id === 'crystalMine' ? 'crystal' : 'deuterium';
+        if (key !== resId) return 0;
+        return Math.floor((Data.getBaseHourlyProduction(b.id, nextLv, planet.maxTemp) - Data.getBaseHourlyProduction(b.id, curLv, planet.maxTemp)) * effSpeed * (prod.efficiency || 1));
+      };
+
       const hasM = isCreative || planet.resources.metal >= cost.metal;
       const hasC = isCreative || planet.resources.crystal >= cost.crystal;
       const hasD = isCreative || planet.resources.deuterium >= cost.deuterium;
-      const canBuild = isCreative || (req.met && hasM && hasC && hasD && planet.buildQueue.length === 0 && (!b.maxLevel || curLv < b.maxLevel));
+      const canBuild = isCreative || (req.met && hasM && hasC && hasD && !energyInsufficient && planet.buildQueue.length === 0 && (!b.maxLevel || curLv < b.maxLevel));
 
       return `
         <div class="glass-panel" style="padding:14px; display:flex; flex-direction:column; gap:10px;">
@@ -48,6 +63,7 @@
           </div>
           <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-top:auto;">
             <span style="font-size:0.88rem; display:inline-flex; align-items:center;">${svgIcon('clock')} ${isCreative ? '<strong class="text-metal">ISTANTANEO (0s)</strong>' : formatDuration(buildSec)}</span>
+            <span style="font-size:0.82rem; color:${energyNext >= 0 ? 'var(--res-energy)' : '#ffab40'};">${svgIcon('bolt')} Energia: ${energyNext >= 0 ? '+' : ''}${formatNum(energyNext)}${prodGain('metal') > 0 ? ` • +${formatNum(prodGain('metal'))}/h Metallo` : ''}${prodGain('crystal') > 0 ? ` • +${formatNum(prodGain('crystal'))}/h Cristallo` : ''}${prodGain('deuterium') > 0 ? ` • +${formatNum(prodGain('deuterium'))}/h Deuterio` : ''}${energyInsufficient ? ' • <strong style="color:#ff5252;">Energia insufficiente</strong>' : ''}</span>
             <button type="button" class="btn btn-green btn-sm btn-build-structure" data-bid="${b.id}" ${canBuild ? '' : 'disabled'}>
               ${b.maxLevel && curLv >= b.maxLevel ? 'MAX' : `COSTRUISCI LV.${nextLv}`}
             </button>
@@ -58,6 +74,13 @@
 
     viewport.innerHTML = `
       <h2 style="font-size:1.1rem; color:var(--res-crystal); margin-bottom:12px;">EDIFICI PLANETARI — ${escapeHTML(planet.name)}</h2>
+      <div class="glass-panel" style="padding:12px; margin-bottom:12px; display:flex; flex-wrap:wrap; gap:14px; font-size:0.92rem;">
+        <span>Energia totale: <strong class="text-energy">${formatNum(prod.energyProduced)}</strong> disponibile / <strong style="color:#ffab40;">${formatNum(prod.energyConsumed)}</strong> usata</span>
+        <span>Saldo: <strong style="color:${prod.energyBalance >= 0 ? 'var(--btn-green)' : '#ff5252'};">${prod.energyBalance >= 0 ? '+' : ''}${formatNum(prod.energyBalance)}</strong></span>
+        <span class="text-metal">+${formatNum(prod.metalPerHour)}/h Metallo</span>
+        <span class="text-crystal">+${formatNum(prod.crystalPerHour)}/h Cristallo</span>
+        <span class="text-deuterium">${prod.deuteriumPerHour >= 0 ? '+' : ''}${formatNum(prod.deuteriumPerHour)}/h Deuterio</span>
+      </div>
       <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(305px, 1fr)); gap:12px;">
         ${cards}
       </div>
@@ -293,13 +316,16 @@
     const isCreative = uni.creativeMode && !st.isMultiplayerMode;
     const res = planet.resources || {};
 
+    const prodNow = Engine.getPlanetProduction(planet, uni);
     document.querySelectorAll('.btn-build-structure').forEach((btn) => {
       const b = Data.BUILDINGS[btn.dataset.bid];
       if (!b) return;
       const curLv = Number(planet.buildings?.[b.id] || 0);
       const cost = Data.getBuildingCost(b.id, curLv + 1, false);
       const req = Data.checkRequirements(b.requirements, planet, uni, false);
-      const canBuild = isCreative || (req.met && res.metal >= cost.metal && res.crystal >= cost.crystal && res.deuterium >= cost.deuterium && (planet.buildQueue || []).length === 0 && (!b.maxLevel || curLv < b.maxLevel));
+      const energyDelta = Data.getBuildingEnergyDelta(b.id, curLv + 1, planet.maxTemp) - Data.getBuildingEnergyDelta(b.id, curLv, planet.maxTemp);
+      const energyOk = isCreative || energyDelta >= 0 || (prodNow.energyBalance + energyDelta) >= 0;
+      const canBuild = isCreative || (req.met && energyOk && res.metal >= cost.metal && res.crystal >= cost.crystal && res.deuterium >= cost.deuterium && (planet.buildQueue || []).length === 0 && (!b.maxLevel || curLv < b.maxLevel));
       btn.disabled = !canBuild;
     });
 

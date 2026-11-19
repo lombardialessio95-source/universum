@@ -1,5 +1,5 @@
 /**
- * UNIVERSUM â€” Motore Missioni Orbitali (Embargo, Occupazione, Spinta Variabile & Esplorazione)
+ * UNIVERSUM — Motore Missioni Orbitali (Embargo, Occupazione, Spinta Variabile & Esplorazione)
  */
 (function () {
   'use strict';
@@ -204,7 +204,7 @@
       }
 
       if (mission === 'embargo' && loadD < 500) {
-        throw new Error('Per imporre un Embargo Planetario devi caricare almeno 500 Deuterio nelle stive per mantenere lâ€™orbita!');
+        throw new Error('Per imporre un Embargo Planetario devi caricare almeno 500 Deuterio nelle stive per mantenere l’orbita!');
       }
 
       const blackHoleExtra = (mission === 'explore' && options.blackHole) ? 50000 : 0;
@@ -520,7 +520,7 @@
       planet.resources.deuterium -= rD;
       universe.incomingSieges.splice(idx, 1);
 
-      window.UniversumUI?.toast('Riscatto pagato! La flotta occupante ha lasciato lâ€™orbita.', 'success');
+      window.UniversumUI?.toast('Riscatto pagato! La flotta occupante ha lasciato l’orbita.', 'success');
     },
 
     // Il difensore lancia un contrattacco locale contro la flotta orbitale
@@ -553,7 +553,7 @@
         window.UniversumUI?.toast('Flotta orbitale distrutta! Il blocco sul pianeta Ã¨ stato spezzato.', 'success');
       } else {
         siege.ships = combat.defenderFleetSurvivors;
-        window.UniversumUI?.toast('Contrattacco respinto: la flotta nemica mantiene ancora lâ€™orbita!', 'error');
+        window.UniversumUI?.toast('Contrattacco respinto: la flotta nemica mantiene ancora l’orbita!', 'error');
       }
     }
   };

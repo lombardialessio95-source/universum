@@ -1,5 +1,5 @@
 /**
- * UNIVERSUM â€” Plugin Core Missioni Avanzate, Carburante Variabile & Slot Flotta
+ * UNIVERSUM — Plugin Core Missioni Avanzate, Carburante Variabile & Slot Flotta
  */
 (function () {
   'use strict';
@@ -13,7 +13,7 @@
         id: 'expeditionTech',
         name: 'Esplorazione Spaziale Profonda',
         icon: 'ðŸ§­',
-        description: 'Estende lâ€™autonomia delle sonde e delle flotte esplorative: +1 ora massima di durata missione per livello.',
+        description: 'Estende l’autonomia delle sonde e delle flotte esplorative: +1 ora massima di durata missione per livello.',
         baseCost: { metal: 3000, crystal: 6000, deuterium: 3000 },
         factor: 1.85,
         requirements: {

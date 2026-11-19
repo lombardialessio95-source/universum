@@ -100,6 +100,12 @@
       if (!reqCheck.met) {
         throw new Error(`Requisiti mancanti: ${reqCheck.missing.join(', ')}`);
       }
+      // Blocco energia: il livello successivo non deve portare il saldo in negativo
+      const prodNow = Engine.getPlanetProduction(planet, universe);
+      const energyDelta = Data.getBuildingEnergyDelta(buildingId, curLv + 1, planet.maxTemp) - Data.getBuildingEnergyDelta(buildingId, curLv, planet.maxTemp);
+      if (energyDelta < 0 && (prodNow.energyBalance + energyDelta) < 0) {
+        throw new Error('Energia insufficiente');
+      }
     }
 
     const targetLv = curLv + 1;

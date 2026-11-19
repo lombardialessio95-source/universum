@@ -1,5 +1,5 @@
 /**
- * UNIVERSUM â€” Schermata UI: Movimento Flotta, Slot & Stato Assedi (Offline + Online PvP)
+ * UNIVERSUM — Schermata UI: Movimento Flotta, Slot & Stato Assedi (Offline + Online PvP)
  */
 (function () {
   'use strict';
@@ -50,6 +50,8 @@
             type: 'embargo',
             targetCoords: pl.coords,
             attackerName: pl.embargo.attackerName,
+            fuelRemaining: Number(pl.embargo.deuterium || 0),
+            deuteriumInitial: Number(pl.embargo.deuterium || 0),
             ransom: pl.embargo.ransom
           });
         }
@@ -59,6 +61,7 @@
             type: 'occupy',
             targetCoords: pl.coords,
             attackerName: pl.occupation.occupierName,
+            prelievoAccumulato: pl.occupation.prelievoAccumulato || { metal: 0, crystal: 0, deuterium: 0 },
             ransom: pl.occupation.ransom
           });
         }
@@ -77,6 +80,8 @@
             id: `mp_my_emb_${p.coords.g}_${p.coords.s}_${p.coords.p}`,
             type: 'embargo',
             targetCoords: p.coords,
+            fuelRemaining: Number(p.embargo?.deuterium || 0),
+            deuteriumInitial: Number(p.embargo?.deuterium || 0),
             ransom: p.embargo?.ransom
           });
         });
@@ -86,6 +91,7 @@
             id: `mp_my_occ_${p.coords.g}_${p.coords.s}_${p.coords.p}`,
             type: 'occupy',
             targetCoords: p.coords,
+            prelievoAccumulato: p.occupation?.prelievoAccumulato || { metal: 0, crystal: 0, deuterium: 0 },
             ransom: p.occupation?.ransom
           });
         });
@@ -120,7 +126,7 @@
             <div>
               <h2 style="font-size:1.1rem; color:var(--res-crystal);">${svgIcon('radar')} MOVIMENTO FLOTTA &amp; CONTROLLO MISSIONI</h2>
               <p class="text-muted" style="font-size:0.88rem; margin-top:2px;">
-                Tecnologia Informatica Lv.${Number(uni.researches?.computerTech || 0)} â€¢ Esplorazione Max: <strong class="text-crystal">${maxExpHours}h</strong>
+                Tecnologia Informatica Lv.${Number(uni.researches?.computerTech || 0)} • Esplorazione Max: <strong class="text-crystal">${maxExpHours}h</strong>
               </p>
             </div>
             <div style="display:flex; align-items:center; gap:8px;">
@@ -170,7 +176,7 @@
                     <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:8px;">
                       <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
                         <span class="badge ${mInfo.badge}">${escapeHTML(mInfo.label)}</span>
-                        <span class="badge ${isOutbound ? 'badge-green' : 'badge-blue'}">${isOutbound ? 'ANDATA' : (f.recalled || f.mission === 'recall' ? 'RICHIAMATA â€¢ RIENTRO' : 'RIENTRO')}</span>
+                        <span class="badge ${isOutbound ? 'badge-green' : 'badge-blue'}">${isOutbound ? 'ANDATA' : (f.recalled || f.mission === 'recall' ? 'RICHIAMATA • RIENTRO' : 'RIENTRO')}</span>
                         <span class="badge badge-neutral">Spinta: ${fuelPct}%</span>
                         ${expH ? `<span class="badge badge-creative">Esplorazione: ${expH}h</span>` : ''}
                       </div>
@@ -178,7 +184,7 @@
                     </div>
 
                     <div style="font-size:0.92rem; margin-bottom:8px; display:flex; justify-content:space-between; flex-wrap:wrap; gap:6px;">
-                      <span>Rotta: <strong class="text-crystal">[${f.originCoords.g}:${f.originCoords.s}:${f.originCoords.p}]</strong> â†’ <strong class="text-metal">[${f.targetCoords.g}:${f.targetCoords.s}:${f.targetCoords.p}]</strong></span>
+                      <span>Rotta: <strong class="text-crystal">[${f.originCoords.g}:${f.originCoords.s}:${f.originCoords.p}]</strong> → <strong class="text-metal">[${f.targetCoords.g}:${f.targetCoords.s}:${f.targetCoords.p}]</strong></span>
                       ${ransomObj ? `<span class="text-energy">Riscatto impostato: <strong>${formatNum((ransomObj.metal || 0) + (ransomObj.crystal || 0) + (ransomObj.deuterium || 0))}</strong> ris.</span>` : ''}
                     </div>
 
@@ -193,8 +199,8 @@
 
                     ${hasCargo ? `
                       <div class="text-muted" style="font-size:0.84rem; margin-bottom:8px;">
-                        Stiva: <strong class="text-metal">${formatNum(f.cargo.metal || 0)} M</strong> â€¢
-                        <strong class="text-crystal">${formatNum(f.cargo.crystal || 0)} C</strong> â€¢
+                        Stiva: <strong class="text-metal">${formatNum(f.cargo.metal || 0)} M</strong> •
+                        <strong class="text-crystal">${formatNum(f.cargo.crystal || 0)} C</strong> •
                         <strong class="text-deuterium">${formatNum(f.cargo.deuterium || 0)} D</strong>
                       </div>
                     ` : ''}
@@ -202,7 +208,7 @@
                     ${isOutbound ? `
                       <div style="display:flex; justify-content:flex-end;">
                         <button type="button" class="btn btn-red btn-sm btn-recall-fleet" data-fid="${escapeHTML(f.id)}">
-                          â†© RICHIAMA FLOTTA
+                          ↩ RICHIAMA FLOTTA
                         </button>
                       </div>
                     ` : ''}
@@ -229,8 +235,8 @@
                   </div>
                   <p class="text-muted" style="font-size:0.88rem; margin-bottom:8px;">
                     ${s.type === 'embargo'
-                      ? `Blocco rotte attivo â€¢ Riscatto richiesto: <strong>${formatNum((s.ransom?.metal || 0) + (s.ransom?.crystal || 0) + (s.ransom?.deuterium || 0))}</strong>`
-                      : `Prelievo automatico: <strong>5% risorse/giorno</strong> â€¢ Riscatto richiesto: <strong>${formatNum((s.ransom?.metal || 0) + (s.ransom?.crystal || 0) + (s.ransom?.deuterium || 0))}</strong>`}
+                      ? `Blocco rotte attivo • Riscatto richiesto: <strong>${formatNum((s.ransom?.metal || 0) + (s.ransom?.crystal || 0) + (s.ransom?.deuterium || 0))}</strong>`
+                      : `Prelievo automatico: <strong>5% risorse/giorno</strong> • Prelievo accumulato: <strong>${formatNum((s.prelievoAccumulato?.metal || 0) + (s.prelievoAccumulato?.crystal || 0) + (s.prelievoAccumulato?.deuterium || 0))}</strong> • Riscatto richiesto: <strong>${formatNum((s.ransom?.metal || 0) + (s.ransom?.crystal || 0) + (s.ransom?.deuterium || 0))}</strong>`}
                   </p>
                   <div style="margin-bottom:8px;">
                     <div style="display:flex; justify-content:space-between; font-size:0.84rem; margin-bottom:4px;">
