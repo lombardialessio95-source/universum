@@ -210,6 +210,75 @@
     }
   };
 
+  // Bacino Spaziale: occupa lo slot orbitale al posto della Luna (mai insieme).
+  // Tempi in giorni reali (non scalati dalla velocita' dell'universo).
+  const BACINO_SPAZIALE = {
+    id: 'bacino_spaziale',
+    name: 'Bacino Spaziale',
+    icon: '🛠️',
+    description: 'Grande cantiere orbitale costruito al posto della Luna: 20 giorni reali, pagato a rate giornaliere.',
+    totalDays: 20,
+    dayMs: 86400000,
+    totalCost: { metal: 5000000, crystal: 3000000, deuterium: 1000000 },
+    dailyCost: { metal: 250000, crystal: 150000, deuterium: 50000 }
+  };
+
+  // Invictus: nave legata a un Bacino Spaziale (max 4 tra attive e in costruzione).
+  const INVICTUS = {
+    id: 'invictus',
+    name: 'Invictus',
+    maxPerBacino: 4,
+    totalDays: 20,
+    dayMs: 86400000,
+    totalCost: { metal: 4000000, crystal: 2400000, deuterium: 1600000 },
+    dailyCost: { metal: 200000, crystal: 120000, deuterium: 80000 },
+    jumpDeuteriumPerShip: 5000,
+    jumpSystemsStep: 3,
+    moonChancePerLost: 0.15
+  };
+
+  // Crepuscolo degli Dei: nave unica d'impero, solo in un Bacino mai usato (vuoto).
+  const CREPUSCOLO = {
+    id: 'crepuscolo',
+    name: 'Crepuscolo degli Dei',
+    maxPerEmpire: 1,
+    buildDays: 100,
+    wreckRepairDays: 30,
+    battleRepairDays: 10,
+    dayMs: 86400000,
+    totalCost: { metal: 50000000, crystal: 30000000, deuterium: 20000000 },
+    dailyCost: { metal: 500000, crystal: 300000, deuterium: 200000 },
+    wreckChance: 0.005,
+    wreckMinDeathStars: 4,
+    wreckExploreHours: 24
+  };
+
+  // Galattica: nave-pianeta errante che nasce nel Bacino e ne prende il posto (max 3 per impero).
+  const GALATTICA = {
+    id: 'galattica',
+    name: 'Galattica',
+    maxPerEmpire: 3,
+    buildDays: 100,
+    dayMs: 86400000,
+    totalCost: { metal: 45000000, crystal: 27000000, deuterium: 18000000 },
+    dailyCost: { metal: 450000, crystal: 270000, deuterium: 180000 },
+    jumpDeuteriumPerSystemStep: 25000,
+    jumpSystemsStep: 3,
+    jumpGalaxyExtraDeuterium: 100000,
+    defenseCostMultiplier: 2,
+    requirements: {
+      researches: { quantumPhysics: 10, jumpPropulsion: 8, mobilePlanetaryStructure: 5, stellarReactor: 7, spatialTerraforming: 5 }
+    }
+  };
+
+  const GALATTICA_STRUCTURES = {
+    cantiereSpaziale: { id: 'cantiereSpaziale', name: 'Cantiere Spaziale', icon: '🚀', baseCost: { metal: 2000, crystal: 1000, deuterium: 500 }, factor: 2.0 },
+    generatoreMetallo: { id: 'generatoreMetallo', name: 'Generatore di Metallo', icon: '⛏️', baseCost: { metal: 300, crystal: 75, deuterium: 0 }, factor: 1.5 },
+    generatoreCristallo: { id: 'generatoreCristallo', name: 'Generatore di Cristallo', icon: '💎', baseCost: { metal: 240, crystal: 120, deuterium: 0 }, factor: 1.6 },
+    sintetizzatoreDeuterio: { id: 'sintetizzatoreDeuterio', name: 'Sintetizzatore di Deuterio', icon: '🧪', baseCost: { metal: 1125, crystal: 375, deuterium: 0 }, factor: 1.5 },
+    reattoreFusione: { id: 'reattoreFusione', name: 'Reattore a Fusione', icon: '⚛️', baseCost: { metal: 4500, crystal: 1800, deuterium: 900 }, factor: 1.8 }
+  };
+
   const RESEARCHES = {
     energyTech: {
       id: 'energyTech',
@@ -372,6 +441,51 @@
       baseCost: { metal: 500000, crystal: 500000, deuterium: 250000 },
       factor: 2.0,
       requirements: { buildings: { researchLab: 12 }, researches: { plasmaTech: 15, hyperspaceTech: 10 } }
+    },
+    quantumPhysics: {
+      id: 'quantumPhysics',
+      name: 'Fisica Quantica',
+      icon: '⚛️',
+      description: 'Fondamenti teorici del salto quantico: primo requisito della Galattica (serve Lv.10).',
+      baseCost: { metal: 0, crystal: 400000, deuterium: 200000 },
+      factor: 2.0,
+      requirements: { buildings: { researchLab: 10 }, researches: { energyTech: 10, hyperspaceTech: 7 } }
+    },
+    jumpPropulsion: {
+      id: 'jumpPropulsion',
+      name: 'Propulsione a Salto',
+      icon: '🌀',
+      description: 'Motori a salto per scafi planetari: requisito Galattica Lv.8.',
+      baseCost: { metal: 300000, crystal: 300000, deuterium: 150000 },
+      factor: 2.0,
+      requirements: { buildings: { researchLab: 9 }, researches: { quantumPhysics: 5, hyperspaceDrive: 6 } }
+    },
+    mobilePlanetaryStructure: {
+      id: 'mobilePlanetaryStructure',
+      name: 'Struttura Planetaria Mobile',
+      icon: '🏗️',
+      description: 'Scafo planetario in grado di muoversi: requisito Galattica Lv.5.',
+      baseCost: { metal: 500000, crystal: 250000, deuterium: 0 },
+      factor: 2.0,
+      requirements: { buildings: { researchLab: 8 }, researches: { jumpPropulsion: 4, armourTech: 8 } }
+    },
+    stellarReactor: {
+      id: 'stellarReactor',
+      name: 'Reattore Stellare',
+      icon: '☀️',
+      description: 'Reattore in grado di alimentare una nave-pianeta: requisito Galattica Lv.7.',
+      baseCost: { metal: 0, crystal: 350000, deuterium: 350000 },
+      factor: 2.0,
+      requirements: { buildings: { researchLab: 10 }, researches: { quantumPhysics: 7, plasmaTech: 8 } }
+    },
+    spatialTerraforming: {
+      id: 'spatialTerraforming',
+      name: 'Terraforming Spaziale',
+      icon: '🌍',
+      description: 'Ecosistemi chiusi per navi-pianeta: requisito Galattica Lv.5.',
+      baseCost: { metal: 450000, crystal: 450000, deuterium: 200000 },
+      factor: 2.0,
+      requirements: { buildings: { researchLab: 9 }, researches: { mobilePlanetaryStructure: 3 } }
     }
   };
 
@@ -631,6 +745,52 @@
         heavyLaser: 100,
         gaussCannon: 50,
         ionCannon: 100
+      }
+    },
+    invictus: {
+      id: 'invictus',
+      name: 'Invictus',
+      icon: '⚔️',
+      description: 'Ammiraglia legata a un Bacino Spaziale: potenza 4x Morte Nera, non orbita e rientra sempre al suo Bacino.',
+      cost: { metal: 4000000, crystal: 2400000, deuterium: 1600000 },
+      hull: 9000000,
+      shield: 50000,
+      attack: 800000,
+      speed: 150,
+      driveType: 'hyperspaceDrive',
+      cargo: 1000000,
+      fuelConsumption: 0,
+      complexity: 100,
+      specialConstruction: 'bacino',
+      requirements: {},
+      rapidFire: {
+        smallCargo: 250, largeCargo: 250, lightFighter: 200, heavyFighter: 100,
+        cruiser: 33, battleship: 30, bomber: 25, battlecruiser: 15,
+        colonyShip: 250, recycler: 250, espionageProbe: 1250, solarSatellite: 1250,
+        rocketLauncher: 200, lightLaser: 200, heavyLaser: 100, gaussCannon: 50, ionCannon: 100
+      }
+    },
+    crepuscolo: {
+      id: 'crepuscolo',
+      name: 'Crepuscolo degli Dei',
+      icon: '🌌',
+      description: 'Nave piu potente dell\'impero: unica, legata a un Bacino Spaziale mai usato, salta anche tra galassie.',
+      cost: { metal: 50000000, crystal: 30000000, deuterium: 20000000 },
+      hull: 9000000,
+      shield: 50000,
+      attack: 2000000,
+      speed: 300,
+      driveType: 'hyperspaceDrive',
+      cargo: 10000000,
+      fuelConsumption: 1,
+      complexity: 100,
+      specialConstruction: 'bacino',
+      requirements: {},
+      rapidFire: {
+        smallCargo: 250, largeCargo: 250, lightFighter: 200, heavyFighter: 100,
+        cruiser: 33, battleship: 30, bomber: 25, battlecruiser: 15,
+        colonyShip: 250, recycler: 250, espionageProbe: 1250, solarSatellite: 1250,
+        rocketLauncher: 200, lightLaser: 200, heavyLaser: 100, gaussCannon: 50, ionCannon: 100
       }
     }
   };
@@ -947,6 +1107,11 @@
   window.UniversumData = {
     BUILDINGS,
     MOON_BUILDINGS,
+    BACINO_SPAZIALE,
+    INVICTUS,
+    CREPUSCOLO,
+    GALATTICA,
+    GALATTICA_STRUCTURES,
     RESEARCHES,
     SHIPS,
     DEFENSES,

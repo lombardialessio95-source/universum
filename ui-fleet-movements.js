@@ -15,7 +15,7 @@
     explore: { label: 'Esplorazione', badge: 'badge-creative' },
     expedition: { label: 'Esplorazione', badge: 'badge-creative' },
     recycle: { label: 'Riciclaggio', badge: 'badge-creative' },
-    destroyMoon: { label: 'Distruzione Luna', badge: 'badge-red' },
+    destroyMoon: { label: 'Distruzione Luna/Bacino', badge: 'badge-red' },
     embargo: { label: 'Embargo Planetario', badge: 'badge-red' },
     blockade: { label: 'Embargo Planetario', badge: 'badge-red' },
     occupy: { label: 'Occupazione Planetaria', badge: 'badge-red' },

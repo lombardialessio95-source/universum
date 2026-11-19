@@ -519,6 +519,94 @@
   };
 
   // =========================================================
+  // RENDERERS: SLOT ORBITALI (Bacino Spaziale e Galattica)
+  // =========================================================
+  function _drawBacino(c, mode) {
+    const accent = mode === 'stopped' ? '#ff9100' : mode === 'building' ? '#00d2ff' : '#00e676';
+    _drawCardBg(c, accent);
+    _drawPlanetarySurface(c, '#10231c', accent);
+    // Anello orbitale del bacino sopra il pianeta
+    c.save();
+    c.strokeStyle = accent;
+    c.lineWidth = 3;
+    if (mode === 'building') c.setLineDash([7, 5]);
+    c.beginPath();
+    c.ellipse(64, 56, 44, 16, -0.18, 0, Math.PI * 2);
+    c.stroke();
+    c.setLineDash([]);
+    // Bracci e piloni del cantiere orbitale
+    _drawMetallicHull(c, (p) => {
+      p.moveTo(22, 62); p.lineTo(36, 44); p.lineTo(48, 50); p.lineTo(40, 66);
+    }, '#263238', '#90a4ae', accent);
+    _drawMetallicHull(c, (p) => {
+      p.moveTo(106, 62); p.lineTo(92, 44); p.lineTo(80, 50); p.lineTo(88, 66);
+    }, '#263238', '#90a4ae', accent);
+    _drawMetallicHull(c, (p) => {
+      p.moveTo(50, 30); p.lineTo(78, 30); p.lineTo(84, 42); p.lineTo(44, 42);
+    }, '#37474f', '#cfd8dc', accent);
+    [40, 64, 88].forEach((lx) => _drawEngineGlow(c, lx, 36, 4, accent));
+    if (mode === 'building') {
+      // Gru da costruzione e sezione incompleta
+      c.strokeStyle = '#00e5ff'; c.lineWidth = 2;
+      c.beginPath(); c.moveTo(88, 30); c.lineTo(88, 14); c.lineTo(106, 14); c.stroke();
+      _drawEngineGlow(c, 106, 18, 6, '#00e5ff');
+    }
+    if (mode === 'stopped') {
+      // Segnale di fermo cantiere
+      c.fillStyle = '#ff9100';
+      c.fillRect(54, 78, 7, 18);
+      c.fillRect(68, 78, 7, 18);
+    }
+    if (mode === 'active') {
+      // Nave attraccata stilizzata sul bacino operativo
+      _drawMetallicHull(c, (p) => {
+        p.moveTo(46, 50); p.lineTo(66, 44); p.lineTo(84, 50); p.lineTo(66, 56);
+      }, '#455a64', '#eceff1', '#00e676');
+    }
+    c.restore();
+  }
+
+  const ORBITAL_STRUCTURES = {
+    bacinoSpaziale(c) { _drawBacino(c, 'active'); },
+    bacinoSpazialeBuilding(c) { _drawBacino(c, 'building'); },
+    bacinoSpazialeStopped(c) { _drawBacino(c, 'stopped'); },
+
+    // Galattica: semisfera planetaria con cupole, anello stazione e propulsori.
+    galattica(c) {
+      _drawCardBg(c, '#00e5ff');
+      _drawEngineGlow(c, 40, 104, 12, '#ff9100', Math.PI * 0.5, 18);
+      _drawEngineGlow(c, 64, 106, 14, '#ff9100', Math.PI * 0.5, 20);
+      _drawEngineGlow(c, 88, 104, 12, '#ff9100', Math.PI * 0.5, 18);
+      const g = c.createRadialGradient(52, 42, 6, 64, 58, 44);
+      g.addColorStop(0, '#1b5e20');
+      g.addColorStop(0.45, '#0d3b4c');
+      g.addColorStop(1, '#050b18');
+      c.fillStyle = g;
+      c.strokeStyle = '#00e5ff';
+      c.lineWidth = 1.6;
+      c.beginPath(); c.arc(64, 58, 42, 0, Math.PI * 2); c.fill(); c.stroke();
+      c.save();
+      c.beginPath(); c.arc(64, 58, 42, 0, Math.PI * 2); c.clip();
+      c.strokeStyle = 'rgba(0,229,255,0.45)'; c.lineWidth = 1.4;
+      c.beginPath(); c.ellipse(30, 44, 26, 10, 0.5, 0, Math.PI * 2); c.stroke();
+      c.beginPath(); c.ellipse(92, 74, 28, 10, 0.4, 0, Math.PI * 2); c.stroke();
+      [[46, 48], [68, 40], [82, 62], [54, 76]].forEach(([x, y]) => {
+        c.fillStyle = 'rgba(207,216,220,0.9)';
+        c.beginPath(); c.arc(x, y, 5, Math.PI, 0); c.fill();
+        c.fillStyle = '#00e5ff'; c.fillRect(x - 1, y - 6, 2, 3);
+      });
+      c.restore();
+      c.strokeStyle = '#cfd8dc'; c.lineWidth = 4;
+      c.beginPath(); c.ellipse(64, 58, 50, 18, -0.15, 0, Math.PI * 2); c.stroke();
+      c.strokeStyle = '#00e5ff'; c.lineWidth = 1.4;
+      c.beginPath(); c.ellipse(64, 58, 54, 20, -0.15, 0, Math.PI * 2); c.stroke();
+      _drawMetallicHull(c, (p) => {
+        p.moveTo(48, 98); p.lineTo(80, 98); p.lineTo(88, 110); p.lineTo(40, 110);
+      }, '#263238', '#90a4ae', '#ff9100');
+    }
+  };
+
+  // =========================================================
   // RENDERERS: 19 RICERCHE (Stile Olografico Blueprint)
   // =========================================================
   const RESEARCH_TECHS = {
@@ -824,11 +912,82 @@
       c.beginPath();
       c.moveTo(72, 52); c.lineTo(112, 22);
       c.stroke();
+    },
+
+    // Ricerche Galattica (stesso stile blueprint delle altre ricerche)
+    quantumPhysics(c) {
+      _drawBlueprintBg(c, '#00e5ff');
+      c.strokeStyle = '#00e5ff'; c.lineWidth = 1.8;
+      c.beginPath(); c.ellipse(64, 64, 40, 15, 0.5, 0, Math.PI * 2); c.stroke();
+      c.beginPath(); c.ellipse(64, 64, 40, 15, -0.5, 0, Math.PI * 2); c.stroke();
+      c.beginPath(); c.ellipse(64, 64, 40, 15, 1.57, 0, Math.PI * 2); c.stroke();
+      _drawEngineGlow(c, 64, 64, 10, '#00e5ff');
+      [[102, 42], [28, 84], [96, 92]].forEach(([x, y]) => _drawEngineGlow(c, x, y, 5, '#ffffff'));
+    },
+
+    jumpPropulsion(c) {
+      _drawBlueprintBg(c, '#ffc400');
+      c.strokeStyle = '#ffc400'; c.lineWidth = 2.4;
+      c.beginPath(); c.arc(88, 64, 26, 0, Math.PI * 2); c.stroke();
+      c.strokeStyle = '#00e5ff';
+      c.beginPath(); c.arc(88, 64, 16, 0, Math.PI * 2); c.stroke();
+      c.strokeStyle = '#ffe082'; c.lineWidth = 3;
+      [52, 64, 76].forEach((y) => {
+        c.beginPath(); c.moveTo(16, y); c.lineTo(42, y); c.lineTo(34, y - 6); c.moveTo(42, y); c.lineTo(34, y + 6); c.stroke();
+      });
+      _drawEngineGlow(c, 88, 64, 10, '#ffc400');
+    },
+
+    mobilePlanetaryStructure(c) {
+      _drawBlueprintBg(c, '#00e676');
+      c.strokeStyle = '#00e676'; c.lineWidth = 2.2;
+      c.beginPath(); c.arc(58, 58, 28, 0, Math.PI * 2); c.stroke();
+      c.strokeStyle = '#cfd8dc'; c.lineWidth = 3;
+      c.beginPath(); c.moveTo(30, 92); c.lineTo(92, 92); c.moveTo(40, 92); c.lineTo(46, 80); c.moveTo(82, 92); c.lineTo(76, 80); c.stroke();
+      _drawEngineGlow(c, 44, 100, 8, '#ff9100');
+      _drawEngineGlow(c, 76, 100, 8, '#ff9100');
+      c.strokeStyle = 'rgba(0,230,118,0.5)'; c.lineWidth = 1.4;
+      c.beginPath(); c.ellipse(46, 50, 18, 8, 0.5, 0, Math.PI * 2); c.stroke();
+    },
+
+    stellarReactor(c) {
+      _drawBlueprintBg(c, '#ff9100');
+      const g = c.createRadialGradient(64, 64, 2, 64, 64, 30);
+      g.addColorStop(0, '#ffffff'); g.addColorStop(0.35, '#ffea00'); g.addColorStop(1, 'rgba(255,145,0,0)');
+      c.fillStyle = g;
+      c.beginPath(); c.arc(64, 64, 30, 0, Math.PI * 2); c.fill();
+      c.strokeStyle = '#ff9100'; c.lineWidth = 2.4;
+      for (let i = 0; i < 8; i++) {
+        const a = (Math.PI / 4) * i;
+        c.beginPath();
+        c.moveTo(64 + Math.cos(a) * 34, 64 + Math.sin(a) * 34);
+        c.lineTo(64 + Math.cos(a) * 44, 64 + Math.sin(a) * 44);
+        c.stroke();
+      }
+      c.strokeStyle = '#cfd8dc';
+      c.beginPath(); c.arc(64, 64, 38, 0, Math.PI * 2); c.stroke();
+    },
+
+    spatialTerraforming(c) {
+      _drawBlueprintBg(c, '#69f0ae');
+      c.strokeStyle = '#69f0ae'; c.lineWidth = 2.2;
+      c.beginPath(); c.arc(60, 66, 30, 0, Math.PI * 2); c.stroke();
+      c.strokeStyle = 'rgba(105,240,174,0.55)'; c.lineWidth = 1.5;
+      c.beginPath(); c.arc(60, 66, 37, 0, Math.PI * 2); c.stroke();
+      c.strokeStyle = '#00e5ff';
+      c.beginPath(); c.ellipse(44, 56, 14, 6, 0.5, 0, Math.PI * 2); c.stroke();
+      // Germoglio su cupola di terraformazione
+      c.strokeStyle = '#69f0ae'; c.lineWidth = 2.4;
+      c.beginPath(); c.moveTo(86, 92); c.lineTo(86, 74); c.stroke();
+      c.fillStyle = '#69f0ae';
+      c.beginPath(); c.ellipse(78, 70, 8, 4, -0.6, 0, Math.PI * 2); c.fill();
+      c.beginPath(); c.ellipse(94, 70, 8, 4, 0.6, 0, Math.PI * 2); c.fill();
+      _drawEngineGlow(c, 86, 64, 5, '#69f0ae');
     }
   };
 
   G.registerRenderers(
-    Object.assign({}, PLANETARY_BUILDINGS, MOON_BUILDINGS, RESEARCH_TECHS, {
+    Object.assign({}, PLANETARY_BUILDINGS, MOON_BUILDINGS, ORBITAL_STRUCTURES, RESEARCH_TECHS, {
       intergalacticResearchNetwork: RESEARCH_TECHS.intergalacticNetwork,
       lunarEngineering: RESEARCH_TECHS.lunarTech,
       gravitonTech: RESEARCH_TECHS.deathStarTech,

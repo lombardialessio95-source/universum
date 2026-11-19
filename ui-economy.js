@@ -197,7 +197,7 @@
     const dict = isDef ? Data.DEFENSES : Data.SHIPS;
     const ownedMap = isDef ? planet.defenses : planet.fleet;
 
-    const cards = Object.values(dict).map((u) => {
+    const cards = Object.values(dict).filter((u) => isDef || (u.id !== 'invictus' && u.id !== 'crepuscolo')).map((u) => {
       const owned = Number(ownedMap[u.id] || 0);
       const cost = Engine.getUnitCostAdjusted(planet, u.id, isDef);
       const req = Data.checkRequirements(u.requirements, planet, uni, false);
@@ -370,8 +370,183 @@
     const planet = UI.getActivePlanet();
     const isCreative = uni.creativeMode && !st.isMultiplayerMode;
 
+    const galHere = Galaxy.findGalatticaAt ? Galaxy.findGalatticaAt(uni, planet.coords) : null;
+    if (galHere) {
+      const gDef = Data.GALATTICA;
+      const prod = Engine.getGalatticaProduction(galHere, uni);
+      viewport.innerHTML = `
+        <div style="display:flex; flex-direction:column; gap:14px;">
+          <div class="glass-panel" style="padding:16px;">
+            <div style="display:flex; gap:12px; align-items:center;">${artTag('galattica', 'unit-art', 'Galattica')}<h2 style="font-size:1.2rem; color:var(--res-crystal); margin-bottom:8px;">🌌 GALATTICA su ${escapeHTML(planet.name)} [${galHere.coords.g}:${galHere.coords.s}:${galHere.coords.p}]</h2></div>
+            <p style="margin-bottom:6px;">Stiva: <span class="text-metal">${formatNum(galHere.resources.metal)} M</span> · <span class="text-crystal">${formatNum(galHere.resources.crystal)} C</span> · <span class="text-deuterium">${formatNum(galHere.resources.deuterium)} D</span></p>
+            <p class="text-muted">Produzione/ora: ${formatNum(prod.metalPerHour)} M · ${formatNum(prod.crystalPerHour)} C · ${formatNum(prod.deuteriumPerHour)} D · Energia: ${formatNum(prod.energyProduced - prod.energyConsumed)} (${formatNum(prod.energyProduced)} prodotta, solo Reattore a Fusione)</p>
+          </div>
+          <div class="glass-panel" style="padding:14px;">
+            <h3 style="margin-bottom:10px;">STRUTTURE INTERNE</h3>
+            ${Object.values(Data.GALATTICA_STRUCTURES).map((sd) => {
+              const lv = Number(galHere.structures[sd.id] || 0);
+              const cost = Engine.getGalatticaStructureCost(sd.id, lv + 1);
+              return `<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px;"><span>${sd.icon} ${escapeHTML(sd.name)} <strong>Lv.${lv}</strong></span><span class="text-muted">${formatNum(cost.metal)} M · ${formatNum(cost.crystal)} C · ${formatNum(cost.deuterium)} D</span><button type="button" class="btn btn-blue btn-sm btn-gal-upgrade" data-gsid="${sd.id}">POTENZIA</button></div>`;
+            }).join('')}
+          </div>
+          <div class="glass-panel" style="padding:14px;">
+            <h3 style="margin-bottom:10px;">DIFESE (prezzo doppio) E CANTIERE INTERNO</h3>
+            <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px;">
+              ${Object.values(Data.DEFENSES).slice(0, 6).map((dd) => `<button type="button" class="btn btn-ghost btn-sm btn-gal-defense" data-gdid="${dd.id}">${escapeHTML(dd.name)} x1 (${formatNum(dd.cost.metal * gDef.defenseCostMultiplier)} M)</button>`).join('')}
+            </div>
+            <div style="display:flex; flex-wrap:wrap; gap:6px;">
+              ${Object.values(Data.SHIPS).filter((sh) => sh.id !== 'solarSatellite' && !sh.specialConstruction).slice(0, 6).map((sh) => `<button type="button" class="btn btn-ghost btn-sm btn-gal-ship" data-gship="${sh.id}">${escapeHTML(sh.name)} x1</button>`).join('')}
+            </div>
+            <p class="text-muted" style="margin-top:8px;">Navi in orbita: ${Object.entries(galHere.orbitingFleet || {}).filter(([, q]) => q > 0).map(([id, q]) => `${escapeHTML(Data.SHIPS[id]?.name || id)} x${q}`).join(', ') || 'nessuna'}</p>
+          </div>
+          <div class="glass-panel" style="padding:14px;">
+            <h3 style="margin-bottom:10px;">SALTO QUANTICO (istantaneo)</h3>
+            <div class="form-grid-3">
+              <div class="form-group"><label>Galassia</label><input type="number" id="gal-jump-g" class="form-control" value="${galHere.coords.g}" min="1" max="9"></div>
+              <div class="form-group"><label>Sistema</label><input type="number" id="gal-jump-s" class="form-control" value="${galHere.coords.s}" min="1" max="499"></div>
+              <div class="form-group"><label>Posizione</label><input type="number" id="gal-jump-p" class="form-control" value="${galHere.coords.p}" min="1" max="15"></div>
+            </div>
+            <p class="text-muted" style="margin-bottom:10px;">Costo: 25.000 D ogni 3 sistemi + 100.000 D per galassia di differenza, dalla stiva. Bloccato se a destinazione c'è Luna o Bacino.</p>
+            <button type="button" id="btn-gal-jump" class="btn btn-creative" style="width:100%;">🌌 ESEGUI SALTO QUANTICO</button>
+          </div>
+        </div>
+      `;
+      viewport.querySelectorAll('.btn-gal-upgrade').forEach((btn) => btn.addEventListener('click', async () => {
+        try { Galaxy.upgradeGalatticaStructure(uni, galHere.id, btn.dataset.gsid); await UI.persistUniverseState(); UI.renderCurrentView(); UI.toast('Struttura Galattica potenziata.', 'success'); }
+        catch (err) { UI.playSound('error'); UI.toast(err.message, 'error'); }
+      }));
+      viewport.querySelectorAll('.btn-gal-defense').forEach((btn) => btn.addEventListener('click', async () => {
+        try { Galaxy.buildGalatticaDefense(uni, galHere.id, btn.dataset.gdid, 1); await UI.persistUniverseState(); UI.renderCurrentView(); UI.toast('Difesa Galattica costruita (prezzo doppio).', 'success'); }
+        catch (err) { UI.playSound('error'); UI.toast(err.message, 'error'); }
+      }));
+      viewport.querySelectorAll('.btn-gal-ship').forEach((btn) => btn.addEventListener('click', async () => {
+        try { Galaxy.buildGalatticaShip(uni, galHere.id, btn.dataset.gship, 1); await UI.persistUniverseState(); UI.renderCurrentView(); UI.toast('Nave in orbita alla Galattica.', 'success'); }
+        catch (err) { UI.playSound('error'); UI.toast(err.message, 'error'); }
+      }));
+      document.getElementById('btn-gal-jump')?.addEventListener('click', async () => {
+        try {
+          const res = Galaxy.jumpGalattica(uni, galHere.id, { g: Number(document.getElementById('gal-jump-g').value), s: Number(document.getElementById('gal-jump-s').value), p: Number(document.getElementById('gal-jump-p').value) });
+          await UI.persistUniverseState(); UI.refreshPlanetSelector(); UI.renderCurrentView(); UI.playSound('complete');
+          UI.toast(`Salto quantico completato (${formatNum(res.cost)} D).`, 'success');
+        } catch (err) { UI.playSound('error'); UI.toast(err.message, 'error'); }
+      });
+      return;
+    }
+
+    if (planet.galatticaOrigin && !planet.moon && !planet.bacinoSpaziale) {
+      viewport.innerHTML = `
+        <div class="glass-panel" style="padding:20px; text-align:center;">
+          <div style="display:flex; justify-content:center; margin-bottom:10px;">${artTag('galattica', 'unit-art', 'Galattica')}</div>
+          <h2 style="font-size:1.15rem; color:var(--res-crystal); margin-bottom:8px;">SLOT ORBITALE CONSUMATO SU ${escapeHTML(planet.name)}</h2>
+          <p class="text-muted">Il Bacino è diventato una Galattica: questo pianeta non ha più uno slot orbitale (niente Luna né Bacino).</p>
+        </div>
+      `;
+      return;
+    }
+
+    if (!planet.moon && planet.bacinoSpaziale) {
+      const def = Data.BACINO_SPAZIALE;
+      const b = planet.bacinoSpaziale;
+      const missing = Engine.getBacinoMissingForDay(planet);
+      const daysRemaining = Math.max(0, def.totalDays - (Number(b.daysPaid) || 0));
+      const statusLabel = b.status === 'active' ? 'Attivo' : (b.status === 'stopped' ? 'Fermato' : 'In costruzione');
+      const pct = Math.min(100, Math.floor(((Number(b.daysPaid) || 0) / def.totalDays) * 100));
+      const invDef = Data.INVICTUS;
+      const invCounts = Galaxy.getInvictusCount(planet);
+      const invMissing = Engine.getInvictusMissingForDay(planet);
+      const invictusHtml = b.status === 'active' ? `
+          <div style="margin-top:14px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.12);">
+            <p style="margin-bottom:8px; display:flex; align-items:center; gap:8px;">${artTag('invictus', 'unit-art-sm', 'Invictus')}<span><strong>⚔️ INVICTUS</strong> · Attive: <strong>${invCounts.active}</strong> · In costruzione: <strong>${invCounts.building}</strong> · Totale: <strong>${invCounts.total} / ${invDef.maxPerBacino}</strong></span></p>
+            ${(b.invictusConstructions || []).map((c, i) => `<p class="text-muted" style="margin-bottom:6px;">Costruzione ${i + 1}: ${c.status === 'stopped' ? 'Fermato' : 'In costruzione'} · Giorni ${Number(c.daysPaid) || 0} / ${invDef.totalDays} · Mancanti oggi: ${formatNum(invMissing.metal)} M · ${formatNum(invMissing.crystal)} C · ${formatNum(invMissing.deuterium)} D</p>`).join('')}
+            <p class="text-muted" style="margin-bottom:10px;">Costruzione: ${invDef.totalDays} giorni reali, rata ${formatNum(invDef.dailyCost.metal)} M / ${formatNum(invDef.dailyCost.crystal)} C / ${formatNum(invDef.dailyCost.deuterium)} D al giorno.</p>
+            <button type="button" id="btn-start-invictus" class="btn btn-blue" ${invCounts.total >= invDef.maxPerBacino ? 'disabled' : ''}>⚔️ COSTRUISCI INVICTUS</button>
+          </div>` : '';
+      const crepDef = Data.CREPUSCOLO;
+      const crep = b.crepuscolo;
+      const crepMissing = Engine.getCrepuscoloMissingForDay(planet);
+      const isVuoto = b.status === 'active' && Galaxy.isBacinoVuoto(planet);
+      const limboHere = uni.crepuscoloLimbo && uni.planets[0] && uni.planets[0].id === planet.id;
+      const crepuscoloHtml = b.status === 'active' ? `
+          <div style="margin-top:14px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.12);">
+            <p style="margin-bottom:8px;"><strong>🌌 CREPUSCOLO DEGLI DEI</strong> · Bacino: <strong>${isVuoto ? 'VUOTO (mai usato)' : 'non vuoto'}</strong>${limboHere ? ' · <strong>LIMBO su questo pianeta madre</strong>' : ''}</p>
+            ${crep ? `<p class="text-muted" style="margin-bottom:8px;">Stato: <strong>${escapeHTML(crep.status)}</strong>${crep.status !== 'active' ? ` · Giorni ${Number(crep.daysPaid) || 0} / ${Number(crep.daysTotal) || crepDef.buildDays} · Mancanti oggi: ${formatNum(crepMissing.metal)} M · ${formatNum(crepMissing.crystal)} C · ${formatNum(crepMissing.deuterium)} D` : ' · Operativa'}</p>` : '<p class="text-muted" style="margin-bottom:8px;">Nessuna Crepuscolo legata a questo Bacino.</p>'}
+            ${!crep && isVuoto ? `<p class="text-muted" style="margin-bottom:10px;">Costruzione: ${crepDef.buildDays} giorni reali, rata ${formatNum(crepDef.dailyCost.metal)} M / ${formatNum(crepDef.dailyCost.crystal)} C / ${formatNum(crepDef.dailyCost.deuterium)} D al giorno. Max 1 per impero.</p><button type="button" id="btn-start-crepuscolo" class="btn btn-creative">🌌 COSTRUISCI CREPUSCOLO DEGLI DEI</button>` : ''}
+            ${!crep && !isVuoto ? '<p class="text-muted">Costruzione Crepuscolo disponibile solo in un Bacino mai usato da nessuna nave.</p>' : ''}
+          </div>` : '';
+      const galDef = Data.GALATTICA;
+      const galReq = Data.checkRequirements(galDef.requirements, planet, uni, false);
+      const galMissing = Engine.getGalatticaMissingForDay(planet);
+      const galProject = b.galatticaConstruction;
+      const galatticaHtml = b.status === 'active' ? `
+          <div style="margin-top:14px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.12);">
+            <p style="margin-bottom:8px;"><strong>🌌 GALATTICA</strong> · Totali impero: <strong>${Galaxy.getGalatticaCount(uni)} / ${galDef.maxPerEmpire}</strong></p>
+            ${galProject ? `<p class="text-muted">Costruzione Galattica: ${galProject.status === 'stopped' ? 'Fermato' : 'In costruzione'} · Giorni ${Number(galProject.daysPaid) || 0} / ${galDef.buildDays} · Mancanti oggi: ${formatNum(galMissing.metal)} M · ${formatNum(galMissing.crystal)} C · ${formatNum(galMissing.deuterium)} D</p>` : `
+              ${!galReq.met ? `<p style="color:#ff5252; margin-bottom:8px;">Requisiti mancanti: ${escapeHTML(galReq.missing.join(', '))}</p>` : ''}
+              <p class="text-muted" style="margin-bottom:10px;">Costruzione: ${galDef.buildDays} giorni reali, rata ${formatNum(galDef.dailyCost.metal)} M / ${formatNum(galDef.dailyCost.crystal)} C / ${formatNum(galDef.dailyCost.deuterium)} D. Al termine prende il posto del Bacino. Richiede Bacino senza navi legate.</p>
+              <button type="button" id="btn-start-galattica" class="btn btn-creative" ${!galReq.met ? 'disabled' : ''}>🌌 COSTRUISCI GALATTICA</button>`}
+          </div>` : '';
+      const bacinoArtId = b.status === 'stopped' ? 'bacinoSpazialeStopped' : b.status === 'building' ? 'bacinoSpazialeBuilding' : 'bacinoSpaziale';
+      viewport.innerHTML = `
+        <div class="glass-panel" style="padding:20px;">
+          <div style="display:flex; gap:12px; align-items:center; margin-bottom:10px;">${artTag(bacinoArtId, 'unit-art', 'Bacino Spaziale')}<h2 style="font-size:1.15rem; color:var(--res-crystal); margin-bottom:8px;">🛠️ BACINO SPAZIALE SU ${escapeHTML(planet.name)}</h2></div>
+          <p style="margin-bottom:10px;">Stato: <strong>${statusLabel}</strong> · Giorni: <strong>${Number(b.daysPaid) || 0} / ${def.totalDays}</strong> · Rimasti: <strong>${daysRemaining}</strong></p>
+          <div style="height:10px; background:rgba(255,255,255,0.12); border-radius:6px; overflow:hidden; margin-bottom:12px;">
+            <div style="height:100%; width:${pct}%; background:var(--res-crystal);"></div>
+          </div>
+          ${b.status === 'active'
+            ? '<p class="text-muted">Bacino operativo: occupa lo slot orbitale al posto della Luna. Distruggibile solo con missione Distruzione Luna/Bacino (Morte Nera); se distrutto si forma una Luna.</p>'
+            : `<p style="margin-bottom:8px;">Rata giornaliera: <span class="cost-item text-metal">${resIconTag('metal')} ${formatNum(def.dailyCost.metal)}</span> <span class="cost-item text-crystal">${resIconTag('crystal')} ${formatNum(def.dailyCost.crystal)}</span> <span class="cost-item text-deuterium">${resIconTag('deuterium')} ${formatNum(def.dailyCost.deuterium)}</span></p>
+               <p class="text-muted">Risorse mancanti per il giorno corrente: ${formatNum(missing.metal)} M · ${formatNum(missing.crystal)} C · ${formatNum(missing.deuterium)} D${b.status === 'stopped' ? ' — cantiere fermato, il giorno non viene conteggiato finché la rata non è coperta.' : ''}</p>`}
+          ${invictusHtml}
+          ${crepuscoloHtml}
+          ${galatticaHtml}
+        </div>
+      `;
+      document.getElementById('btn-start-galattica')?.addEventListener('click', async () => {
+        try {
+          const res = Galaxy.startGalatticaConstruction(uni, pIdx);
+          await UI.persistUniverseState();
+          UI.updateTopBarNumbers();
+          UI.renderCurrentView();
+          UI.playSound('complete');
+          UI.toast(res.instant ? 'Galattica completata: ha preso il posto del Bacino!' : 'Costruzione Galattica avviata: 100 giorni reali a rate giornaliere.', 'success');
+        } catch (err) {
+          UI.playSound('error');
+          UI.toast(err.message, 'error');
+        }
+      });
+      document.getElementById('btn-start-crepuscolo')?.addEventListener('click', async () => {
+        try {
+          const res = Galaxy.startCrepuscoloConstruction(uni, pIdx);
+          await UI.persistUniverseState();
+          UI.updateTopBarNumbers();
+          UI.renderCurrentView();
+          UI.playSound('complete');
+          UI.toast(res.instant ? 'Crepuscolo degli Dei operativa!' : 'Costruzione Crepuscolo avviata: 100 giorni reali a rate giornaliere.', 'success');
+        } catch (err) {
+          UI.playSound('error');
+          UI.toast(err.message, 'error');
+        }
+      });
+      document.getElementById('btn-start-invictus')?.addEventListener('click', async () => {
+        try {
+          const res = Galaxy.startInvictusConstruction(uni, pIdx);
+          await UI.persistUniverseState();
+          UI.updateTopBarNumbers();
+          UI.renderCurrentView();
+          UI.playSound('complete');
+          UI.toast(res.instant ? 'Invictus pronta al Bacino!' : 'Costruzione Invictus avviata: 20 giorni reali a rate giornaliere.', 'success');
+        } catch (err) {
+          UI.playSound('error');
+          UI.toast(err.message, 'error');
+        }
+      });
+      return;
+    }
+
     if (!planet.moon) {
       const cost = Galaxy.getMoonCreationCost(uni);
+      const bDef = Data.BACINO_SPAZIALE;
       viewport.innerHTML = `
         <div class="glass-panel" style="padding:20px; text-align:center;">
           <div style="margin-bottom:12px; display:flex; justify-content:center;">${artTag('lunarBase', 'unit-art', 'Base Lunare')}</div>
@@ -383,6 +558,10 @@
             <span class="cost-item text-deuterium">${resIconTag('deuterium')} ${formatNum(cost.deuterium)}</span>
           </div>
           <button type="button" id="btn-create-moon" class="btn btn-green">${svgIcon('moon')} CREA LUNA ORA</button>
+          <div style="margin-top:18px; padding-top:14px; border-top:1px solid rgba(255,255,255,0.12);">
+            <p class="text-muted" style="margin-bottom:10px;">Oppure, al posto della Luna: Bacino Spaziale in ${bDef.totalDays} giorni reali, rate di ${formatNum(bDef.dailyCost.metal)} M / ${formatNum(bDef.dailyCost.crystal)} C / ${formatNum(bDef.dailyCost.deuterium)} D al giorno (totale ${formatNum(bDef.totalCost.metal)} M / ${formatNum(bDef.totalCost.crystal)} C / ${formatNum(bDef.totalCost.deuterium)} D).</p>
+            <button type="button" id="btn-start-bacino" class="btn btn-blue">🛠️ AVVIA BACINO SPAZIALE</button>
+          </div>
         </div>
       `;
 
@@ -395,6 +574,20 @@
           UI.renderCurrentView();
           UI.playSound('complete');
           UI.toast('Nuova Luna stabilizzata in orbita!', 'success');
+        } catch (err) {
+          UI.playSound('error');
+          UI.toast(err.message, 'error');
+        }
+      });
+      document.getElementById('btn-start-bacino')?.addEventListener('click', async () => {
+        try {
+          Galaxy.startBacinoSpaziale(uni, pIdx);
+          await UI.persistUniverseState();
+          UI.refreshPlanetSelector();
+          UI.updateTopBarNumbers();
+          UI.renderCurrentView();
+          UI.playSound('complete');
+          UI.toast('Cantiere Bacino Spaziale avviato: 20 giorni reali a rate giornaliere.', 'success');
         } catch (err) {
           UI.playSound('error');
           UI.toast(err.message, 'error');

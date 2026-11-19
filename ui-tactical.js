@@ -27,6 +27,11 @@
     if (st.fleetExploreHours > maxExpHours) st.fleetExploreHours = maxExpHours;
 
     const availableShips = Object.values(Data.SHIPS).filter((s) => s.id !== 'solarSatellite');
+    const getShipAvail = (shipId) => shipId === 'invictus'
+      ? Number(planet.bacinoSpaziale?.invictusActive || 0)
+      : shipId === 'crepuscolo'
+        ? (planet.bacinoSpaziale?.crepuscolo?.status === 'active' ? 1 : 0)
+        : Number(planet.fleet[shipId] || 0);
     const dist = Galaxy.calculateDistance(planet.coords, st.fleetTarget);
     const flightStats = MCore
       ? MCore.getAdjustedFlightStats(uni, st.fleetSelection, dist, st.fleetFuelPercent, st.fleetExploreHours, st.fleetMission)
@@ -52,7 +57,7 @@
 
           <div style="display:flex; flex-direction:column; gap:8px;">
             ${availableShips.map((s) => {
-              const avail = Number(planet.fleet[s.id] || 0);
+              const avail = getShipAvail(s.id);
               const sel = Number(st.fleetSelection[s.id] || 0);
               return `
                 <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; background:rgba(0,0,0,0.35); padding:8px 10px; border-radius:8px;">
@@ -111,7 +116,7 @@
               <option value="deploy" ${st.fleetMission === 'deploy' ? 'selected' : ''}>Schiera Flotta su Tuo Pianeta</option>
               <option value="explore" ${st.fleetMission === 'explore' ? 'selected' : ''}>Esplora Spazio Profondo (Pos. 16)</option>
               <option value="recycle" ${st.fleetMission === 'recycle' ? 'selected' : ''}>Ricicla Campo Detriti</option>
-              <option value="destroyMoon" ${st.fleetMission === 'destroyMoon' ? 'selected' : ''}>Distruggi Luna (Morte Nera)</option>
+              <option value="destroyMoon" ${st.fleetMission === 'destroyMoon' ? 'selected' : ''}>Distruggi Luna/Bacino (Morte Nera)</option>
             </select>
           </div>
 
@@ -212,14 +217,14 @@
     viewport.querySelectorAll('.btn-fleet-plus10').forEach((btn) => {
       btn.addEventListener('click', () => {
         const sid = btn.dataset.sid;
-        const avail = Number(planet.fleet[sid] || 0);
+        const avail = getShipAvail(sid);
         st.fleetSelection[sid] = Math.min(avail, (st.fleetSelection[sid] || 0) + 10);
         UI.renderCurrentView();
       });
     });
 
     document.getElementById('btn-fleet-all')?.addEventListener('click', () => {
-      for (const s of availableShips) st.fleetSelection[s.id] = Number(planet.fleet[s.id] || 0);
+      for (const s of availableShips) st.fleetSelection[s.id] = getShipAvail(s.id);
       UI.renderCurrentView();
     });
 
@@ -424,6 +429,8 @@
                     <strong class="font-display text-crystal">[${slot.coords.p}]</strong>
                     <strong style="font-size:1.05rem;">${escapeHTML(slot.planetName || slot.name || 'Slot Colonizzabile')}</strong>
                     ${slot.moon ? `<span class="badge badge-blue" title="${escapeHTML(slot.moon.name || 'Luna')}">${svgIcon('moon')} LUNA</span>` : ''}
+                    ${slot.bacinoSpaziale ? '<span class="badge badge-creative">🛠️ BACINO</span>' : ''}
+                    ${slot.galattica ? '<span class="badge badge-creative">🌌 GALATTICA</span>' : ''}
                     ${slotSiege ? `<span class="badge badge-red">${slotSiege.type === 'embargo' ? 'SOTTO EMBARGO' : 'SOTTO OCCUPAZIONE'}</span><button type="button" class="btn btn-red btn-sm btn-gal-expel" data-p="${slot.coords.p}">${svgIcon('sword')} Scaccia Flotta</button>` : ''}
                     ${hasDebris ? `<span class="badge badge-creative">${svgIcon('recycle')} Detriti</span>` : ''}
                   </div>

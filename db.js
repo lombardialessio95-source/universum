@@ -220,7 +220,8 @@
           buildQueue: [],
           shipyardQueue: [],
           defenseQueue: [],
-          moon: null
+          moon: null,
+          bacinoSpaziale: null
         }
       ],
       researches: {
@@ -259,7 +260,9 @@
       contracts: [],
       dailyQuests: [],
       achievements: [],
-      galaxyDeltas: {}
+      galaxyDeltas: {},
+      crepuscoloLimbo: null,
+      galattiche: []
     };
 
     await save(universe);

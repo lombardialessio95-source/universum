@@ -499,8 +499,78 @@
       c.fillStyle = '#ff1744';
       c.fillRect(62, 46, 36, 6);
       c.fillRect(62, 76, 36, 6);
-    }
+    },
+
+    // Invictus: ammiraglia-lancia legata al Bacino, profilo a punta dorata.
+    invictus(c) {
+      _drawCardBg(c, '#ffc400');
+      _drawEngineGlow(c, 20, 64, 13, '#00d2ff', Math.PI, 26);
+      _drawMetallicHull(c, (p) => {
+        p.moveTo(18, 52); p.lineTo(58, 40); p.lineTo(104, 56); p.lineTo(122, 64);
+        p.lineTo(104, 72); p.lineTo(58, 88); p.lineTo(18, 76); p.lineTo(28, 64);
+      }, '#37474f', '#ffe082', '#ffc400');
+      _drawPanelLines(c, [[40, 52, 96, 60], [40, 76, 96, 68], [58, 40, 58, 88]], 'rgba(255,196,0,0.4)');
+      c.save();
+      c.shadowColor = '#ffc400'; c.shadowBlur = 10;
+      c.strokeStyle = '#ffe082'; c.lineWidth = 3;
+      c.beginPath(); c.moveTo(84, 64); c.lineTo(124, 64); c.stroke();
+      c.restore();
+      _drawEngineGlow(c, 84, 64, 7, '#ffc400');
+      [48, 64, 80].forEach((lx) => _drawEngineGlow(c, lx, 58, 4, '#00d2ff'));
+    },
+
+    // Crepuscolo degli Dei: sole nero corazzato, corona dorata e spire dorsali.
+    crepuscolo(c) { _drawCrepuscolo(c, 'active'); },
+    crepuscoloDamaged(c) { _drawCrepuscolo(c, 'damaged'); },
+    crepuscoloRepair(c) { _drawCrepuscolo(c, 'repair'); },
+    crepuscoloLimbo(c) { _drawCrepuscolo(c, 'limbo'); }
   };
+
+  function _drawCrepuscolo(c, mode) {
+    const accent = mode === 'limbo' ? '#78909c' : '#ff1744';
+    _drawCardBg(c, accent);
+    const cx = 64, cy = 62, r = 36;
+    // Corona di spire
+    c.save();
+    c.strokeStyle = mode === 'limbo' ? '#546e7a' : '#ffc400';
+    c.lineWidth = 3;
+    for (let i = 0; i < 8; i++) {
+      const a = (Math.PI / 4) * i + 0.2;
+      c.beginPath();
+      c.moveTo(cx + Math.cos(a) * (r + 2), cy + Math.sin(a) * (r + 2));
+      c.lineTo(cx + Math.cos(a) * (r + 13), cy + Math.sin(a) * (r + 13));
+      c.stroke();
+    }
+    c.restore();
+    // Scafo eclisse
+    const g = c.createRadialGradient(cx - 10, cy - 12, 4, cx, cy, r);
+    g.addColorStop(0, mode === 'limbo' ? '#37474f' : '#4a1020');
+    g.addColorStop(0.6, '#131a26');
+    g.addColorStop(1, '#05070d');
+    c.fillStyle = g;
+    c.strokeStyle = mode === 'limbo' ? '#78909c' : '#ffc400';
+    c.lineWidth = 1.6;
+    c.beginPath(); c.arc(cx, cy, r, 0, Math.PI * 2); c.fill(); c.stroke();
+    _drawPanelLines(c, [[cx - r, cy, cx + r, cy], [cx - 24, cy - 20, cx + 24, cy - 20], [cx - 24, cy + 20, cx + 24, cy + 20]], 'rgba(255,196,0,0.3)');
+    _drawEngineGlow(c, cx, cy, mode === 'limbo' ? 8 : 13, mode === 'limbo' ? '#78909c' : '#ff1744');
+    if (mode === 'damaged' || mode === 'repair') {
+      // Fessure di danno e fasce di riparazione
+      c.save();
+      c.strokeStyle = '#ff5252'; c.lineWidth = 2;
+      c.beginPath(); c.moveTo(38, 44); c.lineTo(54, 60); c.lineTo(46, 74); c.moveTo(78, 38); c.lineTo(70, 54); c.stroke();
+      c.strokeStyle = '#ffc400'; c.lineWidth = 3;
+      c.beginPath(); c.moveTo(28, 96); c.lineTo(100, 96); c.stroke();
+      if (mode === 'repair') { c.fillStyle = '#ffc400'; c.fillRect(44, 90, 8, 12); c.fillRect(76, 90, 8, 12); }
+      c.restore();
+    }
+    if (mode === 'limbo') {
+      // Alone spento e deriva: sagoma in dissolvenza verso il basso
+      c.save();
+      c.globalAlpha = 0.35; c.fillStyle = '#78909c';
+      c.beginPath(); c.ellipse(64, 108, 30, 6, 0, 0, Math.PI * 2); c.fill();
+      c.restore();
+    }
+  }
 
   // =========================================================
   // RENDERERS: 10 DIFESE

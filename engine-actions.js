@@ -192,6 +192,9 @@
     const qty = Math.max(1, Math.floor(Number(count) || 1));
     const unit = isDefense ? Data.DEFENSES[unitId] : Data.SHIPS[unitId];
     if (!unit) throw new Error('Unità sconosciuta.');
+    if (!isDefense && unit.specialConstruction === 'bacino') {
+      throw new Error(`${unit.name} si costruisce solo nel Bacino Spaziale, non nel Cantiere Navale.`);
+    }
 
     if (!universe.creativeMode) {
       const reqCheck = Data.checkRequirements(unit.requirements, planet, universe, false);
