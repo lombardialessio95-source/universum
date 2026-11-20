@@ -4,6 +4,19 @@
   const UI = window.UniversumUI;
 
   // =========================================================
+  // MAPPING ARTE STRUTTURE GALATTICA → RENDERER ESISTENTI
+  // =========================================================
+  // I 5 id di GALATTICA_STRUCTURES non hanno un renderer dedicato in
+  // graphics-structures.js: riuso quelli planetari equivalenti.
+  const GAL_STRUCT_ART = {
+    cantiereSpaziale: 'shipyard',
+    generatoreMetallo: 'metalMine',
+    generatoreCristallo: 'crystalMine',
+    sintetizzatoreDeuterio: 'deuteriumSynth',
+    reattoreFusione: 'fusionReactor'
+  };
+
+  // =========================================================
   // EDIFICI & RISORSE
   // =========================================================
   UI.renderBuildings = function (viewport) {
@@ -386,7 +399,8 @@
             ${Object.values(Data.GALATTICA_STRUCTURES).map((sd) => {
               const lv = Number(galHere.structures[sd.id] || 0);
               const cost = Engine.getGalatticaStructureCost(sd.id, lv + 1);
-              return `<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px;"><span>${sd.icon} ${escapeHTML(sd.name)} <strong>Lv.${lv}</strong></span><span class="text-muted">${formatNum(cost.metal)} M · ${formatNum(cost.crystal)} C · ${formatNum(cost.deuterium)} D</span><button type="button" class="btn btn-blue btn-sm btn-gal-upgrade" data-gsid="${sd.id}">POTENZIA</button></div>`;
+              const artId = GAL_STRUCT_ART[sd.id] || sd.id;
+              return `<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px; flex-wrap:wrap;"><span style="display:inline-flex; align-items:center; gap:8px; min-width:180px;">${artTag(artId, 'unit-art-sm', sd.name)}<span>${escapeHTML(sd.name)} <strong>Lv.${lv}</strong></span></span><span class="text-muted">${formatNum(cost.metal)} M · ${formatNum(cost.crystal)} C · ${formatNum(cost.deuterium)} D</span><button type="button" class="btn btn-blue btn-sm btn-gal-upgrade" data-gsid="${sd.id}">POTENZIA</button></div>`;
             }).join('')}
           </div>
           <div class="glass-panel" style="padding:14px;">
