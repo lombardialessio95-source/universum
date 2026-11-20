@@ -19,7 +19,8 @@
     embargo: { label: 'Embargo Planetario', badge: 'badge-red' },
     blockade: { label: 'Embargo Planetario', badge: 'badge-red' },
     occupy: { label: 'Occupazione Planetaria', badge: 'badge-red' },
-    recall: { label: 'Richiamo Flotta', badge: 'badge-blue' }
+    recall: { label: 'Richiamo Flotta', badge: 'badge-blue' },
+    'galattica-return': { label: 'Rientro Galattica', badge: 'badge-creative' }
   };
 
   UI.renderFleetMovements = async function (viewport) {
@@ -40,7 +41,6 @@
     let activeSieges = uni.activeSieges || [];
     let incomingSieges = uni.incomingSieges || [];
 
-    // In modalità Online carica anche gli embarghi/occupazioni reali da Firestore
     if (st.isMultiplayerMode && window.fbDB && window.fbAuth?.currentUser) {
       const myUid = window.fbAuth.currentUser.uid;
       const uniRef = window.fbDB.collection('online_universes').doc(uni.id);
@@ -123,7 +123,6 @@
 
     viewport.innerHTML = `
       <div style="display:flex; flex-direction:column; gap:14px;">
-        <!-- INTESTAZIONE SLOT FLOTTA -->
         <div class="glass-panel" style="padding:14px;">
           <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:10px;">
             <div>
@@ -147,7 +146,6 @@
           </div>
         </div>
 
-        <!-- SEZIONE: FLOTTE IN VOLO -->
         <div class="glass-panel" style="padding:14px;">
           <h3 style="font-size:0.98rem; color:var(--res-crystal); margin-bottom:10px;">SQUADRONI IN TRANSITO (${flights.length})</h3>
           ${flights.length === 0 ? `
@@ -164,6 +162,7 @@
                 const fuelPct = Number(f.fuelPercent || f.speedPct || 100);
                 const expH = f.exploreHours || f.expeditionHours;
                 const ransomObj = f.ransomDemand || f.ransom;
+                const isGalatticaReturn = f.mission === 'galattica-return' || f.isGalatticaReturn;
 
                 const shipBadges = Object.entries(f.ships || {})
                   .filter(([, q]) => Number(q) > 0)
@@ -182,6 +181,7 @@
                         <span class="badge ${isOutbound ? 'badge-green' : 'badge-blue'}">${isOutbound ? 'ANDATA' : (f.recalled || f.mission === 'recall' ? 'RICHIAMATA • RIENTRO' : 'RIENTRO')}</span>
                         <span class="badge badge-neutral">Spinta: ${fuelPct}%</span>
                         ${expH ? `<span class="badge badge-creative">Esplorazione: ${expH}h</span>` : ''}
+                        ${isGalatticaReturn ? '<span class="badge badge-creative">5% velocità</span>' : ''}
                       </div>
                       <span class="font-display text-energy live-timer" data-end="${endTs}" style="font-size:1.05rem;">${formatDuration((endTs - now) / 1000)}</span>
                     </div>
@@ -191,7 +191,6 @@
                       ${ransomObj ? `<span class="text-energy">Riscatto impostato: <strong>${formatNum((ransomObj.metal || 0) + (ransomObj.crystal || 0) + (ransomObj.deuterium || 0))}</strong> ris.</span>` : ''}
                     </div>
 
-                    <!-- Barra avanzamento rotta -->
                     <div style="height:6px; background:rgba(255,255,255,0.08); border-radius:4px; overflow:hidden; margin-bottom:10px;">
                       <div style="height:100%; width:${progressPct}%; background:${isOutbound ? 'var(--res-crystal)' : 'var(--btn-blue)'};"></div>
                     </div>
@@ -208,7 +207,7 @@
                       </div>
                     ` : ''}
 
-                    ${isOutbound ? `
+                    ${isOutbound && !isGalatticaReturn ? `
                       <div style="display:flex; justify-content:flex-end;">
                         <button type="button" class="btn btn-red btn-sm btn-recall-fleet" data-fid="${escapeHTML(f.id)}">
                           ↩ RICHIAMA FLOTTA
@@ -222,7 +221,6 @@
           `}
         </div>
 
-        <!-- SEZIONE: GALATTICHE (Fase 6) -->
         <div class="glass-panel" style="padding:14px;">
           <h3 style="font-size:0.98rem; color:var(--res-crystal); margin-bottom:10px;">GALATTICHE DELL'IMPERO (${galattiche.length})</h3>
           ${galattiche.length === 0 ? `
@@ -241,11 +239,11 @@
                     <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:8px;">
                       <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
                         ${artTag('galattica', 'unit-art-sm', 'Galattica')}
-                        <strong style="font-size:1.05rem;">🌌 ${escapeHTML(g.name || 'Galattica')}</strong>
+                        <strong style="font-size:1.05rem;">${escapeHTML(g.name || 'Galattica')}</strong>
                         <span class="badge badge-creative">SLOT OCCUPATO</span>
                         ${isOnOwnPlanet ? '<span class="badge badge-green">SU TUO PIANETA</span>' : '<span class="badge badge-blue">SU PIANETA BOT</span>'}
                       </div>
-                      <button type="button" class="btn btn-blue btn-sm btn-gal-from-movements" data-gal-id="${escapeHTML(g.id)}" data-gal-own="${isOnOwnPlanet ? '1' : '0'}" data-gal-planet-id="${escapeHTML(originPlanet?.id || '')}">
+                      <button type="button" class="btn btn-blue btn-sm btn-gal-from-movements" data-gal-id="${escapeHTML(g.id)}">
                         ${svgIcon('radar')} VAI ALLA GALATTICA
                       </button>
                     </div>
@@ -265,7 +263,6 @@
           `}
         </div>
 
-        <!-- SEZIONE: EMBARGHI & OCCUPAZIONI ORBITALI ATTIVI -->
         <div class="glass-panel" style="padding:14px;">
           <h3 style="font-size:0.98rem; color:var(--btn-gold); margin-bottom:10px;">OPERAZIONI ORBITALI (EMBARGHI &amp; OCCUPAZIONI)</h3>
 
@@ -343,23 +340,10 @@
       UI.switchView('fleet');
     });
 
-    // Fase 6: pulsanti "Vai alla Galattica"
     viewport.querySelectorAll('.btn-gal-from-movements').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
-        const galId = btn.dataset.galId;
-        const isOwn = btn.dataset.galOwn === '1';
-        if (isOwn) {
-          const pl = (uni.planets || []).find((p) => p.id === btn.dataset.galPlanetId);
-          if (pl) {
-            uni.activePlanetId = pl.id;
-            UI.refreshPlanetSelector();
-            UI.updateTopBarNumbers();
-            UI.switchView('moon');
-            return;
-          }
-        }
-        UI.renderGalatticaViewer(galId);
+        UI.renderGalatticaManage(btn.dataset.galId);
       });
     });
 

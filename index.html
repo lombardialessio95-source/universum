@@ -240,6 +240,11 @@
           </span>
           <span id="sidebar-chat-badge" class="badge badge-red hidden">0</span>
         </button>
+        <!-- NUOVO: GUIDA -->
+        <button type="button" class="sidebar-btn" data-view="guide">
+          <svg class="nav-svg" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+          Guida &amp; Aiuto
+        </button>
       </aside>
 
       <!-- VIEWPORT PRINCIPALE -->
@@ -299,6 +304,8 @@
             <span id="drawer-chat-badge" class="badge badge-red hidden" style="position:absolute; top:6px; right:6px;">0</span>
           </button>
           <button type="button" class="drawer-item" id="drawer-btn-lobby"><span class="icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><path d="M3 10.5L12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9.5z"/></svg></span>Partite</button>
+          <!-- NUOVO: GUIDA -->
+          <button type="button" class="drawer-item" data-view="guide"><span class="icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></span>Guida &amp; Aiuto</button>
         </div>
       </div>
     </div>
@@ -332,6 +339,7 @@
   <script src="./firebase-config.js"></script>     <!-- Chiavi e inizializzazione Firebase Auth + Firestore -->
   <script src="./multiplayer.js"></script>         <!-- Logica PvP online: auth, universi condivisi, flotte live, chat e classifica -->
   <script src="./ui-core.js"></script>             <!-- Regia UI: stato globale, loop 1s, audio WebAudio, Panoramica e salvataggi -->
+  <script src="./ui-guide.js"></script>            <!-- Pagina Guida/Aiuto: sezioni generate dinamicamente da data.js -->
   <script src="./ui-economy.js"></script>          <!-- Schermate UI: Edifici, Ricerche, Cantiere Navale, Difese e Luna -->
   <script src="./ui-tactical.js"></script>         <!-- Schermate UI: Flotta, Galassia, Spionaggio, Simulatore e Imperiale/Quest -->
   <script src="./ui-social.js"></script>           <!-- Schermate UI: Commercio BOT, Classifica e Comunicazioni (Chat/MP) -->

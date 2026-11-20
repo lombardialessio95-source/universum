@@ -80,6 +80,9 @@
 
     const delta = (universe.galaxyDeltas && universe.galaxyDeltas[key]) || null;
 
+    const galatticaHere = findGalatticaAt(universe, { g, s, p });
+    const galatticaRef = galatticaHere ? { id: galatticaHere.id, name: galatticaHere.name } : null;
+
     if (delta && delta.destroyed && !playerPlanet) {
       return {
         coords: { g, s, p },
@@ -92,6 +95,7 @@
         minTemp: temps.minTemp,
         fieldsMax: maxFields,
         moon: null,
+        galattica: galatticaRef,
         debris: delta.debris || { metal: 0, crystal: 0 },
         destroyed: true
       };
@@ -116,7 +120,7 @@
         bacinoSpaziale: (playerPlanet && playerPlanet.bacinoSpaziale)
           ? { status: playerPlanet.bacinoSpaziale.status }
           : (delta && delta.hasBacino ? { status: 'active' } : null),
-        galattica: findGalatticaAt(universe, { g, s, p }) ? { id: findGalatticaAt(universe, { g, s, p }).id, name: findGalatticaAt(universe, { g, s, p }).name } : null,
+        galattica: galatticaRef,
         debris: (delta && delta.debris) || { metal: 0, crystal: 0 }
       };
     }
@@ -135,6 +139,7 @@
         minTemp: temps.minTemp,
         fieldsMax: maxFields,
         moon: null,
+        galattica: galatticaRef,
         debris: (delta && delta.debris) || { metal: 0, crystal: 0 }
       };
     }
@@ -152,6 +157,7 @@
         minTemp: temps.minTemp,
         fieldsMax: maxFields,
         moon: null,
+        galattica: galatticaRef,
         debris: (delta && delta.debris) || { metal: 0, crystal: 0 }
       };
     }
@@ -272,7 +278,7 @@
       tradeRates,
       moon: hasBotMoon ? { name: (delta && delta.moonName) || `Luna di ${bName}`, diameter: 7500 } : null,
       bacinoSpaziale: hasBotBacino ? { status: 'active' } : null,
-      galattica: findGalatticaAt(universe, { g, s, p }) ? { id: findGalatticaAt(universe, { g, s, p }).id, name: findGalatticaAt(universe, { g, s, p }).name } : null,
+      galattica: galatticaRef,
       debris: (delta && delta.debris) || { metal: 0, crystal: 0 }
     };
   }
@@ -365,7 +371,6 @@
     return planet.moon;
   }
 
-  // Bacino Spaziale: cantiere di 20 giorni reali al posto della Luna.
   function startBacinoSpaziale(universe, planetIndex) {
     const Data = window.UniversumData;
     const def = Data.BACINO_SPAZIALE;
@@ -427,7 +432,6 @@
     });
   }
 
-  // Invictus: costruzione di 20 giorni reali dentro un Bacino attivo (max 4 totali).
   function startInvictusConstruction(universe, planetIndex) {
     const Data = window.UniversumData;
     const def = Data.INVICTUS;
@@ -495,7 +499,6 @@
     return true;
   }
 
-  // Crepuscolo: solo in un Bacino mai usato, max 1 per impero.
   function startCrepuscoloConstruction(universe, planetIndex) {
     const def = window.UniversumData.CREPUSCOLO;
     const planet = universe.planets[planetIndex];
@@ -525,7 +528,7 @@
   }
 
   // =========================================================
-  // GALATTICA: costruzione nel Bacino, salto quantico, economia interna
+  // GALATTICA
   // =========================================================
   function findGalatticaAt(universe, coords) {
     return (universe.galattiche || []).find((gal) => gal.coords && gal.coords.g === coords.g && gal.coords.s === coords.s && gal.coords.p === coords.p) || null;
@@ -589,7 +592,6 @@
       throw new Error(`Deuterio insufficiente nella stiva della Galattica per il salto (${cost.toLocaleString()} D richiesti).`);
     }
 
-    // Navi in orbita: 50% distrutte senza detriti; il resto dipende dal pianeta di partenza.
     const originSlot = generateProceduralSlot(universe, galattica.coords.g, galattica.coords.s, galattica.coords.p);
     const remaining = {};
     for (const [shipId, qtyRaw] of Object.entries(galattica.orbitingFleet || {})) {
@@ -599,7 +601,7 @@
     }
     const now = Date.now();
     if (originSlot.ownerType === 'bot') {
-      galattica.orbitingFleet = remaining; // restano alla Galattica
+      galattica.orbitingFleet = remaining;
     } else {
       galattica.orbitingFleet = {};
       const totalRemaining = Object.values(remaining).reduce((acc, q) => acc + q, 0);
@@ -624,11 +626,23 @@
 
     galattica.resources.deuterium -= cost;
     const oldKey = coordKey(galattica.coords.g, galattica.coords.s, galattica.coords.p);
+    const oldCoords = Object.assign({}, galattica.coords);
     galattica.coords = target;
     if (!universe.galaxyDeltas) universe.galaxyDeltas = {};
     universe.galaxyDeltas[oldKey] = Object.assign({}, universe.galaxyDeltas[oldKey], { galatticaId: null });
     const newKey = coordKey(target.g, target.s, target.p);
     universe.galaxyDeltas[newKey] = Object.assign({}, universe.galaxyDeltas[newKey], { galatticaId: galattica.id });
+
+    const originPlanet = (universe.planets || []).find(
+      (pl) => pl.coords && pl.coords.g === oldCoords.g && pl.coords.s === oldCoords.s && pl.coords.p === oldCoords.p
+    );
+    if (originPlanet && originPlanet.galatticaOrigin) {
+      const galStillThere = findGalatticaAt(universe, originPlanet.coords);
+      if (!galStillThere) {
+        originPlanet.galatticaOrigin = false;
+      }
+    }
+
     return { cost, coords: Object.assign({}, target) };
   }
 
@@ -641,7 +655,6 @@
     const curLv = Number(galattica.structures[structureId] || 0);
     const cost = Engine.getGalatticaStructureCost(structureId, curLv + 1);
     if (!universe.creativeMode) {
-      // Vincolo energetico: generatori/sintetizzatori solo con energia sufficiente a sostenerli.
       if (structureId === 'generatoreMetallo' || structureId === 'generatoreCristallo' || structureId === 'sintetizzatoreDeuterio') {
         const projected = Object.assign({}, galattica, { structures: Object.assign({}, galattica.structures, { [structureId]: curLv + 1 }) });
         if (Engine.getGalatticaProduction(projected, universe).energyBalance < 0) {
@@ -700,21 +713,16 @@
     return { count: galattica.orbitingFleet[shipId], cost };
   }
 
-  // Annulla il cantiere in corso: le rate gia' pagate sono perse.
   function cancelBacinoConstruction(planet) {
     if (!planet || !planet.bacinoSpaziale || planet.bacinoSpaziale.status === 'active') return false;
     planet.bacinoSpaziale = null;
     return true;
   }
 
-  // Solo missione Distruzione Luna/Bacino con Morte Nera: se distrutto, Luna al 100%.
   function destroyBacinoAndFormMoon(universe, planet) {
     if (!planet || !planet.bacinoSpaziale || planet.bacinoSpaziale.status !== 'active') return false;
-    // Costruzioni Invictus annullate e perse; attive attraccate perse come detriti.
     const dockedInvictus = Number(planet.bacinoSpaziale.invictusActive) || 0;
     if (dockedInvictus > 0) addInvictusDebris(universe, planet.coords, dockedInvictus);
-    // Crepuscolo: in riparazione/costruzione viene distrutta o persa per sempre;
-    // attiva attraccata (non in missione) parte in limbo verso il pianeta madre.
     const cp = planet.bacinoSpaziale.crepuscolo;
     if (cp) {
       if (cp.status === 'repairing') {
@@ -830,7 +838,7 @@
   }
 
   // =========================================================
-  // 3. MOTORE DI BATTAGLIA A 6 ROUND + CONQUISTA + MORTE NERA
+  // 3. MOTORE DI BATTAGLIA A 6 ROUND
   // =========================================================
   function expandUnitPool(unitMap, tech, isDefenseMap = false) {
     const Data = window.UniversumData;
@@ -889,7 +897,6 @@
     let defenders = defFleetUnits.concat(defDefenseUnits);
 
     const log = [];
-    // Regola Crepuscolo: servono 4+ Invictus nel lato che spara per danneggiarla.
     const attackerInvictusCount = Math.max(0, Math.floor(Number(attackerFleet?.invictus || 0)));
     const defenderInvictusCount = Math.max(0, Math.floor(Number(defenderData.fleet?.invictus || 0)));
 
@@ -1009,7 +1016,6 @@
     const attackerSurvivors = summarizePool(attackers);
     const defenderAllSurvivors = summarizePool(defenders);
 
-    // Crepuscolo: danneggiabile solo da 4+ Invictus (gate sopra), mai distrutta in battaglia.
     const attackerCrepUnit = attackers.find((unit) => unit.id === 'crepuscolo');
     const defenderCrepUnit = defenders.find((unit) => unit.id === 'crepuscolo');
     let attackerCrepuscoloDamaged = !!attackerCrepUnit && attackerCrepUnit.hull < attackerCrepUnit.maxHull;
@@ -1113,7 +1119,6 @@
           moonDestroyed = true;
           log.push('🌑💥 UNA MORTE NERA HA POLVERIZZATO LA LUNA NEMICA CON TUTTI I SUOI EDIFICI!');
         }
-        // Bacino: distruggibile solo su esplicita missione Distruzione Luna/Bacino.
         if (options.allowBacinoDestruction && defenderData.bacinoSpaziale && defenderData.bacinoSpaziale.status === 'active' && !bacinoDestroyed && Math.random() < 0.10) {
           bacinoDestroyed = true;
           log.push('🛠️💥 UNA MORTE NERA HA POLVERIZZATO IL BACINO SPAZIALE NEMICO!');
@@ -1147,7 +1152,7 @@
   }
 
   // =========================================================
-  // 4. SIMULATORE / CALCOLATORE DI BATTAGLIA VELOCE (MONTE CARLO)
+  // 4. SIMULATORE
   // =========================================================
   function simulateBattle(attackerFleet, attackerTech, targetCoords, universe, iterations = 30) {
     const Data = window.UniversumData;
@@ -1298,18 +1303,39 @@
       (universe.incomingSieges || []).find((s) => s.type === 'embargo' && same(s.targetCoords)) || null;
   }
 
+  // *** MODIFICA A: launchFleet accetta origine "galattica" ***
   function launchFleet(universe, originPlanetIndex, targetCoords, mission, fleetSelection, cargo = { metal: 0, crystal: 0, deuterium: 0 }, options = {}) {
-    const originP = universe.planets[originPlanetIndex];
-    if (!originP) throw new Error('Pianeta di partenza non valido.');
+    const isGalatticaOrigin = options.originType === 'galattica';
 
-    // Embargo Planetario: blocca partenze/arrivi (solo un Attacco normale di liberazione puo' partire/ingaggiare)
-    if (findEmbargoAt(universe, originP.coords) && mission !== 'attack') {
-      throw new Error(`Partenza bloccata dall'Embargo Planetario su [${originP.coords.g}:${originP.coords.s}:${originP.coords.p}].`);
+    let originP = null;
+    let originG = null;
+    let originCoords = null;
+    let shipSource = null;
+    let resourceSource = null;
+
+    if (isGalatticaOrigin) {
+      originG = findGalattica(universe, options.originGalatticaId);
+      if (!originG) throw new Error('Galattica di partenza non trovata.');
+      if (mission === 'colonize' || mission === 'deploy') {
+        throw new Error('Missione non disponibile dalla Galattica.');
+      }
+      originCoords = Object.assign({}, originG.coords);
+      shipSource = originG.orbitingFleet;
+      resourceSource = originG.resources;
+    } else {
+      originP = universe.planets[originPlanetIndex];
+      if (!originP) throw new Error('Pianeta di partenza non valido.');
+      originCoords = Object.assign({}, originP.coords);
+      shipSource = originP.fleet;
+      resourceSource = originP.resources;
+    }
+
+    if (findEmbargoAt(universe, originCoords) && mission !== 'attack') {
+      throw new Error(`Partenza bloccata dall'Embargo Planetario su [${originCoords.g}:${originCoords.s}:${originCoords.p}].`);
     }
     if (findEmbargoAt(universe, targetCoords) && mission !== 'attack') {
       throw new Error(`Rotta bloccata dall'Embargo Planetario su [${targetCoords.g}:${targetCoords.s}:${targetCoords.p}].`);
     }
-
 
     const maxSlots = universe.creativeMode ? 999 : (5 + Number(universe.researches?.computerTech || 0));
     if ((universe.fleetsInFlight || []).length >= maxSlots) {
@@ -1324,13 +1350,20 @@
     for (const [id, rawQty] of Object.entries(fleetSelection || {})) {
       const qty = Math.max(0, Math.floor(Number(rawQty) || 0));
       if (qty <= 0 || id === 'solarSatellite') continue;
-      const avail = id === 'invictus'
-        ? Number(originP.bacinoSpaziale?.invictusActive || 0)
-        : id === 'crepuscolo'
-          ? (originP.bacinoSpaziale?.crepuscolo?.status === 'active' ? 1 : 0)
-          : Number(originP.fleet?.[id] || 0);
+
+      let avail;
+      if (isGalatticaOrigin) {
+        if (id === 'invictus' || id === 'crepuscolo') continue;
+        avail = Number(shipSource[id] || 0);
+      } else {
+        avail = id === 'invictus'
+          ? Number(originP.bacinoSpaziale?.invictusActive || 0)
+          : id === 'crepuscolo'
+            ? (originP.bacinoSpaziale?.crepuscolo?.status === 'active' ? 1 : 0)
+            : Number(originP.fleet?.[id] || 0);
+      }
       if (qty > avail) {
-        throw new Error(`Navi insufficienti su ${originP.name}: ${Data.SHIPS[id]?.name || id}.`);
+        throw new Error(`Navi insufficienti ${isGalatticaOrigin ? 'nella Galattica' : `su ${originP.name}`}: ${Data.SHIPS[id]?.name || id}.`);
       }
       cleanFleet[id] = qty;
       totalShips += qty;
@@ -1352,16 +1385,15 @@
       throw new Error('Serve almeno una Morte Nera per tentare la distruzione di una Luna/Bacino.');
     }
 
-    // Invictus: niente salti tra galassie; costo salto a sistemi, per nave.
     let invictusJumpFuel = 0;
-    if (cleanFleet.invictus) {
-      if (Number(targetCoords.g) !== Number(originP.coords.g)) {
+    if (!isGalatticaOrigin && cleanFleet.invictus) {
+      if (Number(targetCoords.g) !== Number(originCoords.g)) {
         throw new Error('L\'Invictus non può saltare tra galassie: destinazione in un\'altra galassia.');
       }
-      invictusJumpFuel = universe.creativeMode ? 0 : getInvictusJumpCost(originP.coords, targetCoords, cleanFleet.invictus);
+      invictusJumpFuel = universe.creativeMode ? 0 : getInvictusJumpCost(originCoords, targetCoords, cleanFleet.invictus);
     }
 
-    const distance = calculateDistance(originP.coords, targetCoords);
+    const distance = calculateDistance(originCoords, targetCoords);
     const fleetStats = getFleetSpeedAndFuel(universe, cleanFleet, distance, options.fuelPercent || 100);
     const durationSec = fleetStats.durationSec;
     const fuelCost = fleetStats.fuelCost + invictusJumpFuel;
@@ -1378,20 +1410,21 @@
 
     if (!universe.creativeMode) {
       if (
-        originP.resources.metal < loadM ||
-        originP.resources.crystal < loadC ||
-        originP.resources.deuterium < (loadD + fuelCost + blackHoleFee)
+        resourceSource.metal < loadM ||
+        resourceSource.crystal < loadC ||
+        resourceSource.deuterium < (loadD + fuelCost + blackHoleFee)
       ) {
-        throw new Error(`Risorse o carburante insufficienti (Carburante richiesto: ${fuelCost.toLocaleString()} D).`);
+        throw new Error(`Risorse o carburante insufficienti${isGalatticaOrigin ? ' nella stiva della Galattica' : ''} (Carburante richiesto: ${fuelCost.toLocaleString()} D).`);
       }
-
-      originP.resources.metal -= loadM;
-      originP.resources.crystal -= loadC;
-      originP.resources.deuterium -= (loadD + fuelCost + blackHoleFee);
+      resourceSource.metal -= loadM;
+      resourceSource.crystal -= loadC;
+      resourceSource.deuterium -= (loadD + fuelCost + blackHoleFee);
     }
 
     for (const [id, qty] of Object.entries(cleanFleet)) {
-      if (id === 'invictus') {
+      if (isGalatticaOrigin) {
+        shipSource[id] -= qty;
+      } else if (id === 'invictus') {
         originP.bacinoSpaziale.invictusActive -= qty;
       } else if (id === 'crepuscolo') {
         originP.bacinoSpaziale.crepuscolo.status = 'inMission';
@@ -1404,8 +1437,8 @@
     const missionObj = {
       id: 'flt_' + now + '_' + Math.random().toString(36).substring(2, 6),
       mission,
-      originPlanetId: originP.id,
-      originCoords: Object.assign({}, originP.coords),
+      originPlanetId: isGalatticaOrigin ? null : originP.id,
+      originCoords: Object.assign({}, originCoords),
       targetCoords: Object.assign({}, targetCoords),
       ships: Object.assign({}, cleanFleet),
       fleet: cleanFleet,
@@ -1418,6 +1451,10 @@
       returnTime: now + durationSec * 2000,
       durationSec
     };
+
+    if (isGalatticaOrigin) {
+      missionObj.originGalatticaId = originG.id;
+    }
 
     if (!Array.isArray(universe.fleetsInFlight)) universe.fleetsInFlight = [];
     universe.fleetsInFlight.push(missionObj);
@@ -1459,11 +1496,9 @@
     const key = coordKey(flt.targetCoords.g, flt.targetCoords.s, flt.targetCoords.p);
     if (!universe.galaxyDeltas) universe.galaxyDeltas = {};
 
-    // Normalizza flt.fleet e flt.ships per compatibilità con siege-missions.js
     if (!flt.fleet && flt.ships) flt.fleet = Object.assign({}, flt.ships);
     if (!flt.ships && flt.fleet) flt.ships = Object.assign({}, flt.fleet);
 
-    // 1. SPIONAGGIO
     if (flt.mission === 'spy') {
       const slot = generateProceduralSlot(universe, flt.targetCoords.g, flt.targetCoords.s, flt.targetCoords.p);
       if (slot.ownerType !== 'bot') {
@@ -1514,7 +1549,6 @@
       return;
     }
 
-    // 2. COLONIZZAZIONE (FIX: controlla sia 'empty' che 'none' + verifica presenza Colonizzatrice)
     if (flt.mission === 'colonize') {
       const slot = generateProceduralSlot(universe, flt.targetCoords.g, flt.targetCoords.s, flt.targetCoords.p);
       const isSlotFree = slot.ownerType === 'empty' || slot.ownerType === 'none' || slot.type === 'empty';
@@ -1530,7 +1564,6 @@
         return;
       }
 
-      // Consuma 1 Colonizzatrice
       flt.fleet.colonyShip = Math.max(0, (flt.fleet.colonyShip || 1) - 1);
       flt.ships = Object.assign({}, flt.fleet);
 
@@ -1582,7 +1615,6 @@
       return;
     }
 
-    // 3. TRASPORTO E SCHIERAMENTO
     if (flt.mission === 'transport' || flt.mission === 'deploy') {
       const destPlanet = universe.planets.find(
         (p) => p.coords.g === flt.targetCoords.g && p.coords.s === flt.targetCoords.s && p.coords.p === flt.targetCoords.p
@@ -1606,7 +1638,6 @@
       return;
     }
 
-    // 4. RICICLAGGIO DETRITI
     if (flt.mission === 'recycle') {
       const slot = generateProceduralSlot(universe, flt.targetCoords.g, flt.targetCoords.s, flt.targetCoords.p);
       const debris = slot.debris || { metal: 0, crystal: 0 };
@@ -1635,9 +1666,7 @@
       return;
     }
 
-    // 5. SPEDIZIONE (POSIZIONE 16 / BUCO NERO)
     if (flt.mission === 'explore') {
-      // Relitto Crepuscolo: solo Esplorazione Profonda 24h con 4+ Morti Nere, 0,5%.
       const crepDef = window.UniversumData.CREPUSCOLO;
       const exploreHours = Number(flt.exploreHours || flt.options?.exploreHours || 1);
       const deathStarsArrived = Math.max(0, Math.floor(Number((flt.fleet || {}).deathStar || 0)));
@@ -1720,7 +1749,6 @@
       return;
     }
 
-    // 5b. EMBARGO / OCCUPAZIONE (fallback se il modulo assedi non ha intercettato l'arrivo)
     if (flt.mission === 'embargo' || flt.mission === 'occupy' || flt.mission === 'blockade') {
       const siegeType = flt.mission === 'occupy' ? 'occupy' : 'embargo';
       const slot = generateProceduralSlot(universe, flt.targetCoords.g, flt.targetCoords.s, flt.targetCoords.p);
@@ -1783,9 +1811,7 @@
       return 'remove';
     }
 
-    // 6. ATTACCO / DISTRUZIONE LUNA
     if (flt.mission === 'attack' || flt.mission === 'destroyMoon') {
-      // Attacco di liberazione: ingaggia la flotta nemica in orbita (Embargo/Occupazione)
       const siegeIdx = (universe.incomingSieges || []).findIndex(
         (s) => Number(s.targetCoords?.g) === Number(flt.targetCoords.g) && Number(s.targetCoords?.s) === Number(flt.targetCoords.s) && Number(s.targetCoords?.p) === Number(flt.targetCoords.p)
       );
@@ -1813,7 +1839,6 @@
         return Object.values(flt.fleet).reduce((acc, q) => acc + Number(q || 0), 0) <= 0 ? 'remove' : undefined;
       }
 
-      // Galattica alle coordinate bersaglio: solo missione Distruzione Luna puo' distruggerla.
       const galatticaTarget = flt.mission === 'destroyMoon' ? findGalatticaAt(universe, flt.targetCoords) : null;
       if (galatticaTarget) {
         const gCombat = resolveCombat(flt.fleet, universe.researches, {
@@ -1827,7 +1852,6 @@
         const destroyChance = 1 - Math.pow(0.90, dsCount);
         if (gCombat.result === 'attacker_win' && dsCount > 0 && Math.random() < destroyChance) {
           universe.galattiche = (universe.galattiche || []).filter((gal) => gal.id !== galatticaTarget.id);
-          // Bacino non torna: 75% formazione luna, altrimenti spazio vuoto.
           const moonFormed = Math.random() < 0.75;
           const targetPlanet = (universe.planets || []).find((pl) => pl.coords.g === flt.targetCoords.g && pl.coords.s === flt.targetCoords.s && pl.coords.p === flt.targetCoords.p);
           if (moonFormed && targetPlanet && !targetPlanet.moon && !targetPlanet.bacinoSpaziale) {
@@ -1871,7 +1895,6 @@
         crystal: prevDebris.crystal + combat.debris.crystal
       };
 
-      // Bonus luna da Invictus distrutte in battaglia (+15% ciascuna, max 100%).
       const moonFormedFromInvictus = combat.invictusLost > 0 && !slot.moon && !slot.bacinoSpaziale && !combat.bacinoDestroyed &&
         Math.random() < Math.min(1, combat.invictusLost * window.UniversumData.INVICTUS.moonChancePerLost);
 
@@ -2006,7 +2029,6 @@
         const targetPlanet = universe.planets.find((p) => p.id === atk.targetPlanetId) || universe.planets[0];
         if (!targetPlanet) continue;
 
-        // Invictus attraccate difendono pianeta e Bacino insieme alla flotta.
         const defenderFleet = Object.assign({}, targetPlanet.fleet);
         if (targetPlanet.bacinoSpaziale && targetPlanet.bacinoSpaziale.status === 'active') {
           defenderFleet.invictus = Number(targetPlanet.bacinoSpaziale.invictusActive) || 0;
@@ -2035,7 +2057,6 @@
         }
         targetPlanet.fleet = fleetSurvivors;
         targetPlanet.defenses = combat.repairedDefenses;
-        // Bonus luna da Invictus distrutte in battaglia (+15% ciascuna).
         if (combat.invictusLost > 0 && !targetPlanet.moon && !targetPlanet.bacinoSpaziale) {
           const moonChance = Math.min(1, combat.invictusLost * window.UniversumData.INVICTUS.moonChancePerLost);
           if (Math.random() < moonChance) targetPlanet.moon = makeMoon('Luna');
@@ -2107,6 +2128,61 @@
     }
   }
 
+  // *** MODIFICA C: arrivo della missione galattica-return ***
+  function handleGalatticaReturnArrival(universe, flt, now) {
+    const gal = findGalattica(universe, flt.originGalatticaId);
+    const returningFleet = Object.assign({}, flt.fleet || flt.ships || {});
+    const cargo = Object.assign({ metal: 0, crystal: 0, deuterium: 0 }, flt.cargo || {});
+
+    if (gal) {
+      for (const [id, qty] of Object.entries(returningFleet)) {
+        const q = Math.max(0, Math.floor(Number(qty) || 0));
+        if (q > 0) {
+          gal.orbitingFleet[id] = (gal.orbitingFleet[id] || 0) + q;
+        }
+      }
+      gal.resources.metal += cargo.metal;
+      gal.resources.crystal += cargo.crystal;
+      gal.resources.deuterium += cargo.deuterium;
+      addMessage(universe, 'fleet', `Flotte rientrate alla Galattica [${gal.coords.g}:${gal.coords.s}:${gal.coords.p}].`, '');
+      return 'remove';
+    }
+
+    // Galattica distrutta durante il rientro lento: dirotta al pianeta più vicino
+    const totalRemaining = Object.values(returningFleet).reduce((acc, q) => acc + Math.max(0, Math.floor(Number(q) || 0)), 0);
+    if (totalRemaining > 0 && (universe.planets || []).length > 0) {
+      let nearest = null;
+      let nearestDist = Infinity;
+      for (const pl of universe.planets) {
+        const d = calculateDistance(flt.targetCoords, pl.coords);
+        if (d < nearestDist) { nearestDist = d; nearest = pl; }
+      }
+      if (nearest) {
+        const stats = getFleetSpeedAndFuel(universe, returningFleet, nearestDist);
+        const durationSec = Math.max(1, stats.durationSec) * 20;
+        universe.fleetsInFlight.push({
+          id: 'flt_galret_fallback_' + now,
+          mission: 'deploy',
+          status: 'returning',
+          originPlanetId: nearest.id,
+          originCoords: Object.assign({}, flt.targetCoords),
+          targetCoords: Object.assign({}, nearest.coords),
+          fleet: Object.assign({}, returningFleet),
+          ships: Object.assign({}, returningFleet),
+          cargo: Object.assign({}, cargo),
+          departureTime: now,
+          arrivalTime: now + durationSec * 1000,
+          returnTime: now + durationSec * 1000,
+          galatticaReturn: true
+        });
+        addMessage(universe, 'fleet',
+          `Galattica distrutta durante il rientro lento delle flotte: dirottate al pianeta ${nearest.name} più vicino.`,
+          '');
+      }
+    }
+    return 'remove';
+  }
+
   function processFleetsAndBots(universe) {
     if (!universe) return;
     const now = Date.now();
@@ -2118,17 +2194,116 @@
       if (!flt.ships && flt.fleet) flt.ships = Object.assign({}, flt.fleet);
 
       if (flt.status === 'outbound' && now >= flt.arrivalTime) {
-        const action = handleMissionArrival(universe, flt);
-        if (action === 'remove') {
-          universe.fleetsInFlight.splice(i, 1);
-          continue;
+        if (flt.mission === 'galattica-return') {
+          const action = handleGalatticaReturnArrival(universe, flt, now);
+          if (action === 'remove') {
+            universe.fleetsInFlight.splice(i, 1);
+            continue;
+          }
+        } else {
+          const action = handleMissionArrival(universe, flt);
+          if (action === 'remove') {
+            universe.fleetsInFlight.splice(i, 1);
+            continue;
+          }
         }
       }
 
       if (flt.status === 'returning' && now >= flt.returnTime) {
+        // *** MODIFICA B: gestione ritorno da origine Galattica ***
+        if (flt.originGalatticaId) {
+          const gal = findGalattica(universe, flt.originGalatticaId);
+          if (!gal) {
+            // Galattica distrutta: dirotta al pianeta più vicino al 5%
+            const returningFleet = Object.assign({}, flt.fleet || flt.ships || {});
+            const totalRemaining = Object.values(returningFleet).reduce((acc, q) => acc + Math.max(0, Math.floor(Number(q) || 0)), 0);
+            if (totalRemaining > 0 && (universe.planets || []).length > 0) {
+              let nearest = null;
+              let nearestDist = Infinity;
+              for (const pl of universe.planets) {
+                const d = calculateDistance(flt.targetCoords, pl.coords);
+                if (d < nearestDist) { nearestDist = d; nearest = pl; }
+              }
+              if (nearest) {
+                const stats = getFleetSpeedAndFuel(universe, returningFleet, nearestDist);
+                const durationSec = Math.max(1, stats.durationSec) * 20;
+                universe.fleetsInFlight.push({
+                  id: 'flt_galret_fallback_' + now,
+                  mission: 'deploy',
+                  status: 'returning',
+                  originPlanetId: nearest.id,
+                  originCoords: Object.assign({}, flt.targetCoords),
+                  targetCoords: Object.assign({}, nearest.coords),
+                  fleet: Object.assign({}, returningFleet),
+                  ships: Object.assign({}, returningFleet),
+                  cargo: Object.assign({}, flt.cargo || { metal: 0, crystal: 0, deuterium: 0 }),
+                  departureTime: now,
+                  arrivalTime: now + durationSec * 1000,
+                  returnTime: now + durationSec * 1000,
+                  galatticaReturn: true
+                });
+                addMessage(universe, 'fleet',
+                  'Galattica Distrutta, flotte in rientro deviato',
+                  `La Galattica di partenza non esiste più: le flotte sono state dirotte al pianeta ${nearest.name} al 5% della velocità.`);
+              }
+            }
+            universe.fleetsInFlight.splice(i, 1);
+            continue;
+          }
+
+          // Galattica ancora alle vecchie coordinate? Aggancio normale
+          if (gal.coords.g === flt.originCoords.g &&
+              gal.coords.s === flt.originCoords.s &&
+              gal.coords.p === flt.originCoords.p) {
+            const returningFleet = Object.assign({}, flt.fleet || flt.ships || {});
+            for (const [id, qty] of Object.entries(returningFleet)) {
+              const q = Math.max(0, Math.floor(Number(qty) || 0));
+              if (q > 0) {
+                gal.orbitingFleet[id] = (gal.orbitingFleet[id] || 0) + q;
+              }
+            }
+            gal.resources.metal += flt.cargo?.metal || 0;
+            gal.resources.crystal += flt.cargo?.crystal || 0;
+            gal.resources.deuterium += flt.cargo?.deuterium || 0;
+            addMessage(universe, 'fleet',
+              `Flotte rientrate alla Galattica [${gal.coords.g}:${gal.coords.s}:${gal.coords.p}].`,
+              '');
+            universe.fleetsInFlight.splice(i, 1);
+            continue;
+          }
+
+          // Galattica spostata: crea missione galattica-return al 5%
+          const returningFleet = Object.assign({}, flt.fleet || flt.ships || {});
+          const distance = calculateDistance(flt.targetCoords, gal.coords);
+          const stats = getFleetSpeedAndFuel(universe, returningFleet, distance);
+          const durationSec = Math.max(1, stats.durationSec) * 20;
+          universe.fleetsInFlight.push({
+            id: 'flt_galret_' + now + '_' + Math.random().toString(36).substring(2, 6),
+            mission: 'galattica-return',
+            status: 'outbound',
+            originPlanetId: null,
+            originCoords: Object.assign({}, flt.targetCoords),
+            targetCoords: Object.assign({}, gal.coords),
+            fleet: Object.assign({}, returningFleet),
+            ships: Object.assign({}, returningFleet),
+            cargo: Object.assign({}, flt.cargo || { metal: 0, crystal: 0, deuterium: 0 }),
+            departureTime: now,
+            startTime: now,
+            arrivalTime: now + durationSec * 1000,
+            returnTime: now + durationSec * 2000,
+            durationSec,
+            originGalatticaId: gal.id,
+            isGalatticaReturn: true
+          });
+          addMessage(universe, 'fleet',
+            `Flotte in rientro dirottate: Galattica spostata a [${gal.coords.g}:${gal.coords.s}:${gal.coords.p}].`,
+            `Viaggio al 5% della velocità, arrivo tra ${Math.round(durationSec / 60)} minuti.`);
+          universe.fleetsInFlight.splice(i, 1);
+          continue;
+        }
+
         const homeP = universe.planets.find((p) => p.id === flt.originPlanetId) || universe.planets[0];
         const returningFleet = Object.assign({}, flt.fleet || flt.ships || {});
-        // Crepuscolo: riparazione al rientro, limbo o distruzione se il Bacino è caduto.
         const returningCrepuscolo = Math.max(0, Math.floor(Number(returningFleet.crepuscolo || 0)));
         if (returningCrepuscolo > 0) {
           delete returningFleet.crepuscolo;
@@ -2159,7 +2334,6 @@
             }
           }
         }
-        // Invictus: rientra solo al suo Bacino; se distrutto, persa come detriti all'origine.
         const returningInvictus = Math.max(0, Math.floor(Number(returningFleet.invictus || 0)));
         if (returningInvictus > 0) {
           delete returningFleet.invictus;

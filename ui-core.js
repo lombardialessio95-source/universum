@@ -11,7 +11,6 @@
     audioCtx: null,
     soundMuted: localStorage.getItem('universum_muted') === 'true',
 
-    // Listener Firestore attivi per Multiplayer
     unsubChatListener: null,
     unsubServerListener: null,
     unsubFleetsListener: null,
@@ -41,15 +40,14 @@
     lastAlertCount: 0,
     planetAnimAngle: 0,
     planetAnimId: null,
-    commTab: 'galactic', // 'galactic' | 'private'
-    activePrivateTarget: null, // { uid, nickname } | null
-    currentGalatticaViewerId: null,
-    currentGalatticaViewerPrevView: null
+    commTab: 'galactic',
+    activePrivateTarget: null,
+    currentGalatticaManageId: null,
+    currentGalatticaManagePrevView: null,
+    currentGalatticaFleetId: null,
+    currentGalatticaFleetPrevView: null
   };
 
-  // =========================================================
-  // HELPER GRAFICI & SVG VETTORIALI (ZERO EMOJI)
-  // =========================================================
   UI.artTag = function (id, cls = 'unit-art', alt = '') {
     const res = window.UniversumGraphics?.getArt ? window.UniversumGraphics.getArt(id) : '';
     if (!res) return '';
@@ -73,9 +71,6 @@
     return '';
   };
 
-  // =========================================================
-  // ICONA PWA DINAMICA (CANVAS 512x512) E WEB AUDIO API
-  // =========================================================
   UI.generateDynamicPWAIcon = function () {
     try {
       const canvas = document.createElement('canvas');
@@ -239,9 +234,6 @@
     } catch (e) {}
   };
 
-  // =========================================================
-  // UTILITY DI FORMATTAZIONE, MODALI E STATO PIANETA
-  // =========================================================
   UI.escapeHTML = function (str) {
     return String(str ?? '')
       .replace(/&/g, '&amp;')
@@ -364,9 +356,6 @@
     UI.switchView('chat');
   };
 
-  // =========================================================
-  // LOBBY OFFLINE VS ONLINE
-  // =========================================================
   UI.setupLobbyTabs = function () {
     const { playSound, toast, openModal, closeModal, svgIcon, startOnlineGame } = UI;
     const tabOffline = document.getElementById('tab-mode-offline');
@@ -657,9 +646,6 @@
     }
   };
 
-  // =========================================================
-  // MODALI RINOMINA PIANETA E LUNA
-  // =========================================================
   UI.openRenamePlanetModal = function (planetIndex) {
     const uni = UI.state.currentUniverse;
     const planet = uni.planets[planetIndex];
@@ -746,7 +732,7 @@
   };
 
   // =========================================================
-  // RENDERING PIANETA 2D PROCEDURALE (CANVAS)
+  // CANVAS PANORAMICA — Luna + Bacino Spaziale orbitante
   // =========================================================
   UI.startPlanetCanvas = function (planet) {
     const st = UI.state;
@@ -838,6 +824,7 @@
         ctx.restore();
       }
 
+      // === M1: Satellite orbitante — Luna oppure Bacino Spaziale attivo ===
       if (planet.moon) {
         const mx = cx + Math.cos(st.planetAnimAngle * 1.8) * (radius + 26);
         const my = cy + Math.sin(st.planetAnimAngle * 1.8) * 18;
@@ -848,6 +835,48 @@
         ctx.beginPath();
         ctx.arc(mx, my, 11, 0, Math.PI * 2);
         ctx.fill();
+      } else if (planet.bacinoSpaziale && planet.bacinoSpaziale.status === 'active') {
+        // Bacino Spaziale orbitante: orbita più lenta e più ampia della luna
+        const bx = cx + Math.cos(st.planetAnimAngle * 1.2) * (radius + 32);
+        const by = cy + Math.sin(st.planetAnimAngle * 1.2) * 20;
+        ctx.save();
+        ctx.translate(bx, by);
+        ctx.rotate(-0.32);
+
+        // Anello orbitale del bacino
+        ctx.strokeStyle = 'rgba(0, 230, 118, 0.85)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, 13, 4.8, 0, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Bracci di attracco
+        ctx.strokeStyle = '#90a4ae';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(-10, 0); ctx.lineTo(-3, 0);
+        ctx.moveTo(3, 0); ctx.lineTo(10, 0);
+        ctx.stroke();
+
+        // Hub centrale
+        const hubGrad = ctx.createRadialGradient(-1, -1, 0.5, 0, 0, 5);
+        hubGrad.addColorStop(0, '#b9f6ca');
+        hubGrad.addColorStop(0.6, '#00e676');
+        hubGrad.addColorStop(1, '#004d40');
+        ctx.fillStyle = hubGrad;
+        ctx.beginPath();
+        ctx.arc(0, 0, 4.5, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Alone verde del bacino attivo
+        ctx.shadowColor = '#00e676';
+        ctx.shadowBlur = 9;
+        ctx.strokeStyle = 'rgba(0, 230, 118, 0.75)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(0, 0, 6, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
       }
 
       st.planetAnimId = requestAnimationFrame(drawFrame);
@@ -856,9 +885,6 @@
     drawFrame();
   };
 
-  // =========================================================
-  // HEADER RISORSE, NAVIGAZIONE E ROUTER SCHERMATE
-  // =========================================================
   UI.refreshPlanetSelector = function () {
     const select = document.getElementById('active-planet-select');
     const uni = UI.state.currentUniverse;
@@ -911,7 +937,6 @@
     }
   };
 
-  // Listener chat attivi solo con la chat aperta (Spark)
   UI.startChatListeners = function () {
     const st = UI.state;
     const uni = st.currentUniverse;
@@ -1001,7 +1026,9 @@
       case 'espionage': UI.renderEspionageAndSim(viewport); break;
       case 'reports': await UI.renderReports(viewport); break;
       case 'moon': UI.renderMoon(viewport); break;
-      case 'galattica-viewer': UI.renderGalatticaViewerView(viewport); break;
+      case 'galattica-manage': UI.renderGalatticaManageView(viewport); break;
+      case 'galattica-fleet': UI.renderGalatticaFleetView(viewport); break;
+      case 'guide': UI.renderGuideView(viewport); break;
       case 'diplomacy': UI.renderDiplomacy(viewport); break;
       case 'empire': UI.renderEmpire(viewport); break;
       case 'highscore': await UI.renderHighscoreAndQuests(viewport); break;
@@ -1011,9 +1038,6 @@
     }
   };
 
-  // =========================================================
-  // SCHERMATA 1: PANORAMICA
-  // =========================================================
   UI.renderOverview = function (viewport) {
     const { escapeHTML, formatNum, formatDuration, svgIcon, resIconTag, artTag } = UI;
     const st = UI.state;
@@ -1199,9 +1223,6 @@
     });
   };
 
-  // =========================================================
-  // GESTIONE PARTITE, LOOP E BOOTSTRAP
-  // =========================================================
   UI.renderSavesMenu = function (viewport) {
     const st = UI.state;
     const uni = st.currentUniverse;
@@ -1645,9 +1666,6 @@
 
   document.addEventListener('DOMContentLoaded', UI.init);
 
-  // =========================================================
-  // ENHANCER MENU A TENDINA SCI-FI (UNIVERSALE: DESKTOP + MOBILE)
-  // =========================================================
   UI.initSciFiSelects = function () {
     let activeMenu = null;
     let activeWrap = null;
