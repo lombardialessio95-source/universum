@@ -42,7 +42,9 @@
     planetAnimAngle: 0,
     planetAnimId: null,
     commTab: 'galactic', // 'galactic' | 'private'
-    activePrivateTarget: null // { uid, nickname } | null
+    activePrivateTarget: null, // { uid, nickname } | null
+    currentGalatticaViewerId: null,
+    currentGalatticaViewerPrevView: null
   };
 
   // =========================================================
@@ -309,7 +311,6 @@
     if (!uni) return;
     if (UI.state.isMultiplayerMode) {
       if (window.UniversumMP && typeof window.UniversumMP.syncPlayerState === 'function') {
-        // Persist esplicita = azione utente: sincronizza subito (force)
         await window.UniversumMP.syncPlayerState(uni, { force: true });
       }
     } else {
@@ -1000,6 +1001,7 @@
       case 'espionage': UI.renderEspionageAndSim(viewport); break;
       case 'reports': await UI.renderReports(viewport); break;
       case 'moon': UI.renderMoon(viewport); break;
+      case 'galattica-viewer': UI.renderGalatticaViewerView(viewport); break;
       case 'diplomacy': UI.renderDiplomacy(viewport); break;
       case 'empire': UI.renderEmpire(viewport); break;
       case 'highscore': await UI.renderHighscoreAndQuests(viewport); break;
@@ -1343,7 +1345,6 @@
     await window.UniversumDB.renderLobbyList();
   };
 
-  // Uscita verso la lista server senza persistere (server abbandonato/eliminato)
   UI.exitToLobbyAfterServerRemoval = async function () {
     const st = UI.state;
     UI.stopGameLoop();
@@ -1413,7 +1414,6 @@
           window.UniversumMP.processOnlineOccupations(uni.id).catch(() => {});
         }
         if (mpTickCounter % 60 === 0) {
-          // Sync periodica Firestore solo ogni 60s (Spark); le azioni sincronizzano subito
           UI.persistUniverseState().catch(() => {});
         }
       } else {
@@ -1533,8 +1533,6 @@
       st.fleetTarget = { g: home.coords.g, s: home.coords.s, p: home.coords.p };
     }
 
-    // Listener chat NON avviati qui: partono solo quando si apre la vista chat (startChatListeners)
-
     if (window.UniversumMP?.listenUniverseDeleted) {
       st.unsubServerListener = window.UniversumMP.listenUniverseDeleted(universe.id, async () => {
         if (UI.state.currentUniverse?.id !== universe.id) return;
@@ -1646,6 +1644,7 @@
   };
 
   document.addEventListener('DOMContentLoaded', UI.init);
+
   // =========================================================
   // ENHANCER MENU A TENDINA SCI-FI (UNIVERSALE: DESKTOP + MOBILE)
   // =========================================================
