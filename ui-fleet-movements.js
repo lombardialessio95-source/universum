@@ -28,16 +28,19 @@
     const uni = st.currentUniverse;
     const Data = window.UniversumData;
     const MCore = window.UniversumMissionsCore;
+    const Engine = window.UniversumEngine;
 
     const maxSlots = MCore ? MCore.getMaxFleetSlots(uni) : (5 + Number(uni.researches?.computerTech || 0));
     const flights = (uni.fleetsInFlight || []).filter((f) => !f.resolved);
     const usedSlots = MCore ? MCore.getUsedFleetSlots(uni) : flights.length;
     const maxExpHours = MCore ? MCore.getMaxExploreHours(uni) : (1 + Number(uni.researches?.expeditionTech || 0));
 
+    const galattiche = Array.isArray(uni.galattiche) ? uni.galattiche : [];
+
     let activeSieges = uni.activeSieges || [];
     let incomingSieges = uni.incomingSieges || [];
 
-    // In modalitÃ  Online carica anche gli embarghi/occupazioni reali da Firestore
+    // In modalità Online carica anche gli embarghi/occupazioni reali da Firestore
     if (st.isMultiplayerMode && window.fbDB && window.fbAuth?.currentUser) {
       const myUid = window.fbAuth.currentUser.uid;
       const uniRef = window.fbDB.collection('online_universes').doc(uni.id);
@@ -219,6 +222,49 @@
           `}
         </div>
 
+        <!-- SEZIONE: GALATTICHE (Fase 6) -->
+        <div class="glass-panel" style="padding:14px;">
+          <h3 style="font-size:0.98rem; color:var(--res-crystal); margin-bottom:10px;">GALATTICHE DELL'IMPERO (${galattiche.length})</h3>
+          ${galattiche.length === 0 ? `
+            <p class="text-muted">Nessuna Galattica nell'impero. Costruiscila in un Bacino Spaziale attivo senza navi legate (richiede le 5 ricerche Galattica ai livelli minimi).</p>
+          ` : `
+            <div style="display:flex; flex-direction:column; gap:10px;">
+              ${galattiche.map((g) => {
+                const prod = Engine && Engine.getGalatticaProduction ? Engine.getGalatticaProduction(g, uni) : { metalPerHour: 0, crystalPerHour: 0, deuteriumPerHour: 0, energyBalance: 0 };
+                const originPlanet = (uni.planets || []).find((pl) => pl.id === g.originPlanetId);
+                const isOnOwnPlanet = Boolean(originPlanet
+                  && Number(originPlanet.coords.g) === Number(g.coords.g)
+                  && Number(originPlanet.coords.s) === Number(g.coords.s)
+                  && Number(originPlanet.coords.p) === Number(g.coords.p));
+                return `
+                  <div style="background:rgba(0,0,0,0.4); border:1px solid rgba(0,210,255,0.22); border-radius:10px; padding:12px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:8px;">
+                      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                        ${artTag('galattica', 'unit-art-sm', 'Galattica')}
+                        <strong style="font-size:1.05rem;">🌌 ${escapeHTML(g.name || 'Galattica')}</strong>
+                        <span class="badge badge-creative">SLOT OCCUPATO</span>
+                        ${isOnOwnPlanet ? '<span class="badge badge-green">SU TUO PIANETA</span>' : '<span class="badge badge-blue">SU PIANETA BOT</span>'}
+                      </div>
+                      <button type="button" class="btn btn-blue btn-sm btn-gal-from-movements" data-gal-id="${escapeHTML(g.id)}" data-gal-own="${isOnOwnPlanet ? '1' : '0'}" data-gal-planet-id="${escapeHTML(originPlanet?.id || '')}">
+                        ${svgIcon('radar')} VAI ALLA GALATTICA
+                      </button>
+                    </div>
+
+                    <div style="font-size:0.92rem; margin-bottom:8px; display:flex; justify-content:space-between; flex-wrap:wrap; gap:6px;">
+                      <span>Posizione attuale: <strong class="text-crystal">[${g.coords.g}:${g.coords.s}:${g.coords.p}]</strong></span>
+                      <span class="text-muted">Stiva: <strong class="text-metal">${formatNum(g.resources?.metal || 0)} M</strong> · <strong class="text-crystal">${formatNum(g.resources?.crystal || 0)} C</strong> · <strong class="text-deuterium">${formatNum(g.resources?.deuterium || 0)} D</strong></span>
+                    </div>
+
+                    <div class="text-muted" style="font-size:0.84rem;">
+                      Produzione/ora: ${formatNum(prod.metalPerHour)} M · ${formatNum(prod.crystalPerHour)} C · ${formatNum(prod.deuteriumPerHour)} D · Energia: ${formatNum(prod.energyBalance)}
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          `}
+        </div>
+
         <!-- SEZIONE: EMBARGHI & OCCUPAZIONI ORBITALI ATTIVI -->
         <div class="glass-panel" style="padding:14px;">
           <h3 style="font-size:0.98rem; color:var(--btn-gold); margin-bottom:10px;">OPERAZIONI ORBITALI (EMBARGHI &amp; OCCUPAZIONI)</h3>
@@ -295,6 +341,26 @@
 
     document.getElementById('btn-mov-new-fleet')?.addEventListener('click', () => {
       UI.switchView('fleet');
+    });
+
+    // Fase 6: pulsanti "Vai alla Galattica"
+    viewport.querySelectorAll('.btn-gal-from-movements').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const galId = btn.dataset.galId;
+        const isOwn = btn.dataset.galOwn === '1';
+        if (isOwn) {
+          const pl = (uni.planets || []).find((p) => p.id === btn.dataset.galPlanetId);
+          if (pl) {
+            uni.activePlanetId = pl.id;
+            UI.refreshPlanetSelector();
+            UI.updateTopBarNumbers();
+            UI.switchView('moon');
+            return;
+          }
+        }
+        UI.renderGalatticaViewer(galId);
+      });
     });
 
     viewport.querySelectorAll('.btn-recall-fleet').forEach((btn) => {
