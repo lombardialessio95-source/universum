@@ -430,7 +430,7 @@
                     <strong style="font-size:1.05rem;">${escapeHTML(slot.planetName || slot.name || 'Slot Colonizzabile')}</strong>
                     ${slot.moon ? `<span class="badge badge-blue" title="${escapeHTML(slot.moon.name || 'Luna')}">${svgIcon('moon')} LUNA</span>` : ''}
                     ${slot.bacinoSpaziale ? '<span class="badge badge-creative">🛠️ BACINO</span>' : ''}
-                    ${slot.galattica ? '<span class="badge badge-creative">🌌 GALATTICA</span>' : ''}
+                    ${slot.galattica ? `<button type="button" class="badge badge-creative btn-gal-open-viewer" data-gal-id="${escapeHTML(slot.galattica.id)}" data-gal-own="${slot.ownerType === 'player' ? '1' : '0'}" data-gal-planet-id="${escapeHTML(slot.planetId || '')}" style="cursor:pointer; border:none;">🌌 GALATTICA</button>` : ''}
                     ${slotSiege ? `<span class="badge badge-red">${slotSiege.type === 'embargo' ? 'SOTTO EMBARGO' : 'SOTTO OCCUPAZIONE'}</span><button type="button" class="btn btn-red btn-sm btn-gal-expel" data-p="${slot.coords.p}">${svgIcon('sword')} Scaccia Flotta</button>` : ''}
                     ${hasDebris ? `<span class="badge badge-creative">${svgIcon('recycle')} Detriti</span>` : ''}
                   </div>
@@ -497,6 +497,25 @@
       btn.addEventListener('click', () => {
         st.galaxyFilter = btn.dataset.filter;
         UI.renderCurrentView();
+      });
+    });
+
+    viewport.querySelectorAll('.btn-gal-open-viewer').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const galId = btn.dataset.galId;
+        const isOwn = btn.dataset.galOwn === '1';
+        if (isOwn) {
+          const pl = (uni.planets || []).find((p) => p.id === btn.dataset.galPlanetId);
+          if (pl) {
+            uni.activePlanetId = pl.id;
+            UI.refreshPlanetSelector();
+            UI.updateTopBarNumbers();
+            UI.switchView('moon');
+            return;
+          }
+        }
+        UI.renderGalatticaViewer(galId);
       });
     });
 
