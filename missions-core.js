@@ -12,7 +12,7 @@
       Data.RESEARCHES.expeditionTech = {
         id: 'expeditionTech',
         name: 'Esplorazione Spaziale Profonda',
-        icon: 'ðŸ§­',
+        icon: '🧭',
         description: 'Estende l’autonomia delle sonde e delle flotte esplorative: +1 ora massima di durata missione per livello.',
         baseCost: { metal: 3000, crystal: 6000, deuterium: 3000 },
         factor: 1.85,
@@ -35,12 +35,16 @@
       return MissionsCore.BASE_FLEET_SLOTS + compLv;
     },
 
-    // Slot attualmente occupati (flotte in volo + eventuali embarghi/occupazioni attivi)
+    // Slot attualmente occupati:
+    // flotte in volo + embarghi/occupazioni attivi + 1 slot per ogni Galattica esistente
+    // (Fase 5 decisione B2: la Galattica occupa uno slot flotta reale, indipendentemente
+    // dallo stato: ferma, in salto, in costruzione NON conta finché non è completata).
     getUsedFleetSlots(universe) {
       if (!universe) return 0;
       const inFlight = Array.isArray(universe.fleetsInFlight) ? universe.fleetsInFlight.length : 0;
       const activeSieges = Array.isArray(universe.activeSieges) ? universe.activeSieges.length : 0;
-      return inFlight + activeSieges;
+      const galattiche = Array.isArray(universe.galattiche) ? universe.galattiche.length : 0;
+      return inFlight + activeSieges + galattiche;
     },
 
     // Ore massime selezionabili in Esplorazione: 1h base + 1h per livello di expeditionTech
@@ -49,7 +53,7 @@
       return 1 + expLv;
     },
 
-    // Calcola velocitÃ , durata e consumo carburante in base alla % potenza/carburante (10% - 100%)
+    // Calcola velocità, durata e consumo carburante in base alla % potenza/carburante (10% - 100%)
     getAdjustedFlightStats(universe, fleetSelection, distance, fuelPercent = 100, exploreHours = 1, mission = 'attack') {
       const Galaxy = window.UniversumGalaxy;
       const pct = Math.min(100, Math.max(10, Math.round(Number(fuelPercent) || 100)));
@@ -71,7 +75,7 @@
         fuelCost += Math.ceil(fuelCost * 0.25 * (validExploreHours - 1));
       }
 
-      // Durata stazionamento in esplorazione scalata sulla velocitÃ  universo
+      // Durata stazionamento in esplorazione scalata sulla velocità universo
       const effSpeed = window.UniversumEngine?.getEffectiveSpeed
         ? window.UniversumEngine.getEffectiveSpeed(universe)
         : Math.max(1, Number(universe?.speed) || 1);
@@ -110,11 +114,11 @@
         throw new Error('Nessuna flotta attiva trovata.');
       }
       const idx = universe.fleetsInFlight.findIndex((f) => f.id === fleetId);
-      if (idx === -1) throw new Error('Missione non piÃ¹ presente.');
+      if (idx === -1) throw new Error('Missione non più presente.');
 
       const fleet = universe.fleetsInFlight[idx];
       if (fleet.status !== 'outbound') {
-        throw new Error('La flotta Ã¨ giÃ  sulla rotta di rientro.');
+        throw new Error('La flotta è già sulla rotta di rientro.');
       }
 
       const now = Date.now();
