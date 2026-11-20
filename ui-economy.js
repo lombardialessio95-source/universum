@@ -6,8 +6,6 @@
   // =========================================================
   // MAPPING ARTE STRUTTURE GALATTICA → RENDERER ESISTENTI
   // =========================================================
-  // I 5 id di GALATTICA_STRUCTURES non hanno un renderer dedicato in
-  // graphics-structures.js: riuso quelli planetari equivalenti.
   const GAL_STRUCT_ART = {
     cantiereSpaziale: 'shipyard',
     generatoreMetallo: 'metalMine',
@@ -316,7 +314,6 @@
     });
   };
 
-  // Ricontrolla in tempo reale requisiti/risorse e riabilita i bottoni senza re-render
   UI.refreshAffordabilityButtons = function () {
     const st = UI.state;
     const uni = st.currentUniverse;
@@ -387,9 +384,7 @@
       const gDef = Data.GALATTICA;
       const prod = Engine.getGalatticaProduction(galHere, uni);
 
-      // NAVI costruibili nel cantiere interno (no Bacino, no satellite solare)
       const galShips = Object.values(Data.SHIPS).filter((sh) => sh.id !== 'solarSatellite' && !sh.specialConstruction);
-      // DIFESE installabili (prezzo doppio)
       const galDefenses = Object.values(Data.DEFENSES);
 
       viewport.innerHTML = `
@@ -423,7 +418,6 @@
             }).join('')}
           </div>
 
-          <!-- PANNELLO A: CANTIERE SPAZIALE GALATTICO -->
           <div class="glass-panel" style="padding:14px;">
             <h3 style="margin-bottom:10px;">🚀 CANTIERE SPAZIALE GALATTICO</h3>
             <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:10px;">
@@ -457,7 +451,6 @@
             <p class="text-muted" style="margin-top:10px;">Navi in orbita: ${Object.entries(galHere.orbitingFleet || {}).filter(([, q]) => q > 0).map(([id, q]) => `${escapeHTML(Data.SHIPS[id]?.name || id)} x${q}`).join(', ') || 'nessuna'}</p>
           </div>
 
-          <!-- PANNELLO B: DIFESE GALATTICHE (PREZZO DOPPIO) -->
           <div class="glass-panel" style="padding:14px;">
             <h3 style="margin-bottom:10px;">🛡️ DIFESE GALATTICHE (PREZZO DOPPIO ×${gDef.defenseCostMultiplier})</h3>
             <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:10px;">
@@ -865,6 +858,117 @@
         UI.updateTopBarNumbers();
         UI.switchView('overview');
       });
+    });
+  };
+
+  // =========================================================
+  // GALATTICA VIEWER (Fase 4): vista read-only per Galattica su pianeta BOT
+  // =========================================================
+  UI.renderGalatticaViewer = function (galatticaId) {
+    const uni = UI.state.currentUniverse;
+    if (!uni) return;
+    const Galaxy = window.UniversumGalaxy;
+    const g = Galaxy.findGalattica ? Galaxy.findGalattica(uni, galatticaId) : null;
+    if (!g) {
+      UI.toast('Galattica non trovata.', 'error');
+      return;
+    }
+    UI.state.currentGalatticaViewerId = galatticaId;
+    UI.state.currentGalatticaViewerPrevView = UI.state.currentView || 'galaxy';
+    UI.switchView('galattica-viewer');
+  };
+
+  UI.renderGalatticaViewerView = function (viewport) {
+    const { escapeHTML, formatNum, svgIcon, resIconTag, artTag } = UI;
+    const uni = UI.state.currentUniverse;
+    const Galaxy = window.UniversumGalaxy;
+    const Engine = window.UniversumEngine;
+    const Data = window.UniversumData;
+    const galId = UI.state.currentGalatticaViewerId;
+    const g = galId && Galaxy.findGalattica ? Galaxy.findGalattica(uni, galId) : null;
+
+    const backView = UI.state.currentGalatticaViewerPrevView || 'galaxy';
+
+    if (!g) {
+      viewport.innerHTML = `
+        <div class="glass-panel" style="padding:20px; text-align:center;">
+          <p class="text-muted" style="margin-bottom:12px;">Galattica non più disponibile (forse distrutta o spostata).</p>
+          <button type="button" id="btn-gal-viewer-back-missing" class="btn btn-blue">${svgIcon('radar')} TORNA INDIETRO</button>
+        </div>
+      `;
+      document.getElementById('btn-gal-viewer-back-missing')?.addEventListener('click', () => UI.switchView(backView));
+      return;
+    }
+
+    const prod = Engine.getGalatticaProduction(g, uni);
+
+    const structuresRows = Object.values(Data.GALATTICA_STRUCTURES).map((sd) => {
+      const lv = Number(g.structures?.[sd.id] || 0);
+      return `<div style="display:flex; justify-content:space-between; align-items:center; background:rgba(0,0,0,0.35); border:1px solid rgba(0,210,255,0.22); border-radius:10px; padding:10px 12px; margin-bottom:6px;">
+        <span><strong>${escapeHTML(sd.name)}</strong></span>
+        <span class="badge badge-blue">Lv.${lv}</span>
+      </div>`;
+    }).join('');
+
+    const defensesRows = Object.entries(g.defenses || {})
+      .filter(([, q]) => Number(q) > 0)
+      .map(([id, q]) => `<div style="display:flex; justify-content:space-between; align-items:center; background:rgba(0,0,0,0.35); border:1px solid rgba(255,23,68,0.22); border-radius:10px; padding:8px 12px; margin-bottom:4px;">
+        <span>${escapeHTML(Data.DEFENSES[id]?.name || id)}</span>
+        <span class="badge badge-red">x${formatNum(q)}</span>
+      </div>`).join('');
+
+    const fleetRows = Object.entries(g.orbitingFleet || {})
+      .filter(([, q]) => Number(q) > 0)
+      .map(([id, q]) => `<div style="display:flex; justify-content:space-between; align-items:center; background:rgba(0,0,0,0.35); border:1px solid rgba(0,230,118,0.22); border-radius:10px; padding:8px 12px; margin-bottom:4px;">
+        <span style="display:inline-flex; align-items:center; gap:8px;">${artTag(id, 'unit-art-sm', Data.SHIPS[id]?.name || id)}${escapeHTML(Data.SHIPS[id]?.name || id)}</span>
+        <span class="badge badge-green">x${formatNum(q)}</span>
+      </div>`).join('');
+
+    viewport.innerHTML = `
+      <div style="display:flex; flex-direction:column; gap:14px;">
+        <div class="glass-panel" style="padding:16px;">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">
+            <div style="display:flex; gap:12px; align-items:center;">
+              ${artTag('galattica', 'unit-art', 'Galattica')}
+              <div>
+                <h2 style="font-size:1.2rem; color:var(--res-crystal);">🌌 GALATTICA — ${escapeHTML(g.name || 'Galattica')}</h2>
+                <p class="text-muted" style="font-size:0.9rem;">Coordinate: <strong class="text-crystal">[${g.coords.g}:${g.coords.s}:${g.coords.p}]</strong></p>
+              </div>
+            </div>
+            <button type="button" id="btn-gal-viewer-back" class="btn btn-blue btn-sm">${svgIcon('radar')} ← INDIETRO</button>
+          </div>
+          <p class="text-muted" style="font-size:0.88rem; margin-top:10px;">Vista read-only: stai osservando una Galattica su un pianeta non tuo. Nessuna azione disponibile.</p>
+        </div>
+
+        <div class="glass-panel" style="padding:14px;">
+          <h3 style="margin-bottom:8px;">RISORSE STIVA</h3>
+          <p style="margin-bottom:6px;">
+            <span class="text-metal">${formatNum(g.resources?.metal || 0)} M</span> · 
+            <span class="text-crystal">${formatNum(g.resources?.crystal || 0)} C</span> · 
+            <span class="text-deuterium">${formatNum(g.resources?.deuterium || 0)} D</span>
+          </p>
+          <p class="text-muted" style="font-size:0.85rem;">Produzione/ora: ${formatNum(prod.metalPerHour)} M · ${formatNum(prod.crystalPerHour)} C · ${formatNum(prod.deuteriumPerHour)} D · Energia: ${formatNum(prod.energyProduced - prod.energyConsumed)}</p>
+        </div>
+
+        <div class="glass-panel" style="padding:14px;">
+          <h3 style="margin-bottom:10px;">STRUTTURE INTERNE</h3>
+          ${structuresRows || '<p class="text-muted">Nessuna struttura registrata.</p>'}
+        </div>
+
+        <div class="glass-panel" style="padding:14px;">
+          <h3 style="margin-bottom:10px;">DIFESE</h3>
+          ${defensesRows || '<p class="text-muted">Nessuna difesa installata.</p>'}
+        </div>
+
+        <div class="glass-panel" style="padding:14px;">
+          <h3 style="margin-bottom:10px;">NAVI IN ORBITA</h3>
+          ${fleetRows || '<p class="text-muted">Nessuna nave in orbita.</p>'}
+        </div>
+      </div>
+    `;
+
+    document.getElementById('btn-gal-viewer-back')?.addEventListener('click', () => {
+      UI.switchView(backView);
     });
   };
 })();
