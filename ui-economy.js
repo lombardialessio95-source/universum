@@ -38,7 +38,6 @@
       const req = Data.checkRequirements(b.requirements, planet, uni, false);
       const buildSec = Engine.getBuildingBuildTime(uni, planet, b.id, nextLv, false);
 
-      // Energia e produzione oraria del livello successivo
       const energyCur = Data.getBuildingEnergyDelta(b.id, curLv, planet.maxTemp);
       const energyNext = Data.getBuildingEnergyDelta(b.id, nextLv, planet.maxTemp);
       const energyDelta = energyNext - energyCur;
@@ -387,6 +386,12 @@
     if (galHere) {
       const gDef = Data.GALATTICA;
       const prod = Engine.getGalatticaProduction(galHere, uni);
+
+      // NAVI costruibili nel cantiere interno (no Bacino, no satellite solare)
+      const galShips = Object.values(Data.SHIPS).filter((sh) => sh.id !== 'solarSatellite' && !sh.specialConstruction);
+      // DIFESE installabili (prezzo doppio)
+      const galDefenses = Object.values(Data.DEFENSES);
+
       viewport.innerHTML = `
         <div style="display:flex; flex-direction:column; gap:14px;">
           <div class="glass-panel" style="padding:16px;">
@@ -394,6 +399,7 @@
             <p style="margin-bottom:6px;">Stiva: <span class="text-metal">${formatNum(galHere.resources.metal)} M</span> · <span class="text-crystal">${formatNum(galHere.resources.crystal)} C</span> · <span class="text-deuterium">${formatNum(galHere.resources.deuterium)} D</span></p>
             <p class="text-muted">Produzione/ora: ${formatNum(prod.metalPerHour)} M · ${formatNum(prod.crystalPerHour)} C · ${formatNum(prod.deuteriumPerHour)} D · Energia: ${formatNum(prod.energyProduced - prod.energyConsumed)} (${formatNum(prod.energyProduced)} prodotta, solo Reattore a Fusione)</p>
           </div>
+
           <div class="glass-panel" style="padding:14px;">
             <h3 style="margin-bottom:10px;">STRUTTURE INTERNE</h3>
             ${Object.values(Data.GALATTICA_STRUCTURES).map((sd) => {
@@ -416,16 +422,80 @@
               `;
             }).join('')}
           </div>
+
+          <!-- PANNELLO A: CANTIERE SPAZIALE GALATTICO -->
           <div class="glass-panel" style="padding:14px;">
-            <h3 style="margin-bottom:10px;">DIFESE (prezzo doppio) E CANTIERE INTERNO</h3>
-            <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px;">
-              ${Object.values(Data.DEFENSES).slice(0, 6).map((dd) => `<button type="button" class="btn btn-ghost btn-sm btn-gal-defense" data-gdid="${dd.id}">${escapeHTML(dd.name)} x1 (${formatNum(dd.cost.metal * gDef.defenseCostMultiplier)} M)</button>`).join('')}
+            <h3 style="margin-bottom:10px;">🚀 CANTIERE SPAZIALE GALATTICO</h3>
+            <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:10px;">
+              ${galShips.map((sh) => {
+                const cost = sh.cost;
+                return `
+                  <div style="background:rgba(0,0,0,0.35); border:1px solid rgba(0,210,255,0.22); border-radius:10px; padding:10px 12px; display:flex; flex-direction:column; gap:8px;">
+                    <div style="display:flex; gap:10px; align-items:flex-start;">
+                      ${artTag(sh.id, 'unit-art', sh.name)}
+                      <div style="flex:1; min-width:0;">
+                        <strong style="font-size:1rem;">${escapeHTML(sh.name)}</strong>
+                        <p class="text-muted" style="font-size:0.82rem; margin-top:2px;">${escapeHTML(sh.description || '')}</p>
+                      </div>
+                    </div>
+                    <div style="display:flex; flex-wrap:wrap; gap:8px; font-size:0.82rem; color:var(--res-crystal);">
+                      <span style="display:inline-flex; align-items:center;">${svgIcon('sword')} ${formatNum(sh.attack)}</span>
+                      <span style="display:inline-flex; align-items:center;">${svgIcon('shield')} ${formatNum(sh.shield)}</span>
+                      <span style="display:inline-flex; align-items:center;">${svgIcon('hull')} ${formatNum(sh.hull)}</span>
+                      ${sh.cargo > 0 ? `<span style="display:inline-flex; align-items:center;">${svgIcon('cargo')} ${formatNum(sh.cargo)}</span>` : ''}
+                    </div>
+                    <div style="display:flex; flex-wrap:wrap; gap:8px; font-size:0.82rem; font-weight:700;">
+                      ${cost.metal > 0 ? `<span class="cost-item text-metal">${resIconTag('metal')} ${formatNum(cost.metal)}</span>` : ''}
+                      ${cost.crystal > 0 ? `<span class="cost-item text-crystal">${resIconTag('crystal')} ${formatNum(cost.crystal)}</span>` : ''}
+                      ${cost.deuterium > 0 ? `<span class="cost-item text-deuterium">${resIconTag('deuterium')} ${formatNum(cost.deuterium)}</span>` : ''}
+                    </div>
+                    <button type="button" class="btn btn-green btn-sm btn-gal-ship" data-gship="${sh.id}" style="margin-top:auto;">COSTRUISCI x1</button>
+                  </div>
+                `;
+              }).join('')}
             </div>
-            <div style="display:flex; flex-wrap:wrap; gap:6px;">
-              ${Object.values(Data.SHIPS).filter((sh) => sh.id !== 'solarSatellite' && !sh.specialConstruction).slice(0, 6).map((sh) => `<button type="button" class="btn btn-ghost btn-sm btn-gal-ship" data-gship="${sh.id}">${escapeHTML(sh.name)} x1</button>`).join('')}
-            </div>
-            <p class="text-muted" style="margin-top:8px;">Navi in orbita: ${Object.entries(galHere.orbitingFleet || {}).filter(([, q]) => q > 0).map(([id, q]) => `${escapeHTML(Data.SHIPS[id]?.name || id)} x${q}`).join(', ') || 'nessuna'}</p>
+            <p class="text-muted" style="margin-top:10px;">Navi in orbita: ${Object.entries(galHere.orbitingFleet || {}).filter(([, q]) => q > 0).map(([id, q]) => `${escapeHTML(Data.SHIPS[id]?.name || id)} x${q}`).join(', ') || 'nessuna'}</p>
           </div>
+
+          <!-- PANNELLO B: DIFESE GALATTICHE (PREZZO DOPPIO) -->
+          <div class="glass-panel" style="padding:14px;">
+            <h3 style="margin-bottom:10px;">🛡️ DIFESE GALATTICHE (PREZZO DOPPIO ×${gDef.defenseCostMultiplier})</h3>
+            <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:10px;">
+              ${galDefenses.map((dd) => {
+                const costM = dd.cost.metal * gDef.defenseCostMultiplier;
+                const costC = dd.cost.crystal * gDef.defenseCostMultiplier;
+                const costD = dd.cost.deuterium * gDef.defenseCostMultiplier;
+                const owned = Number(galHere.defenses?.[dd.id] || 0);
+                return `
+                  <div style="background:rgba(0,0,0,0.35); border:1px solid rgba(0,210,255,0.22); border-radius:10px; padding:10px 12px; display:flex; flex-direction:column; gap:8px;">
+                    <div style="display:flex; gap:10px; align-items:flex-start;">
+                      ${artTag(dd.id, 'unit-art', dd.name)}
+                      <div style="flex:1; min-width:0;">
+                        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:6px;">
+                          <strong style="font-size:1rem;">${escapeHTML(dd.name)}</strong>
+                          <span class="badge badge-green">x${formatNum(owned)}</span>
+                        </div>
+                        <p class="text-muted" style="font-size:0.82rem; margin-top:2px;">${escapeHTML(dd.description || '')}</p>
+                      </div>
+                    </div>
+                    <div style="display:flex; flex-wrap:wrap; gap:8px; font-size:0.82rem; color:var(--res-crystal);">
+                      <span style="display:inline-flex; align-items:center;">${svgIcon('sword')} ${formatNum(dd.attack)}</span>
+                      <span style="display:inline-flex; align-items:center;">${svgIcon('shield')} ${formatNum(dd.shield)}</span>
+                      <span style="display:inline-flex; align-items:center;">${svgIcon('hull')} ${formatNum(dd.hull)}</span>
+                    </div>
+                    <div style="display:flex; flex-wrap:wrap; gap:8px; font-size:0.82rem; font-weight:700;">
+                      ${costM > 0 ? `<span class="cost-item text-metal">${resIconTag('metal')} ${formatNum(costM)}</span>` : ''}
+                      ${costC > 0 ? `<span class="cost-item text-crystal">${resIconTag('crystal')} ${formatNum(costC)}</span>` : ''}
+                      ${costD > 0 ? `<span class="cost-item text-deuterium">${resIconTag('deuterium')} ${formatNum(costD)}</span>` : ''}
+                    </div>
+                    <button type="button" class="btn btn-green btn-sm btn-gal-defense" data-gdid="${dd.id}" style="margin-top:auto;">COSTRUISCI x1</button>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+            <p class="text-muted" style="margin-top:10px;">Difese installate: ${Object.entries(galHere.defenses || {}).filter(([, q]) => q > 0).map(([id, q]) => `${escapeHTML(Data.DEFENSES[id]?.name || id)} x${q}`).join(', ') || 'nessuna'}</p>
+          </div>
+
           <div class="glass-panel" style="padding:14px;">
             <h3 style="margin-bottom:10px;">SALTO QUANTICO (istantaneo)</h3>
             <div class="form-grid-3">
