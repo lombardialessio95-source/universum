@@ -400,7 +400,20 @@
               const lv = Number(galHere.structures[sd.id] || 0);
               const cost = Engine.getGalatticaStructureCost(sd.id, lv + 1);
               const artId = GAL_STRUCT_ART[sd.id] || sd.id;
-              return `<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px; flex-wrap:wrap;"><span style="display:inline-flex; align-items:center; gap:8px; min-width:180px;">${artTag(artId, 'unit-art-sm', sd.name)}<span>${escapeHTML(sd.name)} <strong>Lv.${lv}</strong></span></span><span class="text-muted">${formatNum(cost.metal)} M · ${formatNum(cost.crystal)} C · ${formatNum(cost.deuterium)} D</span><button type="button" class="btn btn-blue btn-sm btn-gal-upgrade" data-gsid="${sd.id}">POTENZIA</button></div>`;
+              return `
+                <div style="background:rgba(0,0,0,0.35); border:1px solid rgba(0,210,255,0.22); border-radius:10px; padding:10px 12px; margin-bottom:8px;">
+                  <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:6px;">
+                    <span style="display:inline-flex; align-items:center; gap:8px; min-width:0; flex:1;">
+                      ${artTag(artId, 'unit-art-sm', sd.name)}
+                      <span><strong>${escapeHTML(sd.name)}</strong> <span class="badge badge-blue" style="margin-left:4px;">Lv.${lv}</span></span>
+                    </span>
+                    <button type="button" class="btn btn-blue btn-sm btn-gal-upgrade" data-gsid="${sd.id}" style="flex-shrink:0;">POTENZIA</button>
+                  </div>
+                  <div class="text-muted" style="font-size:0.85rem;">
+                    ${formatNum(cost.metal)} M · ${formatNum(cost.crystal)} C · ${formatNum(cost.deuterium)} D
+                  </div>
+                </div>
+              `;
             }).join('')}
           </div>
           <div class="glass-panel" style="padding:14px;">
