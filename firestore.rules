@@ -4,6 +4,15 @@ rules_version = '2';
 // Limite server: max 3 per account, conteggio salvato in users/{uid}.serverIds
 // NOTA: file da pubblicare con `firebase deploy --only firestore:rules`.
 // Il controllo applicativo resta anche nella funzione di join (claimServerSlot).
+//
+// REVISIONE SICUREZZA (calibrata sulle scritture REALI del client in multiplayer.js):
+// - Le flotte e i pianeti vengono risolti da QUALUNQUE client (attacchi, ritorni, tributi, conquiste),
+//   quindi non si può limitare la scrittura al solo proprietario: i non-proprietari possono toccare
+//   solo i campi elencati in planetFieldsForOthers().
+// - I messaggi (rapporti) sono letti solo dal destinatario; le chat private solo dai partecipanti.
+// - L'universo può essere modificato solo dal fondatore, tranne playerCount (join/leave, +/-1).
+// LIMITE NOTO: senza Cloud Functions (piano Blaze) un client può comunque dichiarare risorse/navi
+// non sue sul PROPRIO pianeta o forgiare un evento di risoluzione: non è chiudibile solo con le regole.
 
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -35,6 +44,26 @@ service cloud.firestore {
         );
     }
 
+    // playerCount può mancare nei server creati con versioni vecchie: in quel caso vale 0
+    function oldPlayerCount() {
+      return ('playerCount' in resource.data) ? resource.data.playerCount : 0;
+    }
+
+    // Campi di un pianeta che un NON proprietario può modificare (risoluzione flotte, assedi,
+    // conquista, inbox di variazioni, detriti). Tutto il resto (edifici, nome, coordinate...) è solo del proprietario.
+    function planetFieldsForOthers() {
+      return ['inbox', 'debris', 'embargo', 'occupation', 'moon',
+        'ownerUid', 'ownerName', 'isNpc',
+        'resources', 'fleet', 'defenses',
+        'buildQueue', 'shipyardQueue', 'defenseQueue', 'lastUpdated'];
+    }
+
+    // I chatId privati sono "uidA_uidB" (ordinati): il partecipante è riconoscibile dall'id,
+    // anche per il PRIMO messaggio, quando il documento della chat non esiste ancora.
+    function isChatParticipant(chatId) {
+      return request.auth.uid in chatId.split('_');
+    }
+
     match /users/{uid} {
       allow read: if signedIn() && request.auth.uid == uid;
       // Il conteggio server non puo' mai superare 3 lato server
@@ -50,7 +79,18 @@ service cloud.firestore {
         && (request.resource.data.founderUid == request.auth.uid
           || request.resource.data.ownerUid == request.auth.uid)
         && underServerLimit(uniId);
-      allow update: if signedIn();
+      // Modifica: solo il fondatore, oppure un giocatore che entra/esce (playerCount, +/- 1)
+      allow update: if signedIn()
+        && (
+          isFounder(uniId)
+          || (
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['playerCount'])
+            && request.resource.data.playerCount is number
+            && request.resource.data.playerCount >= 0
+            && request.resource.data.playerCount - oldPlayerCount() <= 1
+            && oldPlayerCount() - request.resource.data.playerCount <= 1
+          )
+        );
       // Eliminazione server: solo il creatore (founderUid/ownerUid)
       allow delete: if signedIn() && isFounder(uniId);
 
@@ -63,21 +103,65 @@ service cloud.firestore {
       }
 
       match /planets/{planetId} {
-        allow read, write: if signedIn();
+        allow read: if signedIn();
+        // Creazione: pianeta di casa (join), colonie (risoluzione), avamposti BOT (creazione universo)
+        allow create: if signedIn();
+        // Proprietario: tutto. Altri: solo i campi di risoluzione elencati sopra.
+        allow update: if signedIn()
+          && (
+            resource.data.ownerUid == request.auth.uid
+            || request.resource.data.diff(resource.data).affectedKeys().hasOnly(planetFieldsForOthers())
+          );
+        // Eliminazione: proprietario (abbandono server) o fondatore (eliminazione server)
+        allow delete: if signedIn()
+          && (resource.data.ownerUid == request.auth.uid || isFounder(uniId));
       }
+
       match /fleets/{fleetId} {
-        allow read, write: if signedIn();
+        allow read: if signedIn();
+        // Una flotta può essere creata solo a proprio nome
+        allow create: if signedIn() && request.resource.data.attackerUid == request.auth.uid;
+        // Aggiornamento aperto: qualunque client risolve arrivi/ritorni/assedi
+        allow update: if signedIn();
+        allow delete: if signedIn()
+          && (resource.data.attackerUid == request.auth.uid || isFounder(uniId));
       }
+
       match /messages/{messageId} {
-        allow read, write: if signedIn();
+        // Rapporti: li legge solo il destinatario (il fondatore solo per eliminare il server)
+        allow read: if signedIn()
+          && (resource.data.recipientUid == request.auth.uid || isFounder(uniId));
+        // Creazione aperta: la risoluzione scrive rapporti anche per altri giocatori
+        allow create: if signedIn();
+        allow update: if false;
+        allow delete: if signedIn()
+          && (resource.data.recipientUid == request.auth.uid || isFounder(uniId));
       }
+
       match /chat/{messageId} {
         allow read, write: if signedIn();
       }
+
       match /private_chats/{chatId} {
-        allow read, write: if signedIn();
+        // get su una chat (anche non ancora creata) per id; list solo per i propri partecipanti
+        allow get: if signedIn() && (isChatParticipant(chatId) || isFounder(uniId));
+        allow list: if signedIn()
+          && (request.auth.uid in resource.data.participants || isFounder(uniId));
+        allow create: if signedIn()
+          && isChatParticipant(chatId)
+          && request.auth.uid in request.resource.data.participants;
+        allow update: if signedIn()
+          && isChatParticipant(chatId)
+          && request.auth.uid in request.resource.data.participants;
+        allow delete: if signedIn() && (isChatParticipant(chatId) || isFounder(uniId));
+
         match /messages/{messageId} {
-          allow read, write: if signedIn();
+          allow read: if signedIn() && (isChatParticipant(chatId) || isFounder(uniId));
+          allow create: if signedIn()
+            && isChatParticipant(chatId)
+            && request.resource.data.senderUid == request.auth.uid;
+          allow update: if false;
+          allow delete: if signedIn() && (isChatParticipant(chatId) || isFounder(uniId));
         }
       }
     }
