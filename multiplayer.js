@@ -82,7 +82,8 @@
         weaponsTech: Number(f.attackerTech?.weaponsTech || 0),
         shieldingTech: Number(f.attackerTech?.shieldingTech || 0),
         armourTech: Number(f.attackerTech?.armourTech || 0),
-        expeditionTech: Number(f.attackerTech?.expeditionTech || 0)
+        expeditionTech: Number(f.attackerTech?.expeditionTech || 0),
+        espionageTech: Number(f.attackerTech?.espionageTech || 0)
       },
       defenderUid: f.defenderUid || null,
       originCoords,
@@ -632,6 +633,176 @@
     return pts;
   }
 
+  // =========================================================
+  // FIX 2.9 — RIALLINEAMENTO STATO PIANETI (INBOX DI VARIAZIONI)
+  // ---------------------------------------------------------
+  // Problema: il client del proprietario tiene lo stato "vero" dei propri pianeti e lo riscrive
+  // ogni ~60s. Le modifiche fatte da altri client (attacchi, trasporti, ritorni flotta, tributi,
+  // riscatti) venivano quindi cancellate dal sync successivo e il client non le leggeva mai.
+  //
+  // Soluzione: chi risolve un evento NON scrive valori assoluti sullo stato del proprietario ma
+  // accumula VARIAZIONI in planet.inbox (FieldValue.increment: commutative, nessuna gara tra client).
+  // Il proprietario le applica durante il PROPRIO sync, dentro una transazione, e svuota l'inbox.
+  // I campi "solo server" (debris, embargo, occupation, moon, owner*) restano scritti direttamente.
+  // I pianeti BOT (isNpc) non hanno un client proprietario: restano a scrittura assoluta.
+  // =========================================================
+  const _INBOX_RES_KEYS = ['metal', 'crystal', 'deuterium'];
+
+  // Applica una mappa di variazioni {id: delta} a una mappa di unità, senza mai scendere sotto 0
+  function _applyUnitDelta(base, delta) {
+    const out = Object.assign({}, base || {});
+    for (const [id, d] of Object.entries(delta || {})) {
+      const n = Number(d || 0);
+      if (!n) continue;
+      out[id] = Math.max(0, Math.floor(Number(out[id] || 0) + n));
+    }
+    return out;
+  }
+
+  // True se l'inbox contiene almeno una variazione non nulla
+  function _hasInbox(data) {
+    const ib = data && data.inbox;
+    if (!ib || typeof ib !== 'object') return false;
+    for (const part of ['resources', 'fleet', 'defenses']) {
+      const m = ib[part];
+      if (m && Object.values(m).some((v) => Number(v) !== 0)) return true;
+    }
+    return false;
+  }
+
+  // Vista "effettiva" di un pianeta: base + produzione maturata + inbox (mai modifica il documento)
+  function _effectivePlanetView(planetDoc, speed = 10) {
+    const live = calculateLiveResources(planetDoc, speed);
+    if (!live) return live;
+    const inbox = (planetDoc && planetDoc.inbox) || {};
+    const res = Object.assign({ metal: 0, crystal: 0, deuterium: 0 }, live.resources);
+    for (const k of _INBOX_RES_KEYS) {
+      res[k] = Math.max(0, Math.floor(Number(res[k] || 0) + Number(inbox.resources?.[k] || 0)));
+    }
+    live.resources = res;
+    live.fleet = _applyUnitDelta(planetDoc.fleet, inbox.fleet);
+    live.defenses = _applyUnitDelta(planetDoc.defenses, inbox.defenses);
+    delete live.inbox;
+    return live;
+  }
+
+  // Copia profonda dei soli campi che una risoluzione può cambiare (serve per calcolare le differenze)
+  function _snapshotForDiff(p) {
+    if (!p) return null;
+    return JSON.parse(JSON.stringify({
+      resources: p.resources || {},
+      fleet: p.fleet || {},
+      defenses: p.defenses || {},
+      debris: p.debris ?? null,
+      embargo: p.embargo ?? null,
+      occupation: p.occupation ?? null,
+      moon: p.moon ?? null,
+      ownerUid: p.ownerUid ?? null,
+      ownerName: p.ownerName ?? null,
+      isNpc: Boolean(p.isNpc)
+    }));
+  }
+
+  // Scrive su un pianeta l'esito di una risoluzione (before/after sono viste effettive).
+  function _writePlanetResult(tx, ref, before, after) {
+    if (!before || !after) return;
+    const FV = firebase.firestore.FieldValue;
+    const upd = {};
+    const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+
+    // Campi gestiti solo dal server: scrittura diretta se cambiati
+    for (const f of ['debris', 'embargo', 'occupation', 'moon']) {
+      if (!same(before[f], after[f])) upd[f] = after[f] ?? null;
+    }
+
+    const ownerChanged = (before.ownerUid || null) !== (after.ownerUid || null);
+    const floorMap = (m) => {
+      const o = {};
+      for (const [k, v] of Object.entries(m || {})) o[k] = Math.max(0, Math.floor(Number(v) || 0));
+      return o;
+    };
+
+    if (ownerChanged) {
+      // Cambio di proprietario (conquista): stato assoluto e inbox azzerata. Le code del vecchio
+      // proprietario non devono passare al nuovo.
+      upd.ownerUid = after.ownerUid ?? null;
+      upd.ownerName = after.ownerName ?? null;
+      upd.isNpc = Boolean(after.isNpc);
+      upd.resources = floorMap(after.resources);
+      upd.fleet = floorMap(after.fleet);
+      upd.defenses = floorMap(after.defenses);
+      upd.buildQueue = [];
+      upd.shipyardQueue = [];
+      upd.defenseQueue = [];
+      upd.lastUpdated = Date.now();
+      upd.inbox = FV.delete();
+    } else if (after.isNpc) {
+      // BOT: nessun client proprietario, quindi nessun rischio di sovrascrittura
+      upd.resources = floorMap(after.resources);
+      upd.fleet = floorMap(after.fleet);
+      upd.defenses = floorMap(after.defenses);
+      upd.lastUpdated = Date.now();
+      upd.inbox = FV.delete();
+    } else {
+      // Giocatore: SOLO variazioni (commutative)
+      for (const k of _INBOX_RES_KEYS) {
+        const d = Math.round(Number(after.resources?.[k] || 0) - Number(before.resources?.[k] || 0));
+        if (d) upd[`inbox.resources.${k}`] = FV.increment(d);
+      }
+      for (const part of ['fleet', 'defenses']) {
+        const ids = new Set([...Object.keys(before[part] || {}), ...Object.keys(after[part] || {})]);
+        for (const id of ids) {
+          const d = Math.round(Number(after[part]?.[id] || 0) - Number(before[part]?.[id] || 0));
+          if (d) upd[`inbox.${part}.${id}`] = FV.increment(d);
+        }
+      }
+    }
+    if (Object.keys(upd).length > 0) tx.update(ref, upd);
+  }
+
+  // Accredita variazioni (risorse/navi/difese) a un pianeta tramite inbox
+  function _inboxCredit(tx, ref, { resources = {}, fleet = {}, defenses = {} } = {}) {
+    if (!ref) return;
+    const FV = firebase.firestore.FieldValue;
+    const upd = {};
+    for (const k of _INBOX_RES_KEYS) {
+      const v = Math.round(Number(resources[k] || 0));
+      if (v) upd[`inbox.resources.${k}`] = FV.increment(v);
+    }
+    for (const [id, q] of Object.entries(fleet || {})) {
+      const v = Math.floor(Number(q || 0));
+      if (v) upd[`inbox.fleet.${id}`] = FV.increment(v);
+    }
+    for (const [id, q] of Object.entries(defenses || {})) {
+      const v = Math.floor(Number(q || 0));
+      if (v) upd[`inbox.defenses.${id}`] = FV.increment(v);
+    }
+    if (Object.keys(upd).length > 0) tx.update(ref, upd);
+  }
+
+  // Pianeta a cui accreditare un ritorno/tributo: l'origine SE appartiene ancora al giocatore,
+  // altrimenti (es. origine conquistata) un altro suo pianeta. Mai al nuovo proprietario.
+  async function _resolveCreditRef(uniRef, uid, originCoords) {
+    const col = uniRef.collection('planets');
+    try {
+      if (originCoords) {
+        const ref = col.doc(coordsToKey(originCoords));
+        const s = await ref.get();
+        if (s && s.exists && s.data().ownerUid === uid) return ref;
+      }
+      const q = await col.where('ownerUid', '==', uid).limit(1).get();
+      return q && q.docs && q.docs.length > 0 ? q.docs[0].ref : null;
+    } catch (e) {
+      console.warn('[MP] Pianeta di accredito non trovato:', e);
+      return null;
+    }
+  }
+
+  // Sync del giocatore: UNA transazione che
+  //  1) legge ogni pianeta locale dal server;
+  //  2) se non è più suo (conquistato) lo scarta e non lo riscrive;
+  //  3) altrimenti scrive lo stato locale + le variazioni in inbox e svuota l'inbox.
+  // Dopo il commit le variazioni vengono applicate allo stato locale (in modo additivo).
   async function syncPlayerState(universeObj, { force = false } = {}) {
     const auth = getAuth();
     const db = getDB();
@@ -643,39 +814,119 @@
     if (!force && Date.now() - lastSync < SYNC_MIN_INTERVAL_MS) return;
     _syncLastByUni.set(universeObj.id, Date.now());
 
+    const FV = firebase.firestore.FieldValue;
     const uniRef = db.collection('online_universes').doc(universeObj.id);
-    const batch = db.batch();
-
-    for (const p of universeObj.planets || []) {
-      const key = coordsToKey(p.coords);
-      const pRef = uniRef.collection('planets').doc(key);
-      batch.set(pRef, {
-        name: p.name,
-        planetName: p.name,
-        resources: p.resources,
-        buildings: p.buildings,
-        defenses: p.defenses,
-        fleet: p.fleet,
-        buildQueue: p.buildQueue || [],
-        shipyardQueue: p.shipyardQueue || [],
-        defenseQueue: p.defenseQueue || [],
-        moon: p.moon || null,
-        lastUpdated: Date.now()
-      }, { merge: true });
-    }
-
-    const totalPoints = computePlayerPoints(universeObj);
+    const planetsCol = uniRef.collection('planets');
     const playerRef = uniRef.collection('players').doc(user.uid);
-    batch.set(playerRef, {
-      nickname: universeObj.emperor || user.displayName || 'Comandante',
-      researches: universeObj.researches || {},
-      researchQueue: universeObj.researchQueue || null,
-      points: totalPoints,
-      planetCount: (universeObj.planets || []).length,
-      lastSeen: Date.now()
-    }, { merge: true });
+    const planets = (universeObj.planets || []).slice();
 
-    await batch.commit();
+    let reconciled = [];
+    let lost = [];
+
+    await db.runTransaction(async (tx) => {
+      reconciled = [];
+      lost = [];
+      const entries = planets.map((p) => ({ p, ref: planetsCol.doc(coordsToKey(p.coords)) }));
+      const snaps = await Promise.all(entries.map((e) => tx.get(e.ref)));
+      const nowTs = Date.now();
+
+      entries.forEach((e, i) => {
+        const snap = snaps[i];
+        const p = e.p;
+        if (!snap.exists) return; // mai ricreare un pianeta mancante con un documento parziale
+        const data = snap.data();
+        if (data.ownerUid !== user.uid) {
+          lost.push(p); // conquistato/ceduto: non riscrivere nulla
+          return;
+        }
+
+        const inbox = data.inbox || {};
+        const res = Object.assign({}, p.resources);
+        for (const k of _INBOX_RES_KEYS) {
+          res[k] = Math.max(0, Math.floor(Number(p.resources?.[k] || 0) + Number(inbox.resources?.[k] || 0)));
+        }
+        const payload = {
+          name: p.name,
+          planetName: p.name,
+          resources: res,
+          buildings: p.buildings,
+          defenses: _applyUnitDelta(p.defenses, inbox.defenses),
+          fleet: _applyUnitDelta(p.fleet, inbox.fleet),
+          buildQueue: p.buildQueue || [],
+          shipyardQueue: p.shipyardQueue || [],
+          defenseQueue: p.defenseQueue || [],
+          lastUpdated: nowTs
+          // NB: 'moon' non si scrive più dal client: è un campo gestito dal server
+        };
+        if (data.inbox !== undefined) payload.inbox = FV.delete();
+        tx.set(e.ref, payload, { merge: true });
+        if (_hasInbox(data)) reconciled.push({ planet: p, inbox });
+      });
+
+      tx.set(playerRef, {
+        nickname: universeObj.emperor || user.displayName || 'Comandante',
+        researches: universeObj.researches || {},
+        researchQueue: universeObj.researchQueue || null,
+        points: computePlayerPoints(universeObj),
+        planetCount: planets.length - lost.length,
+        lastSeen: nowTs
+      }, { merge: true });
+    });
+
+    // Dopo il commit: applica a caldo le variazioni (il gioco ha continuato a girare nel frattempo)
+    for (const { planet, inbox } of reconciled) {
+      planet.resources = Object.assign({ metal: 0, crystal: 0, deuterium: 0 }, planet.resources);
+      for (const k of _INBOX_RES_KEYS) {
+        const d = Number(inbox.resources?.[k] || 0);
+        if (d) planet.resources[k] = Math.max(0, Math.floor(Number(planet.resources[k] || 0) + d));
+      }
+      planet.fleet = _applyUnitDelta(planet.fleet, inbox.fleet);
+      planet.defenses = _applyUnitDelta(planet.defenses, inbox.defenses);
+    }
+    if (lost.length > 0) {
+      universeObj.planets = (universeObj.planets || []).filter((p) => !lost.includes(p));
+    }
+    if (reconciled.length > 0 || lost.length > 0) {
+      try {
+        window.UniversumUI?.onOnlineReconciled?.({ reconciled, lost });
+      } catch (e) {
+        console.warn('[MP] Aggiornamento UI dopo riallineamento non riuscito:', e);
+      }
+    }
+  }
+
+  // Listener sui pianeti PROPRI: segnala variazioni in arrivo (inbox), pianeti persi e pianeti acquisiti.
+  // Non modifica mai direttamente le risorse locali: delega al sync transazionale (una sola fonte di verità).
+  function listenOwnPlanets(universeObj, onChange) {
+    const auth = getAuth();
+    const db = getDB();
+    const user = auth.currentUser;
+    if (!user || !universeObj?.id) return () => {};
+
+    return db.collection('online_universes').doc(universeObj.id).collection('planets')
+      .where('ownerUid', '==', user.uid)
+      .onSnapshot((snap) => {
+        const gained = [];
+        let needSync = false;
+        for (const ch of snap.docChanges()) {
+          if (ch.type === 'removed') {
+            needSync = true; // non più nostro (conquistato) o eliminato: il sync lo scarta
+            continue;
+          }
+          const data = ch.doc.data();
+          const known = (universeObj.planets || []).some((p) => p.coords && coordsToKey(p.coords) === ch.doc.id);
+          if (!known) {
+            const np = calculateLiveResources(data, universeObj.speed || 10);
+            if (!np.id) np.id = ch.doc.id;
+            universeObj.planets = universeObj.planets || [];
+            universeObj.planets.push(np);
+            gained.push(np);
+            continue;
+          }
+          if (_hasInbox(data)) needSync = true;
+        }
+        if (gained.length > 0 || needSync) onChange({ gained, needSync });
+      }, (err) => _mpNotifyError('listener pianeti', err));
   }
 
   async function renameOnlinePlanet(uniId, coords, newName) {
@@ -727,7 +978,7 @@
 
     const occupiedByPos = new Map();
     snap.docs.forEach((doc) => {
-      const liveData = calculateLiveResources(doc.data(), speed);
+      const liveData = _effectivePlanetView(doc.data(), speed);
       occupiedByPos.set(Number(liveData.coords.p), liveData);
     });
 
@@ -875,7 +1126,8 @@
         weaponsTech: universeObj.researches?.weaponsTech || 0,
         shieldingTech: universeObj.researches?.shieldingTech || 0,
         armourTech: universeObj.researches?.armourTech || 0,
-        expeditionTech: universeObj.researches?.expeditionTech || 0
+        expeditionTech: universeObj.researches?.expeditionTech || 0,
+        espionageTech: universeObj.researches?.espionageTech || 0
       },
       defenderUid,
       originCoords: Object.assign({}, planet.coords),
@@ -958,6 +1210,45 @@
     }
   }
 
+  // FIX 4.3 — Errori Firestore: sempre loggati, e con toast (max 1 ogni 30s per tipo)
+  // solo quando l'utente può farci qualcosa (permessi o rete instabile).
+  const _mpErrorToastAt = new Map();
+  function _mpNotifyError(context, err) {
+    console.warn(`[MP] Errore (${context}):`, err);
+    const code = String(err?.code || '');
+    let msg = null;
+    if (code === 'permission-denied') {
+      msg = "Il server ha rifiutato un'operazione (permessi insufficienti).";
+    } else if (code === 'unavailable' || code === 'deadline-exceeded') {
+      msg = 'Connessione al server instabile: alcune operazioni verranno riprovate.';
+    }
+    if (!msg) return;
+    const last = _mpErrorToastAt.get(code) || 0;
+    if (Date.now() - last < 30000) return;
+    _mpErrorToastAt.set(code, Date.now());
+    window.UniversumUI?.toast?.(msg, 'error');
+  }
+
+  // FIX 4.2 — Listener in tempo reale sulle flotte PROPRIE ancora attive.
+  // Legge solo le flotte non concluse (status in [...]) e, dopo il primo caricamento,
+  // solo i documenti che cambiano: costo di letture contenuto.
+  function listenOwnFleets(universeObj, callback) {
+    const auth = getAuth();
+    const db = getDB();
+    const user = auth.currentUser;
+    if (!user || !universeObj?.id) return () => {};
+
+    return db.collection('online_universes').doc(universeObj.id).collection('fleets')
+      .where('attackerUid', '==', user.uid)
+      .where('status', 'in', ['outbound', 'returning', 'embargo', 'occupy'])
+      .onSnapshot((snap) => {
+        const list = snap.docs
+          .map((d) => normalizeOnlineFleet(d.data(), d.id))
+          .filter((f) => !f.resolved);
+        callback(list);
+      }, (err) => _mpNotifyError('listener flotte proprie', err));
+  }
+
   function listenIncomingFleets(universeObj, callback) {
     const auth = getAuth();
     const db = getDB();
@@ -979,26 +1270,38 @@
       });
   }
 
+  // Missioni che l'online sa risolvere (blockade/explore sono alias normalizzati)
+  const _ONLINE_SUPPORTED_MISSIONS = new Set([
+    'attack', 'destroyMoon', 'spy', 'transport', 'deploy', 'colonize', 'recycle',
+    'expedition', 'explore', 'embargo', 'blockade', 'occupy', 'recall'
+  ]);
+
+  // Testo chiaro per il giocatore: perché la missione è stata annullata
+  function _cleanupReasonText(fleet, reason) {
+    const r = String(reason || '');
+    let why;
+    if (r === 'repair-button') {
+      why = 'Riparazione manuale richiesta dal comandante.';
+    } else if (r === 'missing-route') {
+      why = 'Dati di rotta mancanti o non validi.';
+    } else if (fleet && fleet.mission && !_ONLINE_SUPPORTED_MISSIONS.has(fleet.mission)) {
+      why = `La missione "${fleet.mission}" non è supportata in modalità online.`;
+    } else {
+      why = 'Errore temporaneo durante la risoluzione (missione ferma da oltre 60 secondi).';
+    }
+    return `${why} Missione annullata: flotta e carico restituiti al pianeta di partenza.`;
+  }
+
   async function forceCleanupOnlineFleet(uniRef, fleet, fleetRef, reason) {
     const db = getDB();
     const now = Date.now();
+    const creditRef = await _resolveCreditRef(uniRef, fleet.attackerUid, fleet.originCoords);
     try {
       await db.runTransaction(async (tx) => {
         const freshSnap = await tx.get(fleetRef);
         if (!freshSnap.exists || freshSnap.data().resolved) return;
-        const originRef = fleet.originCoords ? uniRef.collection('planets').doc(coordsToKey(fleet.originCoords)) : null;
-        const originSnap = originRef ? await tx.get(originRef) : null;
-        if (originSnap?.exists) {
-          const origin = calculateLiveResources(originSnap.data(), 10);
-          origin.fleet = origin.fleet || {};
-          for (const [sId, qty] of Object.entries(fleet.ships || {})) {
-            if (qty > 0) origin.fleet[sId] = (origin.fleet[sId] || 0) + qty;
-          }
-          origin.resources.metal += fleet.cargo?.metal || 0;
-          origin.resources.crystal += fleet.cargo?.crystal || 0;
-          origin.resources.deuterium += fleet.cargo?.deuterium || 0;
-          tx.set(originRef, origin, { merge: true });
-        }
+        // Restituzione di navi e carico tramite inbox (mai scritture assolute sul pianeta del proprietario)
+        _inboxCredit(tx, creditRef, { resources: fleet.cargo || {}, fleet: fleet.ships || {} });
         tx.update(fleetRef, {
           status: 'completed', phase: 'COMPLETATA', resolved: true,
           completedAt: now, repaired: true, repairReason: String(reason || 'orphan')
@@ -1008,7 +1311,7 @@
           tx.set(msgRef, {
             recipientUid: fleet.attackerUid,
             title: `Missione riparata [${fleet.targetKey || 'sconosciuta'}]`,
-            body: 'Missione scaduta/bloccata ripulita automaticamente: flotta e carico restituiti al pianeta di partenza.',
+            body: _cleanupReasonText(fleet, reason),
             timestamp: now
           });
         }
@@ -1016,7 +1319,7 @@
       return true;
     } catch (e) {
       // Ultima risorsa: chiude comunque la missione per non lasciarla mai a 0s
-      await fleetRef.update({ status: 'completed', phase: 'COMPLETATA', resolved: true, completedAt: now, repaired: true }).catch(() => {});
+      await fleetRef.update({ status: 'completed', phase: 'COMPLETATA', resolved: true, completedAt: now, repaired: true }).catch((e) => _mpNotifyError('chiusura forzata flotta', e));
       return false;
     }
   }
@@ -1038,13 +1341,13 @@
         const targetRef = uniRef.collection('planets').doc(fleet.targetKey);
         if (remaining > 0) {
           await fDoc.ref.update({ siegeDeuterium: remaining, lastSiegeTickAt: now });
-          await targetRef.update({ 'embargo.deuterium': remaining }).catch(() => {});
+          await targetRef.update({ 'embargo.deuterium': remaining }).catch((e) => _mpNotifyError('tick deuterio embargo', e));
         } else {
           // Deuterio finito: embargo finisce e la flotta torna da sola
           const durationSec = window.UniversumGalaxy?.getFleetSpeedAndFuel
             ? Math.max(5, window.UniversumGalaxy.getFleetSpeedAndFuel({ speed: 10, researches: {} }, fleet.ships, window.UniversumGalaxy.calculateDistance(fleet.targetCoords, fleet.originCoords)).durationSec || 60)
             : 60;
-          await targetRef.update({ embargo: null }).catch(() => {});
+          await targetRef.update({ embargo: null }).catch((e) => _mpNotifyError('fine embargo', e));
           await fDoc.ref.update({
             status: 'returning', phase: 'IN RITORNO', siegeDeuterium: 0, lastSiegeTickAt: now,
             arrivalTime: now + durationSec * 1000, returnTime: now + durationSec * 1000
@@ -1077,6 +1380,9 @@
 
     await migrateOnlineFleets(uniId).catch(() => {});
 
+    // FIX 2.7 — tributi di tutte le occupazioni del server (anche con l'occupante offline), max 1 sweep ogni 10 min
+    await sweepOccupationsThrottled(uniId).catch(() => {});
+
     // Mai resolved==false in query: i documenti vecchi senza quel campo resterebbero esclusi per sempre.
     // Si leggono solo le flotte scadute (arrivalTime <= ora) e si filtra resolved/status in locale.
     const allSnap = await uniRef.collection('fleets').where('arrivalTime', '<=', now).limit(100).get().catch(() => ({ docs: [] }));
@@ -1103,7 +1409,46 @@
       }
       const targetPlanetRef = uniRef.collection('planets').doc(fleetNorm.targetKey);
       const originPlanetRef = uniRef.collection('planets').doc(coordsToKey(fleetNorm.originCoords));
+
+      // FIX 2.6 — L'embargo blocca anche gli ARRIVI (allineato all'offline).
+      // - Solo all'andata: una flotta in ritorno deve poter sempre rientrare.
+      // - attack/destroyMoon passano: l'attacco è l'unico modo per rompere un embargo.
+      if (fleetNorm.status === 'outbound' && !['attack', 'destroyMoon', 'recall'].includes(fleetNorm.mission)) {
+        const preSnap = await targetPlanetRef.get().catch(() => null);
+        const preEmbargo = preSnap && preSnap.exists ? preSnap.data().embargo : null;
+        if (preEmbargo && preEmbargo.attackerUid && preEmbargo.attackerUid !== fleetNorm.attackerUid) {
+          try {
+            // Transazione: evita doppio messaggio se due client risolvono insieme
+            await db.runTransaction(async (txR) => {
+              const fs = await txR.get(fleetRef);
+              if (!fs.exists) return;
+              const cur = normalizeOnlineFleet(fs.data(), fDoc.id);
+              if (cur.resolved || cur.status !== 'outbound') return;
+              const t = Date.now();
+              const legMs = Math.max(5000, (Number(cur.returnTime || t) - Number(cur.arrivalTime || t)) || 60000);
+              txR.update(fleetRef, {
+                status: 'returning', phase: 'IN RITORNO', resolved: false,
+                arrivalTime: t + legMs, returnTime: t + legMs,
+                schemaVersion: FLEET_SCHEMA_VERSION
+              });
+              txR.set(uniRef.collection('messages').doc(), {
+                recipientUid: cur.attackerUid,
+                title: `Missione Respinta [${cur.targetKey}]`,
+                body: `Il pianeta è sotto embargo di ${preEmbargo.attackerName || 'un altro comandante'}. La tua flotta sta rientrando alla base.`,
+                timestamp: t
+              });
+            });
+          } catch (e) {
+            console.warn('[MP Embargo] Respingimento flotta rinviato:', e);
+          }
+          continue;
+        }
+      }
       let newlyColonizedPlanet = null;
+      // Pianeta che riceverà navi/carico al RITORNO (l'origine, se è ancora del giocatore)
+      const creditRef = fleetNorm.status === 'returning'
+        ? await _resolveCreditRef(uniRef, fleetNorm.attackerUid, fleetNorm.originCoords)
+        : null;
       let localReturning = null;
 
       try {
@@ -1114,10 +1459,13 @@
           if ((fleet.status !== 'outbound' && fleet.status !== 'returning') || _fleetDueTime(fleet) > Date.now()) return;
 
           const targetSnap = await tx.get(targetPlanetRef);
-          const originSnap = await tx.get(originPlanetRef);
 
-          const targetPlanet = targetSnap.exists ? calculateLiveResources(targetSnap.data(), speed) : null;
-          const originPlanet = originSnap.exists ? calculateLiveResources(originSnap.data(), speed) : null;
+          // FIX 2.9 — Vista effettiva (base + produzione + inbox). Le scritture sui pianeti avvengono
+          // solo come variazioni (inbox) o su campi gestiti dal server, mai come valori assoluti.
+          const targetPlanet = targetSnap.exists ? _effectivePlanetView(targetSnap.data(), speed) : null;
+          const targetBefore = _snapshotForDiff(targetPlanet);
+          // Memorizzato PRIMA della risoluzione: una conquista può cambiare isNpc
+          const targetWasNpc = Boolean(targetPlanet && targetPlanet.isNpc);
 
           let reportTitle = `Missione ${fleet.mission.toUpperCase()} [${fleet.targetKey}]`;
           let reportBody = 'Missione completata.';
@@ -1127,19 +1475,63 @@
           let completeNow = fleet.status === 'returning';
           let persistentStatus = null;
           let siegeShips = null;
+          // Messaggio al difensore (se diverso dal report dell'attaccante): usato dallo spionaggio
+          let defenderBody;
+          let defenderTitle;
 
           if (fleet.status === 'returning' || fleet.mission === 'recall') {
             reportTitle = `Flotta Richiamata Rientrata [${coordsToKey(fleet.originCoords)}]`;
             reportBody = 'Le navi sono rientrate alla base con il carico integro.';
           } else if (fleet.mission === 'spy' && targetPlanet) {
+            // FIX 2.5 — Allineato all'offline: controspionaggio, perdita sonde, report progressivo.
+            const Data = window.UniversumData;
+            const probes = Math.max(0, Number(fleet.ships?.espionageProbe || 0));
+            const myEsp = Number(fleet.attackerTech?.espionageTech || 0);
+            let defEsp = 0;
+            if (targetPlanet.ownerUid && !targetPlanet.isNpc) {
+              const defSpySnap = await tx.get(uniRef.collection('players').doc(targetPlanet.ownerUid));
+              if (defSpySnap.exists) defEsp = Number(defSpySnap.data().researches?.espionageTech || 0);
+            }
+            // Sonde presenti sul pianeta difensore: più ne ha, più è facile intercettare
+            const defProbes = Number(targetPlanet.fleet?.espionageProbe || 0);
+            const spyDiff = (myEsp - defEsp) + Math.floor(Math.sqrt(probes));
+            const catchChance = Math.min(0.85, Math.max(0.02, (defProbes / (Math.max(1, probes) * 8)) * 0.25 - spyDiff * 0.03));
+            const probesLost = (probes > 0 && Math.random() < catchChance) ? Math.min(probes, Math.ceil(probes * 0.5)) : 0;
+            if (probes > 0) returnShips.espionageProbe = Math.max(0, probes - probesLost);
+
+            const nameOf = (id) => (Data?.SHIPS?.[id] || Data?.DEFENSES?.[id])?.name || id;
+            const listUnits = (map) => {
+              const parts = Object.entries(map || {})
+                .filter(([, q]) => Number(q) > 0)
+                .map(([id, q]) => `${nameOf(id)} x${Number(q).toLocaleString('it-IT')}`);
+              return parts.length > 0 ? parts.join(', ') : 'nessuna';
+            };
+            const resInfo = `Risorse: ${Math.floor(targetPlanet.resources.metal)} M, ${Math.floor(targetPlanet.resources.crystal)} C, ${Math.floor(targetPlanet.resources.deuterium)} D.`;
+            const fleetInfo = spyDiff >= 0 ? ` Flotta: ${listUnits(targetPlanet.fleet)}.` : ' Flotta: non rilevata.';
+            const defInfo = spyDiff >= 1 ? ` Difese: ${listUnits(targetPlanet.defenses)}.` : ' Difese: non rilevate.';
             reportTitle = `Rapporto Spionaggio su ${targetPlanet.name} [${fleet.targetKey}]`;
-            reportBody = `Risorse rilevate — Metallo: ${Math.floor(targetPlanet.resources.metal)}, Cristallo: ${Math.floor(targetPlanet.resources.crystal)}, Deuterio: ${Math.floor(targetPlanet.resources.deuterium)}.`;
+            reportBody = resInfo + fleetInfo + defInfo + ` Sonde perse: ${probesLost}.`;
+
+            // Mai mandare al difensore il contenuto del rapporto: sa solo se ha intercettato le sonde
+            if (probesLost > 0) {
+              defenderTitle = `Sonde spia intercettate [${fleet.targetKey}]`;
+              defenderBody = `Le tue difese hanno distrutto ${probesLost} sonde spia di ${fleet.attackerName}.`;
+            } else {
+              defenderBody = null;
+            }
+
+            // Se non resta nessuna nave la missione finisce qui (niente flotta vuota "in ritorno")
+            const spyShipsLeft = Object.values(returnShips).reduce((a, q) => a + Math.max(0, Number(q) || 0), 0);
+            if (spyShipsLeft <= 0) {
+              completeNow = true;
+              reportBody += ' Tutte le sonde sono andate perdute.';
+            }
           } else if (fleet.mission === 'transport' && targetPlanet) {
             targetPlanet.resources.metal += returnCargo.metal;
             targetPlanet.resources.crystal += returnCargo.crystal;
             targetPlanet.resources.deuterium += returnCargo.deuterium;
             returnCargo = { metal: 0, crystal: 0, deuterium: 0 };
-            tx.set(targetPlanetRef, targetPlanet, { merge: true });
+            _writePlanetResult(tx, targetPlanetRef, targetBefore, targetPlanet);
             reportTitle = `Consegna Risorse su ${targetPlanet.name}`;
             reportBody = `Consegnati ${fleet.cargo.metal} M, ${fleet.cargo.crystal} C, ${fleet.cargo.deuterium} D.`;
           } else if (fleet.mission === 'deploy' && targetPlanet && targetPlanet.ownerUid === fleet.attackerUid) {
@@ -1152,7 +1544,7 @@
             returnShips = {};
             returnCargo = { metal: 0, crystal: 0, deuterium: 0 };
             completeNow = true; // Schiera: la flotta resta a destinazione e la missione finisce
-            tx.set(targetPlanetRef, targetPlanet, { merge: true });
+            _writePlanetResult(tx, targetPlanetRef, targetBefore, targetPlanet);
             reportTitle = `Schieramento Completato su ${targetPlanet.name}`;
             reportBody = 'La flotta si è unita alla guarnigione locale.';
           } else if (fleet.mission === 'colonize') {
@@ -1170,17 +1562,40 @@
               newColony.resources.deuterium += returnCargo.deuterium;
               returnCargo = { metal: 0, crystal: 0, deuterium: 0 };
               returnShips.colonyShip = Math.max(0, returnShips.colonyShip - 1);
-              newColony.fleet = Object.assign({}, returnShips); // La flotta resta sulla nuova colonia
-              returnShips = {};
-              completeNow = true; // Colonizza: crea il pianeta e finisce, nessun ritorno
+              // FIX 2.3 — Allineato all'offline: la colonizzatrice è già stata consumata sopra,
+              // la nuova colonia parte senza flotta e il resto delle navi TORNA al pianeta d'origine.
+              newColony.fleet = {};
+              var shipsLeftAfterColony = Object.values(returnShips).reduce((a, q) => a + Math.max(0, Number(q) || 0), 0);
+              completeNow = shipsLeftAfterColony <= 0; // se non resta nulla, niente ritorno a vuoto
               tx.set(targetPlanetRef, newColony);
               newlyColonizedPlanet = newColony;
               reportTitle = `Nuova Colonia Fondata [${fleet.targetCoords.g}:${fleet.targetCoords.s}:${fleet.targetCoords.p}]`;
-              reportBody = `Il pianeta è ora sotto il tuo comando.`;
+              reportBody = 'Il pianeta è ora sotto il tuo comando.' + (shipsLeftAfterColony > 0 ? ' Il resto della flotta sta rientrando alla base.' : '');
             } else {
               reportTitle = `Colonizzazione Fallita [${fleet.targetCoords.g}:${fleet.targetCoords.s}:${fleet.targetCoords.p}]`;
               reportBody = 'Lo slot era già occupato. La Colonizzatrice rientra alla base.';
             }
+          } else if (fleet.mission === 'recycle' && targetPlanet) {
+            // FIX 2.2 — Raccolta detriti, come offline: 60% metallo / resto cristallo nella capacità libera.
+            const Data = window.UniversumData;
+            const debris = targetPlanet.debris || { metal: 0, crystal: 0 };
+            let recCap = 0;
+            for (const [sId, qty] of Object.entries(returnShips)) {
+              recCap += (Data?.SHIPS?.[sId]?.cargo || 0) * Number(qty || 0);
+            }
+            const alreadyLoaded = (returnCargo.metal || 0) + (returnCargo.crystal || 0) + (returnCargo.deuterium || 0);
+            const freeCap = Math.max(0, recCap - alreadyLoaded);
+            const takeM = Math.min(debris.metal || 0, Math.floor(freeCap * 0.6));
+            const takeC = Math.min(debris.crystal || 0, freeCap - takeM);
+            returnCargo.metal += takeM;
+            returnCargo.crystal += takeC;
+            targetPlanet.debris = {
+              metal: Math.max(0, (debris.metal || 0) - takeM),
+              crystal: Math.max(0, (debris.crystal || 0) - takeC)
+            };
+            _writePlanetResult(tx, targetPlanetRef, targetBefore, targetPlanet);
+            reportTitle = `Raccolta Detriti [${fleet.targetKey}]`;
+            reportBody = `Riciclati ${takeM} M e ${takeC} C. Detriti rimasti: ${targetPlanet.debris.metal} M, ${targetPlanet.debris.crystal} C.`;
           } else if (fleet.mission === 'expedition' || fleet.mission === 'explore') {
             const expLv = fleet.attackerTech?.expeditionTech || 0;
             const hrs = fleet.expeditionHours || 1;
@@ -1205,16 +1620,18 @@
               reportBody = 'Nessuna anomalia rilevata nel settore esplorato. Flotta rientrata alla base.';
             }
           } else if (
-            (fleet.mission === 'attack' || fleet.mission === 'blockade' || fleet.mission === 'embargo' || fleet.mission === 'occupy') &&
+            (fleet.mission === 'attack' || fleet.mission === 'destroyMoon' || fleet.mission === 'blockade' || fleet.mission === 'embargo' || fleet.mission === 'occupy') &&
             targetPlanet &&
             window.UniversumGalaxy?.resolveCombat
           ) {
             const defenderUidForTech = fleet.defenderUid || targetPlanet.ownerUid || null;
             let defenderTech = { weaponsTech: 0, shieldingTech: 0, armourTech: 0 };
+            let defenderPlanetCount = 0;
             if (defenderUidForTech && !targetPlanet.isNpc) {
               const defenderSnap = await tx.get(uniRef.collection('players').doc(defenderUidForTech));
               if (defenderSnap.exists) {
                 const defResearches = defenderSnap.data().researches || {};
+                defenderPlanetCount = Number(defenderSnap.data().planetCount || 0);
                 defenderTech = {
                   weaponsTech: Number(defResearches.weaponsTech || 0),
                   shieldingTech: Number(defResearches.shieldingTech || 0),
@@ -1253,6 +1670,76 @@
               returnCargo.deuterium += combat.loot.deuterium;
               reportTitle = `Battaglia PvP su ${targetPlanet.name} [${fleet.targetKey}]`;
               reportBody = `Esito: ${combat.result}. Bottino: ${combat.loot.metal} M, ${combat.loot.crystal} C, ${combat.loot.deuterium} D.`;
+
+              // FIX 2.8 — Conquista (allineata all'offline): vale contro BOT e contro altri giocatori.
+              // Servono: vittoria, nessun difensore rimasto (flotta+difese) e una Colonizzatrice o Nave Madre.
+              const unitsLeft = (m) => Object.values(m || {}).reduce((a, q) => a + Math.max(0, Number(q) || 0), 0);
+              const noDefendersLeft = unitsLeft(targetPlanet.fleet) === 0 && unitsLeft(targetPlanet.defenses) === 0;
+              const hasConquestShip = (returnShips.colonyShip || 0) >= 1 || (returnShips.mothership || 0) >= 1;
+              // Protezione: non si può conquistare l'ULTIMO pianeta di un giocatore (resterebbe senza impero)
+              const canConquerOwner = targetWasNpc || defenderPlanetCount > 1;
+              if (combat.result === 'attacker_win' && noDefendersLeft && hasConquestShip && targetPlanet.ownerUid !== fleet.attackerUid && !canConquerOwner) {
+                reportBody += " Conquista impossibile: è l'ultimo pianeta del giocatore.";
+              }
+              if (combat.result === 'attacker_win' && noDefendersLeft && hasConquestShip && targetPlanet.ownerUid !== fleet.attackerUid && canConquerOwner) {
+                // Eventuali assedi (embargo/occupazione) sul pianeta finiscono: le flotte assedianti rientrano.
+                // Prima TUTTE le letture, poi le scritture (regola delle transazioni Firestore).
+                const siegeIds = Array.from(new Set([targetPlanet.embargo?.fleetId, targetPlanet.occupation?.fleetId].filter(Boolean)));
+                const siegeSnaps = [];
+                for (const sid of siegeIds) siegeSnaps.push(await tx.get(uniRef.collection('fleets').doc(sid)));
+                for (const sSnap of siegeSnaps) {
+                  if (!sSnap.exists) continue;
+                  const sf = normalizeOnlineFleet(sSnap.data(), sSnap.id);
+                  if (sf.resolved || (sf.status !== 'embargo' && sf.status !== 'occupy')) continue;
+                  const sDurSec = window.UniversumGalaxy?.getFleetSpeedAndFuel
+                    ? Math.max(5, window.UniversumGalaxy.getFleetSpeedAndFuel({ speed: 10, researches: {} }, sf.ships, window.UniversumGalaxy.calculateDistance(sf.targetCoords, sf.originCoords)).durationSec || 60)
+                    : 60;
+                  tx.update(sSnap.ref, {
+                    status: 'returning', phase: 'IN RITORNO', resolved: false,
+                    arrivalTime: now + sDurSec * 1000, returnTime: now + sDurSec * 1000
+                  });
+                }
+                if ((returnShips.colonyShip || 0) >= 1) returnShips.colonyShip -= 1;
+                targetPlanet.ownerUid = fleet.attackerUid;
+                targetPlanet.ownerName = fleet.attackerName;
+                targetPlanet.isNpc = false; // un ex-avamposto BOT diventa un pianeta giocatore
+                targetPlanet.embargo = null;
+                targetPlanet.occupation = null;
+                targetPlanet.defenses = {};
+                targetPlanet.fleet = {};
+                reportTitle = `Pianeta Conquistato: ${targetPlanet.name} [${fleet.targetKey}]!`;
+                reportBody = `Hai annientato le difese e annesso ${targetPlanet.name} al tuo Impero.`;
+              }
+            } else if (fleet.mission === 'destroyMoon') {
+              // FIX 2.1 — Distruzione Luna: ogni Morte Nera ha il 10% di polverizzarla (1 - 0.9^n).
+              // Online le Lune non esistono ancora (moon: null): la missione resta un attacco senza conquista,
+              // ma la logica è pronta per quando le Lune verranno introdotte.
+              const hadMoon = Boolean(targetPlanet.moon);
+              const dsCount = Math.max(0, Math.floor(Number(combat.attackerSurvivors?.deathStar || 0)));
+              const destroyChance = 1 - Math.pow(0.90, dsCount);
+              let moonDestroyed = false;
+              if (combat.result === 'attacker_win' && dsCount > 0 && hadMoon && Math.random() < destroyChance) {
+                targetPlanet.moon = null;
+                moonDestroyed = true;
+              }
+              // Bottino scalato dal pianeta come nell'attacco (niente risorse create dal nulla)
+              targetPlanet.resources.metal = Math.max(0, targetPlanet.resources.metal - combat.loot.metal);
+              targetPlanet.resources.crystal = Math.max(0, targetPlanet.resources.crystal - combat.loot.crystal);
+              targetPlanet.resources.deuterium = Math.max(0, targetPlanet.resources.deuterium - combat.loot.deuterium);
+              returnShips = combat.attackerSurvivors;
+              returnCargo.metal += combat.loot.metal;
+              returnCargo.crystal += combat.loot.crystal;
+              returnCargo.deuterium += combat.loot.deuterium;
+              reportTitle = `Distruzione Luna/Bacino [${fleet.targetKey}]`;
+              if (moonDestroyed) {
+                reportBody = 'La Morte Nera ha polverizzato la Luna nemica con tutti i suoi edifici.';
+              } else if (!hadMoon) {
+                reportBody = 'Il pianeta non ha alcuna Luna da distruggere.';
+              } else if (dsCount === 0) {
+                reportBody = 'Nessuna Morte Nera nella flotta: missione fallita.';
+              } else {
+                reportBody = 'La Luna ha resistito al superlaser.';
+              }
             } else if (fleet.mission === 'blockade' || fleet.mission === 'embargo') {
               if (combat.result === 'attacker_win') {
                 targetPlanet.embargo = {
@@ -1309,25 +1796,20 @@
             };
             reportBody += ` Dettagli battaglia — Round: ${combat.roundsPlayed}. Perdite attaccante: ${fmtUnits(combat.attackerLosses)}. Perdite difensore: ${fmtUnits(combat.defenderLosses)}. Superstiti attaccante: ${fmtUnits(combat.attackerSurvivors)}. Superstiti difensore: ${fmtUnits(combat.defenderFleetSurvivors)} (flotta), ${fmtUnits(combat.repairedDefenses)} (difese). Detriti: ${combat.debris.metal.toLocaleString('it-IT')} M, ${combat.debris.crystal.toLocaleString('it-IT')} C.`;
 
-            tx.set(targetPlanetRef, targetPlanet, { merge: true });
+            _writePlanetResult(tx, targetPlanetRef, targetBefore, targetPlanet);
           }
 
           // Solo la tratta di RITORNO accredita origine: mai alla risoluzione dell'andata
-          if (completeNow && fleet.status === 'returning' && originPlanet) {
-            for (const [sId, surv] of Object.entries(returnShips)) {
-              if (surv > 0) {
-                originPlanet.fleet[sId] = (originPlanet.fleet[sId] || 0) + surv;
-              }
-            }
-            originPlanet.resources.metal += returnCargo.metal || 0;
-            originPlanet.resources.crystal += returnCargo.crystal || 0;
-            originPlanet.resources.deuterium += returnCargo.deuterium || 0;
-            if (fleet.pendingRansom) {
-              originPlanet.resources.metal += fleet.pendingRansom.metal || 0;
-              originPlanet.resources.crystal += fleet.pendingRansom.crystal || 0;
-              originPlanet.resources.deuterium += fleet.pendingRansom.deuterium || 0;
-            }
-            tx.set(originPlanetRef, originPlanet, { merge: true });
+          if (completeNow && fleet.status === 'returning' && creditRef) {
+            const ransomBack = fleet.pendingRansom || {};
+            _inboxCredit(tx, creditRef, {
+              resources: {
+                metal: (returnCargo.metal || 0) + (ransomBack.metal || 0),
+                crystal: (returnCargo.crystal || 0) + (ransomBack.crystal || 0),
+                deuterium: (returnCargo.deuterium || 0) + (ransomBack.deuterium || 0)
+              },
+              fleet: returnShips
+            });
           }
 
           if (persistentStatus) {
@@ -1374,12 +1856,12 @@
             timestamp: now
           });
 
-          if (fleet.status === 'outbound' && fleet.defenderUid && fleet.defenderUid !== fleet.attackerUid && !targetPlanet?.isNpc) {
+          if (fleet.status === 'outbound' && fleet.defenderUid && fleet.defenderUid !== fleet.attackerUid && !targetWasNpc && (fleet.mission !== 'spy' || defenderBody)) {
             const msgDefRef = uniRef.collection('messages').doc();
             tx.set(msgDefRef, {
               recipientUid: fleet.defenderUid,
-              title: reportTitle,
-              body: `Comandante: ${fleet.attackerName}. ${reportBody}`,
+              title: defenderTitle || reportTitle,
+              body: defenderBody || `Comandante: ${fleet.attackerName}. ${reportBody}`,
               timestamp: now
             });
           }
@@ -1409,7 +1891,7 @@
           }
         }
       } catch (err) {
-        console.warn('[MP Transaction] Risoluzione flotta rinviata:', err);
+        _mpNotifyError('risoluzione flotta', err);
         // Orfana scaduta da oltre 60s: mai lasciarla a 0s, ripulizia forzata
         if (Date.now() - _fleetDueTime(fleetNorm) > 60000) {
           await forceCleanupOnlineFleet(uniRef, fleetNorm, fleetRef, err.message || 'resolve-failed');
@@ -1439,68 +1921,97 @@
     return repaired;
   }
 
-  async function processOnlineOccupations(uniId) {
-    const auth = getAuth();
+  // FIX 2.7 — Tributi di occupazione.
+  // Un'unica funzione serve sia l'occupante (onlyUid) sia lo sweep globale: così la logica
+  // è condivisa e il controllo di lastTributeAt DENTRO la transazione impedisce doppi pagamenti
+  // anche se due client (o l'occupante e un altro giocatore) la eseguono insieme.
+  const _occupationSweepAt = new Map();
+  const OCCUPATION_SWEEP_MIN_MS = 10 * 60 * 1000; // i tributi sono giornalieri: basta un controllo ogni 10 minuti
+
+  async function processAllOccupations(uniId, { onlyUid = null } = {}) {
     const db = getDB();
-    const user = auth.currentUser;
-    if (!user || !uniId) return;
-
+    if (!uniId) return;
     const uniRef = db.collection('online_universes').doc(uniId);
-    const snap = await uniRef.collection('planets')
-      .where('occupation.occupierUid', '==', user.uid)
-      .get()
-      .catch(() => ({ docs: [] }));
+    const planetsCol = uniRef.collection('planets');
+    const query = onlyUid
+      ? planetsCol.where('occupation.occupierUid', '==', onlyUid)
+      : planetsCol.where('occupation.occupierUid', '!=', null).limit(50);
+    const snap = await query.get().catch(() => null);
+    if (!snap || !snap.docs || snap.docs.length === 0) return;
 
-    if (snap.empty) return;
-
-    const now = Date.now();
     const DAY_MS = 24 * 3600 * 1000;
+    const uniSnapOcc = await uniRef.get().catch(() => null);
+    const occSpeed = uniSnapOcc && uniSnapOcc.exists ? (uniSnapOcc.data().speed || 10) : 10;
 
     for (const pDoc of snap.docs) {
-      const pl = pDoc.data();
-      const occ = pl.occupation;
-      if (!occ) continue;
+      const occ = pDoc.data().occupation;
+      if (!occ || !occ.originCoords) continue;
+      const lastSeen = Number(occ.lastTributeAt || occ.startedAt || 0);
+      if (!lastSeen || Date.now() - lastSeen < DAY_MS) continue; // pre-filtro: nessuna transazione inutile
 
-      const elapsed = now - Number(occ.lastTributeAt || occ.startedAt || now);
-      const cycles = Math.floor(elapsed / DAY_MS);
-      if (cycles < 1) continue;
-
-      const rate = Math.min(0.5, 0.05 * cycles);
-      const tribM = Math.floor((pl.resources?.metal || 0) * rate);
-      const tribC = Math.floor((pl.resources?.crystal || 0) * rate);
-      const tribD = Math.floor((pl.resources?.deuterium || 0) * rate);
-
-      const originKey = coordsToKey(occ.originCoords);
-      const originRef = uniRef.collection('planets').doc(originKey);
+      // Il tributo va a un pianeta dell'occupante (l'origine, se è ancora suo)
+      const creditRef = await _resolveCreditRef(uniRef, occ.occupierUid, occ.originCoords);
+      if (!creditRef) continue;
 
       await db.runTransaction(async (tx) => {
         const freshTarget = await tx.get(pDoc.ref);
-        const freshOrigin = await tx.get(originRef);
-        if (!freshTarget.exists || !freshOrigin.exists) return;
+        if (!freshTarget.exists) return;
 
         const tData = freshTarget.data();
-        const oData = freshOrigin.data();
-        if (!tData.occupation || tData.occupation.occupierUid !== user.uid) return;
+        const o = tData.occupation;
+        if (!o || o.occupierUid !== occ.occupierUid) return;
 
-        tx.update(pDoc.ref, {
-          'resources.metal': Math.max(0, (tData.resources?.metal || 0) - tribM),
-          'resources.crystal': Math.max(0, (tData.resources?.crystal || 0) - tribC),
-          'resources.deuterium': Math.max(0, (tData.resources?.deuterium || 0) - tribD),
-          'occupation.lastTributeAt': Number(occ.lastTributeAt || occ.startedAt) + cycles * DAY_MS,
+        // Ricalcolo sui dati FRESCHI: se un altro client ha già riscosso, cycles è 0 e si esce
+        const last = Number(o.lastTributeAt || o.startedAt || 0);
+        const cycles = Math.floor((Date.now() - last) / DAY_MS);
+        if (!last || cycles < 1) return;
+
+        const eff = _effectivePlanetView(tData, occSpeed);
+        const rate = Math.min(0.5, 0.05 * cycles);
+        const tribM = Math.floor((eff.resources.metal || 0) * rate);
+        const tribC = Math.floor((eff.resources.crystal || 0) * rate);
+        const tribD = Math.floor((eff.resources.deuterium || 0) * rate);
+
+        const FV = firebase.firestore.FieldValue;
+        const upd = {
+          'occupation.lastTributeAt': last + cycles * DAY_MS,
           'occupation.prelievoAccumulato': {
-            metal: Number(tData.occupation.prelievoAccumulato?.metal || 0) + tribM,
-            crystal: Number(tData.occupation.prelievoAccumulato?.crystal || 0) + tribC,
-            deuterium: Number(tData.occupation.prelievoAccumulato?.deuterium || 0) + tribD
+            metal: Number(o.prelievoAccumulato?.metal || 0) + tribM,
+            crystal: Number(o.prelievoAccumulato?.crystal || 0) + tribC,
+            deuterium: Number(o.prelievoAccumulato?.deuterium || 0) + tribD
           }
-        });
-
-        tx.update(originRef, {
-          'resources.metal': (oData.resources?.metal || 0) + tribM,
-          'resources.crystal': (oData.resources?.crystal || 0) + tribC,
-          'resources.deuterium': (oData.resources?.deuterium || 0) + tribD
-        });
-      }).catch(() => {});
+        };
+        if (tData.isNpc) {
+          // BOT: nessun client proprietario, scrittura assoluta
+          upd['resources.metal'] = Math.max(0, eff.resources.metal - tribM);
+          upd['resources.crystal'] = Math.max(0, eff.resources.crystal - tribC);
+          upd['resources.deuterium'] = Math.max(0, eff.resources.deuterium - tribD);
+          upd.lastUpdated = Date.now();
+          upd.inbox = FV.delete();
+        } else {
+          if (tribM) upd['inbox.resources.metal'] = FV.increment(-tribM);
+          if (tribC) upd['inbox.resources.crystal'] = FV.increment(-tribC);
+          if (tribD) upd['inbox.resources.deuterium'] = FV.increment(-tribD);
+        }
+        tx.update(pDoc.ref, upd);
+        _inboxCredit(tx, creditRef, { resources: { metal: tribM, crystal: tribC, deuterium: tribD } });
+      }).catch((e) => console.warn('[MP Occupazioni] Tributo rinviato:', e));
     }
+  }
+
+  // Sweep globale con throttle (chiamato da resolveArrivedOnlineFleets)
+  async function sweepOccupationsThrottled(uniId) {
+    const last = _occupationSweepAt.get(uniId) || 0;
+    if (Date.now() - last < OCCUPATION_SWEEP_MIN_MS) return;
+    _occupationSweepAt.set(uniId, Date.now());
+    await processAllOccupations(uniId);
+  }
+
+  // Compatibilità: l'occupante riscuote solo le proprie occupazioni
+  async function processOnlineOccupations(uniId) {
+    const user = getAuth().currentUser;
+    if (!user || !uniId) return;
+    await processAllOccupations(uniId, { onlyUid: user.uid });
   }
 
   // Porta la flotta assediante a IN RITORNO (niente accrediti/teletrasporti istantanei)
@@ -1522,7 +2033,7 @@
         arrivalTime: now + durationSec * 1000,
         returnTime: now + durationSec * 1000,
         ...(pendingRansom ? { pendingRansom } : {})
-      }).catch(() => {});
+      }).catch((e) => _mpNotifyError('rientro flotta assediante', e));
       transitioned = true;
     }
     return transitioned;
@@ -1539,6 +2050,16 @@
     const planetRef = uniRef.collection('planets').doc(key);
     let paidRansom = null;
     let siegeShipsForReturn = null;
+    const uniSnapPay = await uniRef.get().catch(() => null);
+    const paySpeed = uniSnapPay && uniSnapPay.exists ? (uniSnapPay.data().speed || 10) : 10;
+    // Pianeta dell'assediante a cui accreditare riscatto/navi (letto fuori transazione)
+    const prePlSnap = await planetRef.get().catch(() => null);
+    const prePl = prePlSnap && prePlSnap.exists ? prePlSnap.data() : null;
+    const preSiege = prePl ? (prePl.occupation || prePl.embargo) : null;
+    const preAttackerUid = preSiege ? (prePl.occupation ? preSiege.occupierUid : preSiege.attackerUid) : null;
+    const creditRef = preSiege && preAttackerUid
+      ? await _resolveCreditRef(uniRef, preAttackerUid, preSiege.originCoords)
+      : null;
     const fleetSnapPre = await uniRef.collection('fleets').where('targetKey', '==', key).get().catch(() => ({ docs: [] }));
     const hasSiegeFleet = fleetSnapPre.docs.some((d) => {
       const ff = normalizeOnlineFleet(d.data(), d.id);
@@ -1556,10 +2077,12 @@
       if (!siege) throw new Error('Nessun embargo o occupazione attiva su questo pianeta.');
 
       const ransom = siege.ransom || { metal: 0, crystal: 0, deuterium: 0 };
+      // Il controllo usa la vista effettiva (base + produzione + variazioni in arrivo)
+      const effPl = _effectivePlanetView(pl, paySpeed);
       if (
-        (pl.resources?.metal || 0) < ransom.metal ||
-        (pl.resources?.crystal || 0) < ransom.crystal ||
-        (pl.resources?.deuterium || 0) < ransom.deuterium
+        (effPl.resources.metal || 0) < ransom.metal ||
+        (effPl.resources.crystal || 0) < ransom.crystal ||
+        (effPl.resources.deuterium || 0) < ransom.deuterium
       ) {
         throw new Error('Risorse insufficienti sul pianeta per pagare il riscatto.');
       }
@@ -1567,31 +2090,18 @@
       paidRansom = { ...ransom };
       siegeShipsForReturn = siege.garrisonShips || siege.ships || {};
 
-      const attackerOriginKey = coordsToKey(siege.originCoords);
-      const attackerOriginRef = uniRef.collection('planets').doc(attackerOriginKey);
-      const attackerOriginSnap = await tx.get(attackerOriginRef);
-
-      tx.update(planetRef, {
-        'resources.metal': pl.resources.metal - ransom.metal,
-        'resources.crystal': pl.resources.crystal - ransom.crystal,
-        'resources.deuterium': pl.resources.deuterium - ransom.deuterium,
-        embargo: null,
-        occupation: null
-      });
+      const FV = firebase.firestore.FieldValue;
+      const payUpd = { embargo: null, occupation: null };
+      if (ransom.metal) payUpd['inbox.resources.metal'] = FV.increment(-Math.round(ransom.metal));
+      if (ransom.crystal) payUpd['inbox.resources.crystal'] = FV.increment(-Math.round(ransom.crystal));
+      if (ransom.deuterium) payUpd['inbox.resources.deuterium'] = FV.increment(-Math.round(ransom.deuterium));
+      tx.update(planetRef, payUpd);
 
       // Con flotta assediante tracciata: niente accredito istantaneo, rientra e accredita all'arrivo
-      if (!hasSiegeFleet && attackerOriginSnap.exists) {
-        const attPl = attackerOriginSnap.data();
-        const updatedFleet = Object.assign({}, attPl.fleet || {});
-        const returningShips = siege.garrisonShips || siege.ships || {};
-        for (const [sId, qty] of Object.entries(returningShips)) {
-          updatedFleet[sId] = (updatedFleet[sId] || 0) + qty;
-        }
-        tx.update(attackerOriginRef, {
-          'resources.metal': (attPl.resources?.metal || 0) + ransom.metal,
-          'resources.crystal': (attPl.resources?.crystal || 0) + ransom.crystal,
-          'resources.deuterium': (attPl.resources?.deuterium || 0) + ransom.deuterium,
-          fleet: updatedFleet
+      if (!hasSiegeFleet && creditRef) {
+        _inboxCredit(tx, creditRef, {
+          resources: ransom,
+          fleet: siege.garrisonShips || siege.ships || {}
         });
       }
 
@@ -1621,6 +2131,14 @@
     const uniRef = db.collection('online_universes').doc(uniId);
     const key = coordsToKey(targetCoords);
     const planetRef = uniRef.collection('planets').doc(key);
+    // Pianeta d'origine dell'assedio da accreditare (letto fuori transazione)
+    const prePlSnapL = await planetRef.get().catch(() => null);
+    const prePlL = prePlSnapL && prePlSnapL.exists ? prePlSnapL.data() : null;
+    const preSiegeL = prePlL
+      ? ((prePlL.occupation && prePlL.occupation.occupierUid === user.uid) ? prePlL.occupation
+        : ((prePlL.embargo && prePlL.embargo.attackerUid === user.uid) ? prePlL.embargo : null))
+      : null;
+    const creditRefL = preSiegeL ? await _resolveCreditRef(uniRef, user.uid, preSiegeL.originCoords) : null;
     const fleetSnapPre = await uniRef.collection('fleets').where('targetKey', '==', key).get().catch(() => ({ docs: [] }));
     const hasSiegeFleet = fleetSnapPre.docs.some((d) => {
       const ff = normalizeOnlineFleet(d.data(), d.id);
@@ -1639,23 +2157,14 @@
       }
 
       const siege = isMyOccupation ? pl.occupation : pl.embargo;
-      const originRef = uniRef.collection('planets').doc(coordsToKey(siege.originCoords));
-      const originSnap = await tx.get(originRef);
-
       tx.update(planetRef, {
         embargo: isMyEmbargo ? null : pl.embargo,
         occupation: isMyOccupation ? null : pl.occupation
       });
 
       // Con flotta tracciata: passa a IN RITORNO, accredito solo all'arrivo
-      if (!hasSiegeFleet && originSnap.exists) {
-        const oPl = originSnap.data();
-        const updatedFleet = Object.assign({}, oPl.fleet || {});
-        const returningShips = siege.garrisonShips || siege.ships || {};
-        for (const [sId, qty] of Object.entries(returningShips)) {
-          updatedFleet[sId] = (updatedFleet[sId] || 0) + qty;
-        }
-        tx.update(originRef, { fleet: updatedFleet });
+      if (!hasSiegeFleet && creditRefL) {
+        _inboxCredit(tx, creditRefL, { fleet: siege.garrisonShips || siege.ships || {} });
       }
     });
 
@@ -1980,6 +2489,8 @@
     launchOnlineFleet,
     recallOnlineFleet,
     listenIncomingFleets,
+    listenOwnFleets,
+    listenOwnPlanets,
     resolveArrivedOnlineFleets,
     migrateOnlineFleets,
     repairStuckMissions,
@@ -1987,6 +2498,7 @@
     deleteReport,
     deleteAllReports,
     processOnlineOccupations,
+    processAllOccupations,
     payOnlineSiegeRansom,
     liftOnlineSiege,
     getLeaderboard,

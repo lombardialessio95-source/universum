@@ -14,6 +14,8 @@
     unsubChatListener: null,
     unsubServerListener: null,
     unsubFleetsListener: null,
+    unsubOwnFleetsListener: null,
+    unsubOwnPlanetsListener: null,
     unsubPrivateConvsListener: null,
     unsubPrivateMsgsListener: null,
 
@@ -298,16 +300,108 @@
     return UI.state.currentUniverse.planets[UI.getActivePlanetIndex()];
   };
 
-  UI.persistUniverseState = async function () {
+  // FIX 4.1 + 4.4 — Sync online con feedback e retry automatico.
+  // - Errori: toast chiaro (max 1 ogni 30s) e log in console.
+  // - Errori di rete: retry in background con backoff (5s, 15s, 45s), senza bloccare l'UI.
+  // - Permessi negati: nessun retry (non servirebbe), solo avviso.
+  // - Chi chiama persistUniverseState({ notify: true }) vede "Sincronizzazione..." / "Sincronizzato"
+  //   (non usato di default: il sync automatico gira ogni 60s e riempirebbe lo schermo di toast).
+  UI._syncRetry = { attempt: 0, timer: null, lastErrorToastAt: 0, hadFailure: false };
+  const SYNC_RETRY_DELAYS_MS = [5000, 15000, 45000];
+
+  UI._resetSyncRetry = function () {
+    const r = UI._syncRetry;
+    if (r.timer) clearTimeout(r.timer);
+    r.timer = null;
+    r.attempt = 0;
+    r.hadFailure = false;
+  };
+
+  UI._scheduleSyncRetry = function () {
+    const r = UI._syncRetry;
+    if (r.timer || r.attempt >= SYNC_RETRY_DELAYS_MS.length) return;
+    const delay = SYNC_RETRY_DELAYS_MS[r.attempt++];
+    r.timer = setTimeout(async () => {
+      r.timer = null;
+      if (!UI.state.isMultiplayerMode || !UI.state.currentUniverse) {
+        UI._resetSyncRetry();
+        return;
+      }
+      try {
+        await UI.persistUniverseState();
+      } catch (e) { /* persistUniverseState ripianifica da sola il tentativo successivo */ }
+    }, delay);
+  };
+
+  UI.persistUniverseState = async function (opts = {}) {
     const uni = UI.state.currentUniverse;
     if (!uni) return;
-    if (UI.state.isMultiplayerMode) {
-      if (window.UniversumMP && typeof window.UniversumMP.syncPlayerState === 'function') {
-        await window.UniversumMP.syncPlayerState(uni, { force: true });
-      }
-    } else {
+
+    if (!UI.state.isMultiplayerMode) {
       await window.UniversumDB.save(uni);
+      return;
     }
+    if (!window.UniversumMP || typeof window.UniversumMP.syncPlayerState !== 'function') return;
+
+    const r = UI._syncRetry;
+    if (opts.notify) UI.toast('Sincronizzazione...', 'info');
+    try {
+      await window.UniversumMP.syncPlayerState(uni, { force: true });
+      if (r.timer) { clearTimeout(r.timer); r.timer = null; }
+      r.attempt = 0;
+      if (r.hadFailure) {
+        r.hadFailure = false;
+        UI.toast('Connessione ripristinata: dati sincronizzati.', 'success');
+      } else if (opts.notify) {
+        UI.toast('Sincronizzato', 'success');
+      }
+    } catch (err) {
+      r.hadFailure = true;
+      console.warn('[Sync] Sincronizzazione online non riuscita:', err);
+      const code = String(err?.code || '');
+      const now = Date.now();
+      if (now - r.lastErrorToastAt > 30000) {
+        r.lastErrorToastAt = now;
+        if (code === 'permission-denied') {
+          UI.toast('Il server ha rifiutato il salvataggio (permessi): i progressi online potrebbero non essere salvati.', 'error');
+        } else {
+          UI.toast('Errore di rete: sincronizzazione non riuscita, riprovo automaticamente.', 'error');
+        }
+      }
+      const retryable = !['permission-denied', 'unauthenticated', 'invalid-argument'].includes(code);
+      if (retryable) UI._scheduleSyncRetry();
+      throw err; // stesso comportamento di prima per chi la chiama con await
+    }
+  };
+
+  // FIX 2.9 — Riallineamento con il server: sync (debounced) quando arrivano variazioni sui pianeti propri
+  UI._reconcileTimer = null;
+  UI._requestReconcileSync = function () {
+    if (UI._reconcileTimer) return;
+    UI._reconcileTimer = setTimeout(async () => {
+      UI._reconcileTimer = null;
+      if (!UI.state.isMultiplayerMode || !UI.state.currentUniverse) return;
+      try {
+        await UI.persistUniverseState();
+      } catch (e) { /* errore già mostrato/ritentato da persistUniverseState */ }
+    }, 400);
+  };
+
+  // Chiamata da multiplayer.js dopo ogni riallineamento (variazioni applicate o pianeti persi)
+  UI.onOnlineReconciled = function ({ reconciled = [], lost = [] } = {}) {
+    const st = UI.state;
+    const uni = st.currentUniverse;
+    if (!uni) return;
+    if (lost.length > 0) {
+      lost.forEach((p) => UI.toast(`Hai perso il controllo di ${p.name}!`, 'error'));
+      if (uni.planets.length > 0 && !uni.planets.some((p) => p.id === uni.activePlanetId)) {
+        uni.activePlanetId = uni.planets[0].id;
+      }
+      UI.refreshPlanetSelector?.();
+      UI.playSound?.('alarm');
+    }
+    UI.updateTopBarNumbers?.();
+    if (['overview', 'buildings', 'shipyard', 'defense'].includes(st.currentView)) UI.renderCurrentView();
   };
 
   UI.closePrivateMessageStream = function () {
@@ -1389,6 +1483,19 @@
       st.unsubFleetsListener();
       st.unsubFleetsListener = null;
     }
+    if (typeof st.unsubOwnFleetsListener === 'function') {
+      st.unsubOwnFleetsListener();
+      st.unsubOwnFleetsListener = null;
+    }
+    if (typeof st.unsubOwnPlanetsListener === 'function') {
+      st.unsubOwnPlanetsListener();
+      st.unsubOwnPlanetsListener = null;
+    }
+    if (UI._reconcileTimer) {
+      clearTimeout(UI._reconcileTimer);
+      UI._reconcileTimer = null;
+    }
+    UI._resetSyncRetry?.();
 
     st.chatMessagesCache = [];
     st.privateConversationsCache = [];
@@ -1571,6 +1678,28 @@
         }
         st.lastAlertCount = incomingList.length;
         if (st.currentView === 'overview') UI.renderCurrentView();
+      });
+    }
+
+    // FIX 4.2 — Le flotte proprie si aggiornano da sole (partenza, ritorno, rientro assedi)
+    if (window.UniversumMP?.listenOwnFleets) {
+      st.unsubOwnFleetsListener = window.UniversumMP.listenOwnFleets(universe, (ownList) => {
+        if (UI.state.currentUniverse !== universe) return;
+        universe.fleetsInFlight = ownList;
+        if (['overview', 'movements'].includes(st.currentView)) UI.renderCurrentView();
+      });
+    }
+
+    // FIX 2.9 — Pianeti propri: variazioni in arrivo, pianeti persi (conquista) o acquisiti
+    if (window.UniversumMP?.listenOwnPlanets) {
+      st.unsubOwnPlanetsListener = window.UniversumMP.listenOwnPlanets(universe, ({ gained, needSync }) => {
+        if (UI.state.currentUniverse !== universe) return;
+        if (gained.length > 0) {
+          gained.forEach((p) => UI.toast(`Nuovo pianeta nel tuo impero: ${p.name}`, 'success'));
+          UI.refreshPlanetSelector?.();
+        }
+        if (needSync) UI._requestReconcileSync();
+        else if (gained.length > 0 && st.currentView === 'overview') UI.renderCurrentView();
       });
     }
 
