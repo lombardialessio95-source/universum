@@ -233,7 +233,7 @@
           <svg class="nav-svg" viewBox="0 0 24 24"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
           Classifica
         </button>
-        <button type="button" class="sidebar-btn mp-only-nav hidden" data-view="chat" style="justify-content:space-between;">
+        <button type="button" class="sidebar-btn mp-only-nav hidden sidebar-comm-btn" data-view="chat">
           <span style="display:inline-flex; align-items:center;">
             <svg class="nav-svg" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
             Chat Galattica
@@ -337,6 +337,7 @@
   <script src="./engine-actions.js"></script>      <!-- Azioni giocatore: avvio costruzioni/ricerche/navi, turbo, cheat e autosave -->
   <script src="./galaxy.js"></script>              <!-- Generatore galassia da seed, combattimenti 6 round, spionaggio e IA BOT -->
   <script src="./firebase-config.js"></script>     <!-- Chiavi e inizializzazione Firebase Auth + Firestore -->
+  <script src="./moon-merchant.js"></script>
   <script src="./multiplayer.js"></script>         <!-- Logica PvP online: auth, universi condivisi, flotte live, chat e classifica -->
   <script src="./ui-core.js"></script>             <!-- Regia UI: stato globale, loop 1s, audio WebAudio, Panoramica e salvataggi -->
   <script src="./ui-guide.js"></script>            <!-- Pagina Guida/Aiuto: sezioni generate dinamicamente da data.js -->
@@ -348,5 +349,6 @@
   <script src="./missions-core.js"></script>       <!-- Plugin Missioni: ricerca Esplorazione Profonda, carburante/spinta 10-100%, slot e richiamo -->
 <script src="./siege-missions.js"></script>      <!-- Motore Assedi: Embargo Planetario (blocco rotte), Occupazione (5%/giorno + riscatto) e tick orbitale -->
 <script src="./ui-fleet-movements.js"></script>  <!-- Schermata UI: Movimento Flotta, conteggio slot (5+lv), countdown, richiamo e stato assedi -->
+  <script src="./tutorial.js"></script> <!-- Accademia Imperiale offline -->
 </body>
 </html>

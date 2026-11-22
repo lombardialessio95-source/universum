@@ -333,6 +333,7 @@
   }
 
   function createMoon(universe, planetIndex) {
+    if (!universe.creativeMode) throw new Error('In modalità Normale la Luna si ottiene con il Mercante di Lune, dal menu Commercio e BOT.');
     const planet = universe.planets[planetIndex];
     if (!planet) throw new Error('Pianeta non trovato.');
     if (planet.moon) throw new Error('Questo pianeta possiede già una Luna.');

@@ -16,6 +16,10 @@
     const canvas = document.getElementById('starfield');
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
+    let lastFrame = 0;
+    const frameInterval = 1000 / 24;
+    let nebulaLayer = document.createElement('canvas');
+    let nebulaCtx = nebulaLayer.getContext('2d');
     let width = (canvas.width = window.innerWidth);
     let height = (canvas.height = window.innerHeight);
 
@@ -34,28 +38,35 @@
       });
     }
 
+    // Le nebulose sono statiche: disegnate solo all'avvio e dopo resize.
+    function rebuildNebulaLayer() {
+      nebulaLayer.width = width;
+      nebulaLayer.height = height;
+      nebulaCtx.fillStyle = '#02020a';
+      nebulaCtx.fillRect(0, 0, width, height);
+      const neb1 = nebulaCtx.createRadialGradient(width * 0.2, height * 0.3, 10, width * 0.2, height * 0.3, width * 0.55);
+      neb1.addColorStop(0, 'rgba(14, 28, 72, 0.28)');
+      neb1.addColorStop(1, 'rgba(2, 2, 10, 0)');
+      nebulaCtx.fillStyle = neb1;
+      nebulaCtx.fillRect(0, 0, width, height);
+      const neb2 = nebulaCtx.createRadialGradient(width * 0.8, height * 0.75, 10, width * 0.8, height * 0.75, width * 0.5);
+      neb2.addColorStop(0, 'rgba(42, 12, 68, 0.22)');
+      neb2.addColorStop(1, 'rgba(2, 2, 10, 0)');
+      nebulaCtx.fillStyle = neb2;
+      nebulaCtx.fillRect(0, 0, width, height);
+    }
+    rebuildNebulaLayer();
     window.addEventListener('resize', () => {
       width = canvas.width = window.innerWidth;
       height = canvas.height = window.innerHeight;
+      rebuildNebulaLayer();
     });
 
-    function render() {
-      ctx.fillStyle = '#02020a';
-      ctx.fillRect(0, 0, width, height);
-
-      // Nebulose oscure profonde
-      const neb1 = ctx.createRadialGradient(width * 0.2, height * 0.3, 10, width * 0.2, height * 0.3, width * 0.55);
-      neb1.addColorStop(0, 'rgba(14, 28, 72, 0.28)');
-      neb1.addColorStop(1, 'rgba(2, 2, 10, 0)');
-      ctx.fillStyle = neb1;
-      ctx.fillRect(0, 0, width, height);
-
-      const neb2 = ctx.createRadialGradient(width * 0.8, height * 0.75, 10, width * 0.8, height * 0.75, width * 0.5);
-      neb2.addColorStop(0, 'rgba(42, 12, 68, 0.22)');
-      neb2.addColorStop(1, 'rgba(2, 2, 10, 0)');
-      ctx.fillStyle = neb2;
-      ctx.fillRect(0, 0, width, height);
-
+    function render(timestamp = 0) {
+      requestAnimationFrame(render);
+      if (document.hidden || timestamp - lastFrame < frameInterval) return;
+      lastFrame = timestamp;
+      ctx.drawImage(nebulaLayer, 0, 0);
       for (let i = 0; i < stars.length; i++) {
         const s = stars[i];
         s.alpha += s.speed;
@@ -74,7 +85,6 @@
         ctx.fill();
       }
       ctx.globalAlpha = 1;
-      requestAnimationFrame(render);
     }
 
     requestAnimationFrame(render);
@@ -176,6 +186,7 @@
       name: (config.name || 'Nuovo Universo').trim().substring(0, 32),
       emperor: (config.emperor || 'Comandante').trim().substring(0, 24),
       creativeMode: Boolean(config.creativeMode),
+      tutorial: config.tutorialEnabled ? { enabled: true, step: 0, done: false, hidden: false, visited: {}, baseline: {} } : null,
       speed: Math.max(1, Number(config.speed) || 10),
       galaxies,
       systemsPerGalaxy,
@@ -413,6 +424,7 @@
         </div>
         <div class="universe-card-actions">
           <button type="button" class="btn btn-green btn-sm" data-action="play" data-id="${u.id}">▶ GIOCA</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-action="tutorial" data-id="${u.id}">🎓 ${u.tutorial?.enabled && !u.tutorial?.done ? "TUTORIAL" : "ACCADEMIA"}</button>
           <button type="button" class="btn btn-blue btn-sm" data-action="rename" data-id="${u.id}">✎ RINOMINA</button>
           <button type="button" class="btn btn-ghost btn-sm" data-action="export" data-id="${u.id}">⬇ JSON</button>
           <button type="button" class="btn btn-red btn-sm" data-action="delete" data-id="${u.id}">🗑 ELIMINA</button>
@@ -537,6 +549,12 @@
           </div>
         </div>
 
+        <div class="form-group" style="padding:12px;border:1px solid rgba(0,210,255,.32);border-radius:10px;background:rgba(0,120,200,.08)">
+          <label style="display:flex;gap:10px;align-items:center;cursor:pointer;">
+            <input id="cfg-tutorial" type="checkbox" checked style="width:18px;height:18px;accent-color:#00d2ff;">
+            <span><strong>🎓 Accademia Imperiale — Tutorial offline</strong><br><small>12 missioni guidate, progressi salvati. Puoi disattivarlo o riprenderlo quando vuoi.</small></span>
+          </label>
+        </div>
         <div class="form-grid-2">
           <div class="form-group">
             <label for="cfg-bot-mode">Comportamento BOT</label>
@@ -595,6 +613,7 @@
           name: document.getElementById('cfg-name').value,
           emperor: document.getElementById('cfg-emperor').value,
           creativeMode: modeSelect.value === 'creative',
+          tutorialEnabled: document.getElementById('cfg-tutorial').checked,
           speed: Number(document.getElementById('cfg-speed').value),
           startTier: tierSelect.value,
           customMetal: Number(document.getElementById('cfg-res-m').value),
@@ -732,6 +751,13 @@
 
       try {
         if (action === 'play') {
+          await launchUniverse(id);
+        } else if (action === 'tutorial') {
+          const uni = await load(id);
+          if (!uni) return;
+          uni.tutorial = { enabled: true, step: 0, done: false, hidden: false, visited: {}, baseline: {} };
+          await save(uni);
+          showToastFallback('Accademia Imperiale attivata: progressi inizializzati.', 'success');
           await launchUniverse(id);
         } else if (action === 'rename') {
           const uni = await load(id);

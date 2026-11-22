@@ -1021,13 +1021,13 @@
         <div class="glass-panel" style="padding:20px; text-align:center;">
           <div style="margin-bottom:12px; display:flex; justify-content:center;">${artTag('lunarBase', 'unit-art', 'Base Lunare')}</div>
           <h2 style="font-size:1.15rem; color:var(--res-crystal); margin-bottom:8px;">NESSUNA LUNA IN ORBITA SU ${escapeHTML(planet.name)}</h2>
-          <p class="text-muted" style="margin-bottom:14px;">Richiede Ingegneria Lunare Lv.1.</p>
-          <div style="margin-bottom:16px; font-weight:700; display:flex; justify-content:center; flex-wrap:wrap; gap:12px;">
+          <p class="text-muted" style="margin-bottom:14px;">${uni.creativeMode && !st.isMultiplayerMode ? 'Modalità Creativa: creazione diretta della Luna.' : 'In modalità Normale la Luna può nascere da un grande scontro orbitale. Vai in Commercio e BOT e ingaggia il Mercante di Lune: consuma la flotta stazionata e 1.000.000 di Deuterio, senza toccare difese o pianeta.'}</p>
+          ${uni.creativeMode && !st.isMultiplayerMode ? `<div style="margin-bottom:16px; font-weight:700; display:flex; justify-content:center; flex-wrap:wrap; gap:12px;">
             <span class="cost-item text-metal">${resIconTag('metal')} ${formatNum(cost.metal)}</span>
             <span class="cost-item text-crystal">${resIconTag('crystal')} ${formatNum(cost.crystal)}</span>
             <span class="cost-item text-deuterium">${resIconTag('deuterium')} ${formatNum(cost.deuterium)}</span>
           </div>
-          <button type="button" id="btn-create-moon" class="btn btn-green">${svgIcon('moon')} CREA LUNA ORA</button>
+          <button type="button" id="btn-create-moon" class="btn btn-green">${svgIcon('moon')} CREA LUNA ORA</button>` : `<button type="button" id="btn-go-moon-merchant" class="btn btn-blue">${svgIcon('moon')} VAI AL MERCANTE DI LUNE</button>`}
           <div style="margin-top:18px; padding-top:14px; border-top:1px solid rgba(255,255,255,0.12);">
             <p class="text-muted" style="margin-bottom:10px;">Oppure, al posto della Luna: Bacino Spaziale in ${bDef.totalDays} giorni reali, rate di ${formatNum(bDef.dailyCost.metal)} M / ${formatNum(bDef.dailyCost.crystal)} C / ${formatNum(bDef.dailyCost.deuterium)} D al giorno (totale ${formatNum(bDef.totalCost.metal)} M / ${formatNum(bDef.totalCost.crystal)} C / ${formatNum(bDef.totalCost.deuterium)} D).</p>
             <button type="button" id="btn-start-bacino" class="btn btn-blue">AVVIA BACINO SPAZIALE</button>
@@ -1035,6 +1035,7 @@
         </div>
       `;
 
+      document.getElementById('btn-go-moon-merchant')?.addEventListener('click', () => UI.switchView('diplomacy'));
       document.getElementById('btn-create-moon')?.addEventListener('click', async () => {
         try {
           Galaxy.createMoon(uni, pIdx);

@@ -7,6 +7,7 @@
   const G = window.UniversumGraphics;
   if (!G) return;
 
+  const SIZE = 128;
   const {
     drawCardBg: _drawCardBg,
     drawMetallicHull: _drawMetallicHull,
@@ -17,10 +18,31 @@
     drawBlueprintBg: _drawBlueprintBg
   } = G.helpers;
 
+  const preRenderedOffscreens = {};
+
+  function _createOffscreen() {
+    const canvas = document.createElement('canvas');
+    canvas.width = SIZE;
+    canvas.height = SIZE;
+    return { canvas, c: canvas.getContext('2d') };
+  }
+
+  function _wrapPreRendered(key, drawFn) {
+    return function (targetCtx, mode) {
+      const cacheKey = mode ? `${key}:${mode}` : key;
+      if (!preRenderedOffscreens[cacheKey]) {
+        const { canvas, c } = _createOffscreen();
+        drawFn(c, mode);
+        preRenderedOffscreens[cacheKey] = canvas;
+      }
+      targetCtx.drawImage(preRenderedOffscreens[cacheKey], 0, 0);
+    };
+  }
+
   // =========================================================
   // RENDERERS: 14 EDIFICI PLANETARI
   // =========================================================
-  const PLANETARY_BUILDINGS = {
+  const RAW_PLANETARY_BUILDINGS = {
     metalMine(c) {
       _drawCardBg(c, '#00e676');
       _drawPlanetarySurface(c, '#16241d', '#00e676');
@@ -55,26 +77,26 @@
       _drawPlanetarySurface(c, '#102030', '#00d2ff');
 
       const drawCrystal = (x, y, w, h, tilt) => {
-        c.save();
-        c.translate(x, y);
-        c.rotate(tilt);
-        const cg = c.createLinearGradient(-w / 2, -h, w / 2, 0);
+        const { canvas: cryCanvas, c: crCtx } = _createOffscreen();
+        crCtx.translate(x, y);
+        crCtx.rotate(tilt);
+        const cg = crCtx.createLinearGradient(-w / 2, -h, w / 2, 0);
         cg.addColorStop(0, '#e0f7fa');
         cg.addColorStop(0.5, '#00e5ff');
         cg.addColorStop(1, '#01579b');
-        c.fillStyle = cg;
-        c.strokeStyle = '#84ffff';
-        c.lineWidth = 1.2;
-        c.beginPath();
-        c.moveTo(0, -h);
-        c.lineTo(w * 0.5, -h * 0.35);
-        c.lineTo(w * 0.35, 0);
-        c.lineTo(-w * 0.35, 0);
-        c.lineTo(-w * 0.5, -h * 0.35);
-        c.closePath();
-        c.fill();
-        c.stroke();
-        c.restore();
+        crCtx.fillStyle = cg;
+        crCtx.strokeStyle = '#84ffff';
+        crCtx.lineWidth = 1.2;
+        crCtx.beginPath();
+        crCtx.moveTo(0, -h);
+        crCtx.lineTo(w * 0.5, -h * 0.35);
+        crCtx.lineTo(w * 0.35, 0);
+        crCtx.lineTo(-w * 0.35, 0);
+        crCtx.lineTo(-w * 0.5, -h * 0.35);
+        crCtx.closePath();
+        crCtx.fill();
+        crCtx.stroke();
+        c.drawImage(cryCanvas, 0, 0);
       };
 
       drawCrystal(88, 95, 16, 42, -0.15);
@@ -128,20 +150,20 @@
       }, '#37474f', '#eceff1', '#ffea00');
 
       const drawPanel = (x, y, w, h, skew) => {
-        c.save();
-        c.translate(x, y);
-        c.transform(1, skew, 0, 1, 0, 0);
-        const pg = c.createLinearGradient(0, 0, w, h);
+        const { canvas: panCanvas, c: pCtx } = _createOffscreen();
+        pCtx.translate(x, y);
+        pCtx.transform(1, skew, 0, 1, 0, 0);
+        const pg = pCtx.createLinearGradient(0, 0, w, h);
         pg.addColorStop(0, '#ffd700');
         pg.addColorStop(0.45, '#ff8f00');
         pg.addColorStop(1, '#1a237e');
-        c.fillStyle = pg;
-        c.strokeStyle = '#ffea00';
-        c.lineWidth = 1.4;
-        c.fillRect(0, 0, w, h);
-        c.strokeRect(0, 0, w, h);
-        _drawPanelLines(c, [[w * 0.5, 0, w * 0.5, h], [0, h * 0.5, w, h * 0.5]], 'rgba(255,255,255,0.45)');
-        c.restore();
+        pCtx.fillStyle = pg;
+        pCtx.strokeStyle = '#ffea00';
+        pCtx.lineWidth = 1.4;
+        pCtx.fillRect(0, 0, w, h);
+        pCtx.strokeRect(0, 0, w, h);
+        _drawPanelLines(pCtx, [[w * 0.5, 0, w * 0.5, h], [0, h * 0.5, w, h * 0.5]], 'rgba(255,255,255,0.45)');
+        c.drawImage(panCanvas, 0, 0);
       };
 
       drawPanel(14, 38, 42, 28, -0.18);
@@ -162,15 +184,19 @@
       c.ellipse(64, 58, 30, 17, 0, 0, Math.PI * 2);
       c.fill();
 
-      c.save();
-      c.shadowColor = '#00e5ff';
-      c.shadowBlur = 14;
-      c.strokeStyle = '#84ffff';
-      c.lineWidth = 5;
-      c.beginPath();
-      c.ellipse(64, 58, 23, 12, 0, 0, Math.PI * 2);
-      c.stroke();
-      c.restore();
+      const { canvas: ringCanvas, c: rCtx } = _createOffscreen();
+      rCtx.strokeStyle = 'rgba(0, 229, 255, 0.35)';
+      rCtx.lineWidth = 13;
+      rCtx.beginPath();
+      rCtx.ellipse(64, 58, 23, 12, 0, 0, Math.PI * 2);
+      rCtx.stroke();
+
+      rCtx.strokeStyle = '#84ffff';
+      rCtx.lineWidth = 5;
+      rCtx.beginPath();
+      rCtx.ellipse(64, 58, 23, 12, 0, 0, Math.PI * 2);
+      rCtx.stroke();
+      c.drawImage(ringCanvas, 0, 0);
 
       _drawMetallicHull(c, (p) => {
         p.rect(57, 30, 14, 58);
@@ -272,13 +298,15 @@
       c.strokeStyle = '#84ffff';
       c.lineWidth = 1.3;
       [0, Math.PI / 3, -Math.PI / 3].forEach((rot) => {
-        c.save();
-        c.translate(64, ay);
-        c.rotate(rot);
-        c.beginPath();
-        c.ellipse(0, 0, 22, 7, 0, 0, Math.PI * 2);
-        c.stroke();
-        c.restore();
+        const { canvas: orbCanvas, c: oCtx } = _createOffscreen();
+        oCtx.translate(64, ay);
+        oCtx.rotate(rot);
+        oCtx.strokeStyle = '#84ffff';
+        oCtx.lineWidth = 1.3;
+        oCtx.beginPath();
+        oCtx.ellipse(0, 0, 22, 7, 0, 0, Math.PI * 2);
+        oCtx.stroke();
+        c.drawImage(orbCanvas, 0, 0);
       });
     },
 
@@ -380,7 +408,7 @@
   // =========================================================
   // RENDERERS: 6 EDIFICI LUNARI
   // =========================================================
-  const MOON_BUILDINGS = {
+  const RAW_MOON_BUILDINGS = {
     lunarBase(c) {
       _drawCardBg(c, '#00d2ff');
       _drawLunarSurface(c, '#cfd8dc');
@@ -490,31 +518,32 @@
         p.moveTo(36, 90); p.lineTo(46, 72); p.lineTo(66, 72); p.lineTo(74, 90);
       }, '#263238', '#90a4ae', '#00e676');
 
-      c.save();
-      c.translate(58, 62);
-      c.rotate(-0.65);
-      c.strokeStyle = '#eceff1';
-      c.lineWidth = 4;
-      c.beginPath();
-      c.arc(0, 0, 26, 0.15 * Math.PI, 0.85 * Math.PI);
-      c.stroke();
+      const { canvas: dishCanvas, c: dCtx } = _createOffscreen();
+      dCtx.translate(58, 62);
+      dCtx.rotate(-0.65);
+      dCtx.strokeStyle = '#eceff1';
+      dCtx.lineWidth = 4;
+      dCtx.beginPath();
+      dCtx.arc(0, 0, 26, 0.15 * Math.PI, 0.85 * Math.PI);
+      dCtx.stroke();
 
-      c.strokeStyle = '#00e676';
-      c.lineWidth = 2;
-      c.beginPath();
-      c.moveTo(0, 26); c.lineTo(0, 4);
-      c.stroke();
-      c.restore();
+      dCtx.strokeStyle = '#00e676';
+      dCtx.lineWidth = 2;
+      dCtx.beginPath();
+      dCtx.moveTo(0, 26); dCtx.lineTo(0, 4);
+      dCtx.stroke();
+      c.drawImage(dishCanvas, 0, 0);
 
-      c.strokeStyle = '#00e676';
-      c.lineWidth = 1.6;
+      const { canvas: waveCanvas, c: wCtx } = _createOffscreen();
+      wCtx.lineWidth = 1.6;
       [16, 26, 36].forEach((rad, i) => {
-        c.globalAlpha = 0.85 - i * 0.22;
-        c.beginPath();
-        c.arc(76, 44, rad, -Math.PI * 0.45, Math.PI * 0.05);
-        c.stroke();
+        const alpha = (0.85 - i * 0.22).toFixed(2);
+        wCtx.strokeStyle = `rgba(0, 230, 118, ${alpha})`;
+        wCtx.beginPath();
+        wCtx.arc(76, 44, rad, -Math.PI * 0.45, Math.PI * 0.05);
+        wCtx.stroke();
       });
-      c.globalAlpha = 1;
+      c.drawImage(waveCanvas, 0, 0);
     }
   };
 
@@ -526,7 +555,6 @@
     _drawCardBg(c, accent);
     _drawPlanetarySurface(c, '#10231c', accent);
     // Anello orbitale del bacino sopra il pianeta
-    c.save();
     c.strokeStyle = accent;
     c.lineWidth = 3;
     if (mode === 'building') c.setLineDash([7, 5]);
@@ -563,10 +591,9 @@
         p.moveTo(46, 50); p.lineTo(66, 44); p.lineTo(84, 50); p.lineTo(66, 56);
       }, '#455a64', '#eceff1', '#00e676');
     }
-    c.restore();
   }
 
-  const ORBITAL_STRUCTURES = {
+  const RAW_ORBITAL_STRUCTURES = {
     bacinoSpaziale(c) { _drawBacino(c, 'active'); },
     bacinoSpazialeBuilding(c) { _drawBacino(c, 'building'); },
     bacinoSpazialeStopped(c) { _drawBacino(c, 'stopped'); },
@@ -585,21 +612,39 @@
       c.strokeStyle = '#00e5ff';
       c.lineWidth = 1.6;
       c.beginPath(); c.arc(64, 58, 42, 0, Math.PI * 2); c.fill(); c.stroke();
-      c.save();
-      c.beginPath(); c.arc(64, 58, 42, 0, Math.PI * 2); c.clip();
-      c.strokeStyle = 'rgba(0,229,255,0.45)'; c.lineWidth = 1.4;
-      c.beginPath(); c.ellipse(30, 44, 26, 10, 0.5, 0, Math.PI * 2); c.stroke();
-      c.beginPath(); c.ellipse(92, 74, 28, 10, 0.4, 0, Math.PI * 2); c.stroke();
+
+      const { canvas: sphereCanvas, c: sCtx } = _createOffscreen();
+      sCtx.beginPath();
+      sCtx.arc(64, 58, 42, 0, Math.PI * 2);
+      sCtx.clip();
+      sCtx.strokeStyle = 'rgba(0,229,255,0.45)';
+      sCtx.lineWidth = 1.4;
+      sCtx.beginPath();
+      sCtx.ellipse(30, 44, 26, 10, 0.5, 0, Math.PI * 2);
+      sCtx.stroke();
+      sCtx.beginPath();
+      sCtx.ellipse(92, 74, 28, 10, 0.4, 0, Math.PI * 2);
+      sCtx.stroke();
       [[46, 48], [68, 40], [82, 62], [54, 76]].forEach(([x, y]) => {
-        c.fillStyle = 'rgba(207,216,220,0.9)';
-        c.beginPath(); c.arc(x, y, 5, Math.PI, 0); c.fill();
-        c.fillStyle = '#00e5ff'; c.fillRect(x - 1, y - 6, 2, 3);
+        sCtx.fillStyle = 'rgba(207,216,220,0.9)';
+        sCtx.beginPath();
+        sCtx.arc(x, y, 5, Math.PI, 0);
+        sCtx.fill();
+        sCtx.fillStyle = '#00e5ff';
+        sCtx.fillRect(x - 1, y - 6, 2, 3);
       });
-      c.restore();
-      c.strokeStyle = '#cfd8dc'; c.lineWidth = 4;
-      c.beginPath(); c.ellipse(64, 58, 50, 18, -0.15, 0, Math.PI * 2); c.stroke();
-      c.strokeStyle = '#00e5ff'; c.lineWidth = 1.4;
-      c.beginPath(); c.ellipse(64, 58, 54, 20, -0.15, 0, Math.PI * 2); c.stroke();
+      c.drawImage(sphereCanvas, 0, 0);
+
+      c.strokeStyle = '#cfd8dc';
+      c.lineWidth = 4;
+      c.beginPath();
+      c.ellipse(64, 58, 50, 18, -0.15, 0, Math.PI * 2);
+      c.stroke();
+      c.strokeStyle = '#00e5ff';
+      c.lineWidth = 1.4;
+      c.beginPath();
+      c.ellipse(64, 58, 54, 20, -0.15, 0, Math.PI * 2);
+      c.stroke();
       _drawMetallicHull(c, (p) => {
         p.moveTo(48, 98); p.lineTo(80, 98); p.lineTo(88, 110); p.lineTo(40, 110);
       }, '#263238', '#90a4ae', '#ff9100');
@@ -609,20 +654,20 @@
   // =========================================================
   // RENDERERS: 19 RICERCHE (Stile Olografico Blueprint)
   // =========================================================
-  const RESEARCH_TECHS = {
+  const RAW_RESEARCH_TECHS = {
     energyTech(c) {
       _drawBlueprintBg(c, '#ffea00');
       _drawEngineGlow(c, 64, 64, 14, '#ffea00');
-      c.strokeStyle = '#ffea00';
-      c.lineWidth = 2;
       [0, Math.PI / 3, -Math.PI / 3].forEach((ang) => {
-        c.save();
-        c.translate(64, 64);
-        c.rotate(ang);
-        c.beginPath();
-        c.ellipse(0, 0, 38, 13, 0, 0, Math.PI * 2);
-        c.stroke();
-        c.restore();
+        const { canvas: ringCanvas, c: rCtx } = _createOffscreen();
+        rCtx.translate(64, 64);
+        rCtx.rotate(ang);
+        rCtx.strokeStyle = '#ffea00';
+        rCtx.lineWidth = 2;
+        rCtx.beginPath();
+        rCtx.ellipse(0, 0, 38, 13, 0, 0, Math.PI * 2);
+        rCtx.stroke();
+        c.drawImage(ringCanvas, 0, 0);
       });
     },
 
@@ -634,15 +679,21 @@
       c.moveTo(30, 84); c.lineTo(54, 42); c.lineTo(78, 84); c.closePath();
       c.stroke();
 
-      c.save();
-      c.shadowColor = '#00e5ff';
-      c.shadowBlur = 12;
-      c.strokeStyle = '#00e5ff';
-      c.lineWidth = 3.5;
-      c.beginPath();
-      c.moveTo(14, 64); c.lineTo(114, 64);
-      c.stroke();
-      c.restore();
+      const { canvas: beamCanvas, c: bCtx } = _createOffscreen();
+      bCtx.strokeStyle = 'rgba(0, 229, 255, 0.35)';
+      bCtx.lineWidth = 11;
+      bCtx.beginPath();
+      bCtx.moveTo(14, 64);
+      bCtx.lineTo(114, 64);
+      bCtx.stroke();
+
+      bCtx.strokeStyle = '#00e5ff';
+      bCtx.lineWidth = 3.5;
+      bCtx.beginPath();
+      bCtx.moveTo(14, 64);
+      bCtx.lineTo(114, 64);
+      bCtx.stroke();
+      c.drawImage(beamCanvas, 0, 0);
     },
 
     ionTech(c) {
@@ -806,15 +857,15 @@
       c.stroke();
 
       // Orbita inclinata sonda profonda
-      c.save();
-      c.translate(64, 64);
-      c.rotate(-0.45);
-      c.strokeStyle = '#00e5ff';
-      c.lineWidth = 1.6;
-      c.beginPath();
-      c.ellipse(0, 0, 44, 15, 0, 0, Math.PI * 2);
-      c.stroke();
-      c.restore();
+      const { canvas: orbCanvas, c: oCtx } = _createOffscreen();
+      oCtx.translate(64, 64);
+      oCtx.rotate(-0.45);
+      oCtx.strokeStyle = '#00e5ff';
+      oCtx.lineWidth = 1.6;
+      oCtx.beginPath();
+      oCtx.ellipse(0, 0, 44, 15, 0, 0, Math.PI * 2);
+      oCtx.stroke();
+      c.drawImage(orbCanvas, 0, 0);
 
       // Rosa dei venti a 4 punte
       c.strokeStyle = '#84ffff';
@@ -881,17 +932,17 @@
 
     lunarTech(c) {
       _drawBlueprintBg(c, '#cfd8dc');
-      c.save();
-      c.fillStyle = 'rgba(0, 229, 255, 0.25)';
-      c.strokeStyle = '#eceff1';
-      c.lineWidth = 2.2;
-      c.beginPath();
-      c.arc(60, 64, 30, 0.25 * Math.PI, 1.75 * Math.PI);
-      c.arc(76, 64, 24, 1.65 * Math.PI, 0.35 * Math.PI, true);
-      c.closePath();
-      c.fill();
-      c.stroke();
-      c.restore();
+      const { canvas: moonCanvas, c: mCtx } = _createOffscreen();
+      mCtx.fillStyle = 'rgba(0, 229, 255, 0.25)';
+      mCtx.strokeStyle = '#eceff1';
+      mCtx.lineWidth = 2.2;
+      mCtx.beginPath();
+      mCtx.arc(60, 64, 30, 0.25 * Math.PI, 1.75 * Math.PI);
+      mCtx.arc(76, 64, 24, 1.65 * Math.PI, 0.35 * Math.PI, true);
+      mCtx.closePath();
+      mCtx.fill();
+      mCtx.stroke();
+      c.drawImage(moonCanvas, 0, 0);
     },
 
     deathStarTech(c) {
@@ -985,6 +1036,26 @@
       _drawEngineGlow(c, 86, 64, 5, '#69f0ae');
     }
   };
+
+  const PLANETARY_BUILDINGS = {};
+  for (const [key, fn] of Object.entries(RAW_PLANETARY_BUILDINGS)) {
+    PLANETARY_BUILDINGS[key] = _wrapPreRendered(key, fn);
+  }
+
+  const MOON_BUILDINGS = {};
+  for (const [key, fn] of Object.entries(RAW_MOON_BUILDINGS)) {
+    MOON_BUILDINGS[key] = _wrapPreRendered(key, fn);
+  }
+
+  const ORBITAL_STRUCTURES = {};
+  for (const [key, fn] of Object.entries(RAW_ORBITAL_STRUCTURES)) {
+    ORBITAL_STRUCTURES[key] = _wrapPreRendered(key, fn);
+  }
+
+  const RESEARCH_TECHS = {};
+  for (const [key, fn] of Object.entries(RAW_RESEARCH_TECHS)) {
+    RESEARCH_TECHS[key] = _wrapPreRendered(key, fn);
+  }
 
   G.registerRenderers(
     Object.assign({}, PLANETARY_BUILDINGS, MOON_BUILDINGS, ORBITAL_STRUCTURES, RESEARCH_TECHS, {

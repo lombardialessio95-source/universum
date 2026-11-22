@@ -333,6 +333,7 @@
     return `${_sectionHeader('Commercio & Mercato Nero', 'Scambiare risorse con BOT.')}
     <div class="glass-panel" style="padding:14px;">
       <p style="font-size:0.9rem; margin-bottom:6px;"><strong>Commercio BOT:</strong> scambi risorse con un pianeta BOT. Il tasso è fisso (Metallo:Cristallo:Deuterio = 3:2:1) ma ogni BOT può avere tassi diversi.</p>
+      <p style="font-size:0.9rem; margin-bottom:6px;"><strong>Mercante di Lune (universi Normali offline e online):</strong> costo 1.000.000 Deuterio, flotta di stanza sul pianeta distrutta, difese intatte. I detriti teorici valgono il 30% di Metallo e Cristallo delle navi perse; ogni 100.000 unità di detriti concede 1% di possibilità di Luna, massimo 20%. Per ingaggiarlo servono almeno 100.000 detriti teorici; i detriti sono sempre ritirati dal mercante, anche in caso di fallimento. In Creativa rimane il pulsante Crea Luna nella sezione Luna.</p>
       <p style="font-size:0.9rem; margin-bottom:6px;"><strong>Mercato Nero:</strong> scambio con tasso più sfavorevole (-15%) ma senza BOT.</p>
       <p style="font-size:0.9rem;"><strong>Contratti BOT:</strong> paghi 10.000 Metallo/giorno per avere un BOT che ti difende (bonus difensivo passivo).</p>
     </div>

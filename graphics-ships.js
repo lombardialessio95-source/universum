@@ -7,6 +7,7 @@
   const G = window.UniversumGraphics;
   if (!G) return;
 
+  const SIZE = 128;
   const {
     drawCardBg: _drawCardBg,
     drawMetallicHull: _drawMetallicHull,
@@ -14,10 +15,31 @@
     drawPanelLines: _drawPanelLines
   } = G.helpers;
 
+  const preRenderedOffscreens = {};
+
+  function _createOffscreen() {
+    const canvas = document.createElement('canvas');
+    canvas.width = SIZE;
+    canvas.height = SIZE;
+    return { canvas, c: canvas.getContext('2d') };
+  }
+
+  function _wrapPreRendered(key, drawFn) {
+    return function (targetCtx, mode) {
+      const cacheKey = mode ? `${key}:${mode}` : key;
+      if (!preRenderedOffscreens[cacheKey]) {
+        const { canvas, c } = _createOffscreen();
+        drawFn(c, mode);
+        preRenderedOffscreens[cacheKey] = canvas;
+      }
+      targetCtx.drawImage(preRenderedOffscreens[cacheKey], 0, 0);
+    };
+  }
+
   // =========================================================
   // RENDERERS: 14 NAVI
   // =========================================================
-  const SHIP_RENDERERS = {
+  const RAW_SHIP_RENDERERS = {
     smallCargo(c) {
       _drawCardBg(c, '#00d2ff');
       _drawEngineGlow(c, 26, 52, 11, '#00d2ff', Math.PI, 20);
@@ -462,23 +484,30 @@
       c.fill();
       c.stroke();
 
-      c.save();
-      c.shadowColor = '#00e676';
-      c.shadowBlur = 12;
-      c.strokeStyle = '#00e676';
-      c.lineWidth = 3.5;
-      c.beginPath();
-      c.moveTo(dishX, dishY);
-      c.lineTo(122, 16);
-      c.stroke();
+      // Pre-render del raggio in canvas offscreen dedicato (senza shadowBlur/trasformazioni ripetute)
+      const { canvas: beamCanvas, c: bCtx } = _createOffscreen();
+      bCtx.strokeStyle = 'rgba(0, 230, 118, 0.28)';
+      bCtx.lineWidth = 11;
+      bCtx.beginPath();
+      bCtx.moveTo(dishX, dishY);
+      bCtx.lineTo(122, 16);
+      bCtx.stroke();
 
-      c.strokeStyle = '#ffffff';
-      c.lineWidth = 1.3;
-      c.beginPath();
-      c.moveTo(dishX, dishY);
-      c.lineTo(122, 16);
-      c.stroke();
-      c.restore();
+      bCtx.strokeStyle = '#00e676';
+      bCtx.lineWidth = 3.5;
+      bCtx.beginPath();
+      bCtx.moveTo(dishX, dishY);
+      bCtx.lineTo(122, 16);
+      bCtx.stroke();
+
+      bCtx.strokeStyle = '#ffffff';
+      bCtx.lineWidth = 1.3;
+      bCtx.beginPath();
+      bCtx.moveTo(dishX, dishY);
+      bCtx.lineTo(122, 16);
+      bCtx.stroke();
+
+      c.drawImage(beamCanvas, 0, 0);
     },
 
     destroyer(c) {
@@ -510,11 +539,23 @@
         p.lineTo(104, 72); p.lineTo(58, 88); p.lineTo(18, 76); p.lineTo(28, 64);
       }, '#37474f', '#ffe082', '#ffc400');
       _drawPanelLines(c, [[40, 52, 96, 60], [40, 76, 96, 68], [58, 40, 58, 88]], 'rgba(255,196,0,0.4)');
-      c.save();
-      c.shadowColor = '#ffc400'; c.shadowBlur = 10;
-      c.strokeStyle = '#ffe082'; c.lineWidth = 3;
-      c.beginPath(); c.moveTo(84, 64); c.lineTo(124, 64); c.stroke();
-      c.restore();
+
+      const { canvas: lanceCanvas, c: lCtx } = _createOffscreen();
+      lCtx.strokeStyle = 'rgba(255, 196, 0, 0.32)';
+      lCtx.lineWidth = 9;
+      lCtx.beginPath();
+      lCtx.moveTo(84, 64);
+      lCtx.lineTo(124, 64);
+      lCtx.stroke();
+
+      lCtx.strokeStyle = '#ffe082';
+      lCtx.lineWidth = 3;
+      lCtx.beginPath();
+      lCtx.moveTo(84, 64);
+      lCtx.lineTo(124, 64);
+      lCtx.stroke();
+      c.drawImage(lanceCanvas, 0, 0);
+
       _drawEngineGlow(c, 84, 64, 7, '#ffc400');
       [48, 64, 80].forEach((lx) => _drawEngineGlow(c, lx, 58, 4, '#00d2ff'));
     },
@@ -531,17 +572,16 @@
     _drawCardBg(c, accent);
     const cx = 64, cy = 62, r = 36;
     // Corona di spire
-    c.save();
     c.strokeStyle = mode === 'limbo' ? '#546e7a' : '#ffc400';
     c.lineWidth = 3;
+    c.beginPath();
     for (let i = 0; i < 8; i++) {
       const a = (Math.PI / 4) * i + 0.2;
-      c.beginPath();
       c.moveTo(cx + Math.cos(a) * (r + 2), cy + Math.sin(a) * (r + 2));
       c.lineTo(cx + Math.cos(a) * (r + 13), cy + Math.sin(a) * (r + 13));
-      c.stroke();
     }
-    c.restore();
+    c.stroke();
+
     // Scafo eclisse
     const g = c.createRadialGradient(cx - 10, cy - 12, 4, cx, cy, r);
     g.addColorStop(0, mode === 'limbo' ? '#37474f' : '#4a1020');
@@ -550,54 +590,75 @@
     c.fillStyle = g;
     c.strokeStyle = mode === 'limbo' ? '#78909c' : '#ffc400';
     c.lineWidth = 1.6;
-    c.beginPath(); c.arc(cx, cy, r, 0, Math.PI * 2); c.fill(); c.stroke();
+    c.beginPath();
+    c.arc(cx, cy, r, 0, Math.PI * 2);
+    c.fill();
+    c.stroke();
+
     _drawPanelLines(c, [[cx - r, cy, cx + r, cy], [cx - 24, cy - 20, cx + 24, cy - 20], [cx - 24, cy + 20, cx + 24, cy + 20]], 'rgba(255,196,0,0.3)');
     _drawEngineGlow(c, cx, cy, mode === 'limbo' ? 8 : 13, mode === 'limbo' ? '#78909c' : '#ff1744');
+
     if (mode === 'damaged' || mode === 'repair') {
       // Fessure di danno e fasce di riparazione
-      c.save();
-      c.strokeStyle = '#ff5252'; c.lineWidth = 2;
-      c.beginPath(); c.moveTo(38, 44); c.lineTo(54, 60); c.lineTo(46, 74); c.moveTo(78, 38); c.lineTo(70, 54); c.stroke();
-      c.strokeStyle = '#ffc400'; c.lineWidth = 3;
-      c.beginPath(); c.moveTo(28, 96); c.lineTo(100, 96); c.stroke();
-      if (mode === 'repair') { c.fillStyle = '#ffc400'; c.fillRect(44, 90, 8, 12); c.fillRect(76, 90, 8, 12); }
-      c.restore();
+      c.strokeStyle = '#ff5252';
+      c.lineWidth = 2;
+      c.beginPath();
+      c.moveTo(38, 44); c.lineTo(54, 60); c.lineTo(46, 74);
+      c.moveTo(78, 38); c.lineTo(70, 54);
+      c.stroke();
+
+      c.strokeStyle = '#ffc400';
+      c.lineWidth = 3;
+      c.beginPath();
+      c.moveTo(28, 96); c.lineTo(100, 96);
+      c.stroke();
+
+      if (mode === 'repair') {
+        c.fillStyle = '#ffc400';
+        c.fillRect(44, 90, 8, 12);
+        c.fillRect(76, 90, 8, 12);
+      }
     }
+
     if (mode === 'limbo') {
-      // Alone spento e deriva: sagoma in dissolvenza verso il basso
-      c.save();
-      c.globalAlpha = 0.35; c.fillStyle = '#78909c';
-      c.beginPath(); c.ellipse(64, 108, 30, 6, 0, 0, Math.PI * 2); c.fill();
-      c.restore();
+      // Alone spento e deriva: sagoma pre-calcolata in dissolvenza verso il basso
+      const { canvas: limboCanvas, c: lCtx } = _createOffscreen();
+      lCtx.fillStyle = 'rgba(120, 144, 156, 0.35)';
+      lCtx.beginPath();
+      lCtx.ellipse(64, 108, 30, 6, 0, 0, Math.PI * 2);
+      lCtx.fill();
+      c.drawImage(limboCanvas, 0, 0);
     }
   }
 
   // =========================================================
   // RENDERERS: 10 DIFESE
   // =========================================================
-  const DEFENSE_RENDERERS = {
+  const RAW_DEFENSE_RENDERERS = {
     rocketLauncher(c) {
       _drawCardBg(c, '#ff9100');
       _drawMetallicHull(c, (p) => {
         p.moveTo(24, 106); p.lineTo(36, 86); p.lineTo(92, 86); p.lineTo(104, 106);
       }, '#263238', '#90a4ae', '#ff9100');
 
-      c.save();
-      c.translate(64, 62);
-      c.rotate(-0.45);
-      _drawMetallicHull(c, (p) => {
+      const { canvas: podCanvas, c: pCtx } = _createOffscreen();
+      pCtx.save();
+      pCtx.translate(64, 62);
+      pCtx.rotate(-0.45);
+      _drawMetallicHull(pCtx, (p) => {
         p.rect(-24, -18, 48, 36);
       }, '#37474f', '#cfd8dc', '#ff9100');
 
       [-12, 0, 12].forEach((ty) => {
-        c.fillStyle = '#101622';
-        c.fillRect(-18, ty - 4, 36, 8);
-        c.fillStyle = '#ff3d00';
-        c.beginPath();
-        c.arc(18, ty, 3.5, 0, Math.PI * 2);
-        c.fill();
+        pCtx.fillStyle = '#101622';
+        pCtx.fillRect(-18, ty - 4, 36, 8);
+        pCtx.fillStyle = '#ff3d00';
+        pCtx.beginPath();
+        pCtx.arc(18, ty, 3.5, 0, Math.PI * 2);
+        pCtx.fill();
       });
-      c.restore();
+      pCtx.restore();
+      c.drawImage(podCanvas, 0, 0);
     },
 
     lightLaser(c) {
@@ -646,20 +707,22 @@
         p.moveTo(22, 106); p.lineTo(34, 78); p.lineTo(88, 78); p.lineTo(98, 106);
       }, '#1c2636', '#78909c', '#448aff');
 
-      c.save();
-      c.translate(52, 68);
-      c.rotate(-0.36);
-      _drawMetallicHull(c, (p) => {
+      const { canvas: railCanvas, c: rCtx } = _createOffscreen();
+      rCtx.save();
+      rCtx.translate(52, 68);
+      rCtx.rotate(-0.36);
+      _drawMetallicHull(rCtx, (p) => {
         p.rect(-14, -12, 78, 8);
         p.rect(-14, 4, 78, 8);
       }, '#37474f', '#eceff1', '#448aff');
 
       [6, 22, 38, 54].forEach((bx) => {
-        c.fillStyle = '#00e5ff';
-        c.fillRect(bx, -14, 5, 28);
+        rCtx.fillStyle = '#00e5ff';
+        rCtx.fillRect(bx, -14, 5, 28);
       });
-      _drawEngineGlow(c, 66, 0, 10, '#00e5ff');
-      c.restore();
+      _drawEngineGlow(rCtx, 66, 0, 10, '#00e5ff');
+      rCtx.restore();
+      c.drawImage(railCanvas, 0, 0);
     },
 
     ionCannon(c) {
@@ -668,22 +731,24 @@
         p.moveTo(32, 106); p.lineTo(44, 82); p.lineTo(84, 82); p.lineTo(96, 106);
       }, '#263238', '#90a4ae', '#00e5ff');
 
-      c.save();
-      c.translate(64, 56);
-      c.rotate(-0.4);
-      c.strokeStyle = '#cfd8dc';
-      c.lineWidth = 3;
-      c.beginPath();
-      c.ellipse(0, 0, 32, 12, 0, 0, Math.PI * 2);
-      c.stroke();
+      const { canvas: ringCanvas, c: iCtx } = _createOffscreen();
+      iCtx.save();
+      iCtx.translate(64, 56);
+      iCtx.rotate(-0.4);
+      iCtx.strokeStyle = '#cfd8dc';
+      iCtx.lineWidth = 3;
+      iCtx.beginPath();
+      iCtx.ellipse(0, 0, 32, 12, 0, 0, Math.PI * 2);
+      iCtx.stroke();
 
-      c.rotate(0.8);
-      c.strokeStyle = '#00e5ff';
-      c.lineWidth = 2.2;
-      c.beginPath();
-      c.ellipse(0, 0, 32, 12, 0, 0, Math.PI * 2);
-      c.stroke();
-      c.restore();
+      iCtx.rotate(0.8);
+      iCtx.strokeStyle = '#00e5ff';
+      iCtx.lineWidth = 2.2;
+      iCtx.beginPath();
+      iCtx.ellipse(0, 0, 32, 12, 0, 0, Math.PI * 2);
+      iCtx.stroke();
+      iCtx.restore();
+      c.drawImage(ringCanvas, 0, 0);
 
       _drawEngineGlow(c, 64, 56, 20, '#00e5ff');
       c.fillStyle = '#ffffff';
@@ -834,6 +899,16 @@
       c.fill();
     }
   };
+
+  const SHIP_RENDERERS = {};
+  for (const [key, fn] of Object.entries(RAW_SHIP_RENDERERS)) {
+    SHIP_RENDERERS[key] = _wrapPreRendered(key, fn);
+  }
+
+  const DEFENSE_RENDERERS = {};
+  for (const [key, fn] of Object.entries(RAW_DEFENSE_RENDERERS)) {
+    DEFENSE_RENDERERS[key] = _wrapPreRendered(key, fn);
+  }
 
   G.registerRenderers(
     Object.assign({}, SHIP_RENDERERS, DEFENSE_RENDERERS, {

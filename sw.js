@@ -1,7 +1,7 @@
 /**
  * UNIVERSUM — Service Worker PWA (Offline-First + Network-First per Firebase)
  */
-const CACHE_NAME = 'universum-v11';
+const CACHE_NAME = 'universum-online-security-audit-v3';
 
 const ASSETS = [
   './',
@@ -19,7 +19,8 @@ const ASSETS = [
   './engine-actions.js',      // Azioni giocatore, turbo, creative e autosave
   './galaxy.js',              // Galassia procedurale, combattimenti e IA BOT
   './firebase-config.js',     // Configurazione Firebase Auth + Firestore
-  './multiplayer.js',         // Logica PvP online, chat e classifica
+  './moon-merchant.js',    // Mercante di Lune offline/online
+  './multiplayer.js',      // Logica PvP online, chat e classifica
   './ui-core.js',             // Regia UI, loop 1s, Panoramica e salvataggi
   './ui-economy.js',          // UI Edifici, Ricerche, Cantiere, Difese e Luna
   './ui-tactical.js',         // UI Flotta, Galassia, Spionaggio e Simulatore
@@ -28,7 +29,8 @@ const ASSETS = [
   // Moduli Plugin Espansione
   './missions-core.js',       // Ricerca Esplorazione, spinta 10-100%, slot e richiamo
   './siege-missions.js',      // Motore Assedi: Embargo Planetario (blocco rotte), Occupazione (5%/giorno + riscatto) e tick orbitale
-  './ui-fleet-movements.js'   // Schermata UI Movimento Flotta e stato assedi
+  './ui-fleet-movements.js',  // Schermata UI Movimento Flotta e stato assedi
+  './tutorial.js'             // Accademia Imperiale offline
 ];
 
 self.addEventListener('install', (event) => {

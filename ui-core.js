@@ -520,13 +520,6 @@
             <label for="mp-uni-name">Nome Universo Online</label>
             <input type="text" id="mp-uni-name" class="form-control" placeholder="Es. Andromeda PvP" maxlength="32" required>
           </div>
-          <div class="form-group">
-            <label for="mp-uni-npc">Modalità Avamposti</label>
-            <select id="mp-uni-npc" class="form-control">
-              <option value="none">100% PvP (Zero BOT)</option>
-              <option value="limited">PvP + Max 10 Avamposti Neutrali</option>
-            </select>
-          </div>
           <div class="form-grid-3">
             <div class="form-group">
               <label for="mp-uni-speed">Velocità</label>
@@ -552,17 +545,51 @@
             <label for="mp-uni-passcode">Codice Stanza (Opzionale per partita privata)</label>
             <input type="text" id="mp-uni-passcode" class="form-control" placeholder="Lascia vuoto per universo pubblico" maxlength="20">
           </div>
+          <div class="glass-panel" style="padding:12px; margin-top:12px;">
+            <h4 style="color:var(--res-crystal); margin-bottom:8px;">CONFIGURAZIONE BOT</h4>
+            <div class="form-group"><label for="mp-bot-density">Densità BOT: <span id="mp-bot-density-val">20%</span></label>
+              <input type="range" id="mp-bot-density" min="0" max="100" value="20" class="form-control"></div>
+            <div class="form-grid-3">
+              <div class="form-group"><label for="mp-bot-hostile">Ostili %</label><input type="number" id="mp-bot-hostile" class="form-control" min="0" max="100" value="30"></div>
+              <div class="form-group"><label for="mp-bot-neutral">Neutrali %</label><input type="number" id="mp-bot-neutral" class="form-control" min="0" max="100" value="40"></div>
+              <div class="form-group"><label for="mp-bot-peaceful">Pacifici %</label><input type="number" id="mp-bot-peaceful" class="form-control" min="0" max="100" value="30"></div>
+            </div>
+            <div class="form-group"><label for="mp-bot-level">Livello BOT</label><select id="mp-bot-level" class="form-control">
+              <option value="1">1 — Debole</option><option value="2" selected>2 — Medio</option>
+              <option value="3">3 — Forte</option><option value="4">4 — Elite</option></select></div>
+            <label style="display:block; margin-top:6px;"><input type="checkbox" id="mp-bot-growth" checked> I BOT crescono nel tempo</label>
+            <label style="display:block; margin-top:6px;"><input type="checkbox" id="mp-bot-raids" checked> Raid dei BOT ostili</label>
+          </div>
           <button type="submit" class="btn btn-green" style="width:100%; margin-top:8px;">${svgIcon('globe')} FONDA E ENTRA NELL'UNIVERSO</button>
         </form>
       `);
 
+      document.getElementById('mp-bot-density')?.addEventListener('input', (e) => {
+        document.getElementById('mp-bot-density-val').textContent = `${e.target.value}%`;
+      });
+      document.getElementById('mp-bot-hostile')?.addEventListener('input', (e) => {
+        document.getElementById('mp-bot-raids').disabled = Number(e.target.value) === 0;
+      });
       document.getElementById('form-mp-create-uni-modal')?.addEventListener('submit', async (e) => {
         e.preventDefault();
         if (!window.UniversumMP) return;
         try {
+          const h = Number(document.getElementById('mp-bot-hostile').value);
+          const n = Number(document.getElementById('mp-bot-neutral').value);
+          const p = Number(document.getElementById('mp-bot-peaceful').value);
+          if (![h, n, p].every((v) => Number.isInteger(v) && v >= 0 && v <= 100) || h + n + p !== 100) {
+            toast('Ostili + Neutrali + Pacifici devono totalizzare il 100%.', 'error');
+            return;
+          }
           const cfg = {
             name: document.getElementById('mp-uni-name').value,
-            npcMode: document.getElementById('mp-uni-npc').value,
+            botConfig: {
+              density: Number(document.getElementById('mp-bot-density').value),
+              personality: { hostile: h, neutral: n, peaceful: p },
+              level: Number(document.getElementById('mp-bot-level').value),
+              growth: document.getElementById('mp-bot-growth').checked,
+              raids: h > 0 && document.getElementById('mp-bot-raids').checked
+            },
             speed: Number(document.getElementById('mp-uni-speed').value),
             galaxies: Number(document.getElementById('mp-uni-galaxies').value),
             systemsPerGalaxy: Number(document.getElementById('mp-uni-systems').value),
@@ -851,9 +878,13 @@
       palette = { core: '#ffab00', mid: '#dd2c00', dark: '#1a0500', atmo: 'rgba(255, 110, 64, 0.4)', rings: false };
     }
 
-    function drawFrame() {
+    let lastPlanetFrame = 0;
+    function drawFrame(timestamp = 0) {
       if (!document.getElementById('overview-planet-canvas')) return;
-      st.planetAnimAngle += 0.008;
+      st.planetAnimId = requestAnimationFrame(drawFrame);
+      if (document.hidden || timestamp - lastPlanetFrame < 1000 / 24) return;
+      lastPlanetFrame = timestamp;
+      st.planetAnimAngle += 0.02;
       ctx.clearRect(0, 0, w, h);
 
       const halo = ctx.createRadialGradient(cx, cy, radius * 0.85, cx, cy, radius * 1.45);
@@ -973,10 +1004,9 @@
         ctx.restore();
       }
 
-      st.planetAnimId = requestAnimationFrame(drawFrame);
     }
 
-    drawFrame();
+    st.planetAnimId = requestAnimationFrame(drawFrame);
   };
 
   UI.refreshPlanetSelector = function () {
@@ -1081,6 +1111,7 @@
     }
 
     UI.state.currentView = viewName;
+    window.UniversumTutorial?.onView(viewName);
     UI.playSound('click');
 
     document.querySelectorAll('.sidebar-btn').forEach((btn) => {
@@ -1116,7 +1147,18 @@
         break;
       case 'fleet': UI.renderFleet(viewport); break;
       case 'movements': UI.renderFleetMovements(viewport); break;
-      case 'galaxy': await UI.renderGalaxy(viewport); break;
+      case 'galaxy':
+        await UI.renderGalaxy(viewport);
+        if (st.isMultiplayerMode && st.currentView === 'galaxy') {
+          const tradeButton = document.createElement('button');
+          tradeButton.type = 'button';
+          tradeButton.className = 'btn btn-blue btn-sm';
+          tradeButton.style.margin = '10px 0';
+          tradeButton.textContent = 'COMMERCIA CON UN BOT';
+          tradeButton.addEventListener('click', UI.openOnlineBotTradeModal);
+          viewport.prepend(tradeButton);
+        }
+        break;
       case 'espionage': UI.renderEspionageAndSim(viewport); break;
       case 'reports': await UI.renderReports(viewport); break;
       case 'moon': UI.renderMoon(viewport); break;
@@ -1130,6 +1172,47 @@
       case 'saves': UI.renderSavesMenu(viewport); break;
       default: UI.renderOverview(viewport);
     }
+  };
+
+  // Commercio online: solo BOT neutrali e pacifici, rapporto metallo/cristallo/deuterio 3:2:1.
+  UI.openOnlineBotTradeModal = function () {
+    const uni = UI.state.currentUniverse;
+    if (!UI.state.isMultiplayerMode || !uni) return;
+    const target = UI.state.fleetTarget || { g: UI.state.galaxyG, s: UI.state.galaxyS, p: 7 };
+    UI.openModal('COMMERCIO CON BOT', `
+      <form id="form-online-bot-trade">
+        <p class="text-muted">Seleziona le coordinate del BOT neutrale o pacifico. Scambio dal tuo primo pianeta (3 metallo = 2 cristallo = 1 deuterio).</p>
+        <div class="form-grid-3">
+          <div class="form-group"><label for="trade-bot-g">Galassia</label><input id="trade-bot-g" type="number" class="form-control" min="1" max="9" value="${Number(target.g) || 1}" required></div>
+          <div class="form-group"><label for="trade-bot-s">Sistema</label><input id="trade-bot-s" type="number" class="form-control" min="1" max="499" value="${Number(target.s) || 1}" required></div>
+          <div class="form-group"><label for="trade-bot-p">Posizione</label><input id="trade-bot-p" type="number" class="form-control" min="1" max="15" value="${Number(target.p) || 7}" required></div>
+        </div>
+        <div class="form-group"><label for="trade-bot-give">Risorsa da offrire</label><select id="trade-bot-give" class="form-control"><option value="metal">Metallo</option><option value="crystal">Cristallo</option><option value="deuterium">Deuterio</option></select></div>
+        <div class="form-group"><label for="trade-bot-amount">Quantità da offrire (min. 100)</label><input id="trade-bot-amount" type="number" class="form-control" min="100" step="1" value="300" required></div>
+        <div class="form-group"><label for="trade-bot-get">Risorsa richiesta</label><select id="trade-bot-get" class="form-control"><option value="crystal">Cristallo</option><option value="metal">Metallo</option><option value="deuterium">Deuterio</option></select></div>
+        <button type="submit" class="btn btn-green" style="width:100%;">CONFERMA SCAMBIO</button>
+      </form>
+    `);
+    document.getElementById('form-online-bot-trade')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const button = e.target.querySelector('button[type="submit"]');
+      button.disabled = true;
+      try {
+        const coords = { g: Number(document.getElementById('trade-bot-g').value),
+          s: Number(document.getElementById('trade-bot-s').value), p: Number(document.getElementById('trade-bot-p').value) };
+        const result = await window.UniversumMP.tradeWithOnlineBot(uni, coords,
+          document.getElementById('trade-bot-give').value,
+          Number(document.getElementById('trade-bot-amount').value),
+          document.getElementById('trade-bot-get').value);
+        await window.UniversumMP.syncPlayerState(uni, { force: true });
+        UI.closeModal();
+        UI.updateTopBarNumbers();
+        UI.renderCurrentView();
+        UI.toast(`Scambio completato: ${UI.formatNum(result.given)} ceduti, ${UI.formatNum(result.received)} ricevuti.`, 'success');
+      } catch (err) {
+        UI.toast(err.message || 'Scambio non riuscito.', 'error');
+      } finally { button.disabled = false; }
+    });
   };
 
   UI.renderOverview = function (viewport) {
@@ -1454,6 +1537,7 @@
     UI.cleanupMultiplayerListeners();
     st.isMultiplayerMode = false;
     st.currentUniverse = null;
+    window.UniversumTutorial?.clear();
 
     document.getElementById('screen-game')?.classList.add('hidden');
     document.getElementById('screen-lobby')?.classList.remove('hidden');
@@ -1543,6 +1627,9 @@
         }
         if (mpTickCounter % 60 === 0) {
           UI.persistUniverseState().catch(() => {});
+          if (window.UniversumMP?.maybeLaunchBotRaid) {
+            window.UniversumMP.maybeLaunchBotRaid(uni.id).catch((e) => console.warn('[MP Bot] Raid:', e));
+          }
         }
       } else {
         window.UniversumGalaxy.processFleetsAndBots(uni);
@@ -1568,7 +1655,9 @@
       }
       st.lastAlertCount = atkCount;
 
+      if (document.hidden) return; // Mantieni la simulazione, evita soltanto il lavoro DOM.
       UI.updateTopBarNumbers();
+      if (!st.isMultiplayerMode) window.UniversumTutorial?.check();
       UI.refreshAffordabilityButtons?.();
       document.querySelectorAll('.live-timer').forEach((el) => {
         const endTs = Number(el.dataset.end || 0);
@@ -1595,7 +1684,7 @@
     const sbComm = document.querySelector('.sidebar-btn[data-view="chat"]');
     if (sbComm) {
       sbComm.classList.toggle('hidden', !st.isMultiplayerMode);
-      sbComm.innerHTML = `${UI.svgIcon('chat')}<span>Comunicazioni</span> <span id="sidebar-chat-badge" class="badge badge-red ${st.unreadPrivateCount > 0 ? '' : 'hidden'}">${st.unreadPrivateCount}</span>`;
+      sbComm.innerHTML = `${UI.svgIcon('chat')}<span class="sidebar-comm-label">Comunicazioni</span><span id="sidebar-chat-badge" class="badge badge-red ${st.unreadPrivateCount > 0 ? '' : 'hidden'}">${st.unreadPrivateCount}</span>`;
     }
 
     const drComm = document.querySelector('.drawer-item[data-view="chat"]');
@@ -1627,6 +1716,7 @@
     UI.updateTopBarNumbers();
     UI.switchView('overview');
     UI.startGameLoop();
+    window.UniversumTutorial?.onStart();
 
     if (!universe.creativeMode && offlineReport.offlineSeconds >= 30) {
       const unitNames = Object.entries(offlineReport.completedUnits)
@@ -1674,7 +1764,8 @@
         universe.incomingAttacks = incomingList;
         if (incomingList.length > st.lastAlertCount) {
           UI.playSound('alarm');
-          UI.toast('RADAR PvP: Un giocatore ha lanciato una flotta verso di te!', 'error');
+          const hasBot = incomingList.some((f) => String(f.attackerUid || '').startsWith('npc_raid_'));
+          UI.toast(hasBot ? 'RADAR: Raid BOT in arrivo sul tuo pianeta!' : 'RADAR PvP: Un giocatore ha lanciato una flotta verso di te!', 'error');
         }
         st.lastAlertCount = incomingList.length;
         if (st.currentView === 'overview') UI.renderCurrentView();

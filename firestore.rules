@@ -5,14 +5,11 @@ rules_version = '2';
 // NOTA: file da pubblicare con `firebase deploy --only firestore:rules`.
 // Il controllo applicativo resta anche nella funzione di join (claimServerSlot).
 //
-// REVISIONE SICUREZZA (calibrata sulle scritture REALI del client in multiplayer.js):
-// - Le flotte e i pianeti vengono risolti da QUALUNQUE client (attacchi, ritorni, tributi, conquiste),
-//   quindi non si può limitare la scrittura al solo proprietario: i non-proprietari possono toccare
-//   solo i campi elencati in planetFieldsForOthers().
-// - I messaggi (rapporti) sono letti solo dal destinatario; le chat private solo dai partecipanti.
-// - L'universo può essere modificato solo dal fondatore, tranne playerCount (join/leave, +/-1).
-// LIMITE NOTO: senza Cloud Functions (piano Blaze) un client può comunque dichiarare risorse/navi
-// non sue sul PROPRIO pianeta o forgiare un evento di risoluzione: non è chiudibile solo con le regole.
+// HARDENING 22/11/2026: flotte modificabili solo da attaccante/difensore,
+// partenza con proprieta' della base, vincolo di provenienza per conquiste,
+// NPC raid confinati ai pianeti del richiedente, rapporti privati.
+// IMPORTANTE: il motore resta client-side; regole Firestore NON verificano
+// calcolo risorse, esito combattimenti e accrediti. Si veda documents/audit sicurezza online.txt.
 
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -44,29 +41,101 @@ service cloud.firestore {
         );
     }
 
-    // playerCount può mancare nei server creati con versioni vecchie: in quel caso vale 0
     function oldPlayerCount() {
       return ('playerCount' in resource.data) ? resource.data.playerCount : 0;
     }
 
     // Campi di un pianeta che un NON proprietario può modificare (risoluzione flotte, assedi,
-    // conquista, inbox di variazioni, detriti). Tutto il resto (edifici, nome, coordinate...) è solo del proprietario.
+    // conquista, inbox di variazioni, detriti).
     function planetFieldsForOthers() {
       return ['inbox', 'debris', 'embargo', 'occupation', 'moon',
         'ownerUid', 'ownerName', 'isNpc',
+        'botLevel', 'botPersonality', 'botCreatedAt', 'growthEnabled',
         'resources', 'fleet', 'defenses',
-        'buildQueue', 'shipyardQueue', 'defenseQueue', 'lastUpdated'];
+        'buildQueue', 'shipyardQueue', 'defenseQueue', 'lastUpdated', 'lastResolutionFleetId'];
     }
 
-    // I chatId privati sono "uidA_uidB" (ordinati): il partecipante è riconoscibile dall'id,
-    // anche per il PRIMO messaggio, quando il documento della chat non esiste ancora.
+    // P-R3: campi di una flotta che chiunque autenticato può modificare (risoluzione lato client).
+    // NON include attackerUid, attackerName, attackerTech, defenderUid, targetCoords, originCoords,
+    // targetKey, cargo (immutabile durante la risoluzione), ransom, schemaVersion.
+    // Include 'mission' perché recallOnlineFleet imposta mission='recall'.
+    // Include 'schemaVersion' perché migrateOnlineFleets aggiorna lo schema.
+    function fleetFieldsForUpdate() {
+      return ['status', 'phase', 'resolved', 'completedAt',
+        'ships', 'fleet', 'cargo',
+        'arrivalTime', 'returnTime',
+        'siegeDeuterium', 'lastSiegeTickAt', 'siegeStartedAt',
+        'pendingRansom', 'repaired', 'repairReason',
+        'mission', 'schemaVersion', 'departureTime'];
+    }
+
+    // Un client che non partecipa allo scontro non puo' modificare le flotte.
+    // La risoluzione rimane client-side: NON e' una prova di risultato di combattimento.
+    function fleetParty() {
+      return resource.data.attackerUid == request.auth.uid
+        || resource.data.defenderUid == request.auth.uid;
+    }
+
+    function validHumanFleetCreate(uniId) {
+      return request.resource.data.attackerUid == request.auth.uid
+        && request.resource.data.originCoords is map
+        && request.resource.data.targetCoords is map
+        && request.resource.data.targetKey is string
+        && request.resource.data.ships is map
+        && request.resource.data.cargo is map
+        && request.resource.data.mission in [
+          'attack', 'destroyMoon', 'spy', 'transport', 'deploy', 'colonize',
+          'recycle', 'expedition', 'embargo', 'blockade', 'occupy'
+        ]
+        && request.resource.data.status == 'outbound'
+        && request.resource.data.resolved == false
+        && request.resource.data.arrivalTime is number
+        && request.resource.data.departureTime is number
+        && request.resource.data.arrivalTime > request.resource.data.departureTime
+        && request.resource.data.arrivalTime > request.time.toMillis()
+        && request.resource.data.originKey is string
+        && exists(/databases/$(database)/documents/online_universes/$(uniId)/planets/$(request.resource.data.originKey))
+        && get(/databases/$(database)/documents/online_universes/$(uniId)/planets/$(request.resource.data.originKey)).data.ownerUid == request.auth.uid;
+    }
+
+    function validNpcRaidCreate(uniId, fleetId) {
+      return fleetId.matches('^npc_raid_' + request.auth.uid + '_[0-9]+$')
+        && request.resource.data.attackerUid is string
+        && request.resource.data.attackerUid.matches('^npc_raid_.*')
+        && request.resource.data.defenderUid == request.auth.uid
+        && request.resource.data.mission == 'attack'
+        && request.resource.data.status == 'outbound'
+        && request.resource.data.resolved == false
+        && request.resource.data.targetKey is string
+        && exists(/databases/$(database)/documents/online_universes/$(uniId)/planets/$(request.resource.data.targetKey))
+        && get(/databases/$(database)/documents/online_universes/$(uniId)/planets/$(request.resource.data.targetKey)).data.ownerUid == request.auth.uid;
+    }
+
+    // La conquista deve almeno essere collegata a una flotta d'attacco
+    // reale, diretta su QUESTO pianeta e gia' arrivata.
+    function hasArrivalEvidence(uniId, planetId) {
+      return request.resource.data.lastResolutionFleetId is string
+        && exists(/databases/$(database)/documents/online_universes/$(uniId)/fleets/$(request.resource.data.lastResolutionFleetId))
+        && get(/databases/$(database)/documents/online_universes/$(uniId)/fleets/$(request.resource.data.lastResolutionFleetId)).data.attackerUid == request.auth.uid
+        && get(/databases/$(database)/documents/online_universes/$(uniId)/fleets/$(request.resource.data.lastResolutionFleetId)).data.targetKey == planetId
+        && get(/databases/$(database)/documents/online_universes/$(uniId)/fleets/$(request.resource.data.lastResolutionFleetId)).data.mission == 'attack'
+        && get(/databases/$(database)/documents/online_universes/$(uniId)/fleets/$(request.resource.data.lastResolutionFleetId)).data.arrivalTime <= request.time.toMillis();
+    }
+
+    // P-R5: validazione schema per un messaggio di rapporto (messages)
+    function validReport() {
+      return request.resource.data.recipientUid is string
+        && request.resource.data.recipientUid.size() > 0
+        && request.resource.data.title is string
+        && request.resource.data.body is string;
+    }
+
     function isChatParticipant(chatId) {
       return request.auth.uid in chatId.split('_');
     }
 
     match /users/{uid} {
       allow read: if signedIn() && request.auth.uid == uid;
-      // Il conteggio server non puo' mai superare 3 lato server
       allow create, update: if signedIn() && request.auth.uid == uid
         && (!('serverIds' in request.resource.data) || request.resource.data.serverIds.size() <= 3)
         && (!('serverCount' in request.resource.data) || request.resource.data.serverCount <= 3);
@@ -79,7 +148,6 @@ service cloud.firestore {
         && (request.resource.data.founderUid == request.auth.uid
           || request.resource.data.ownerUid == request.auth.uid)
         && underServerLimit(uniId);
-      // Modifica: solo il fondatore, oppure un giocatore che entra/esce (playerCount, +/- 1)
       allow update: if signedIn()
         && (
           isFounder(uniId)
@@ -91,59 +159,81 @@ service cloud.firestore {
             && oldPlayerCount() - request.resource.data.playerCount <= 1
           )
         );
-      // Eliminazione server: solo il creatore (founderUid/ownerUid)
       allow delete: if signedIn() && isFounder(uniId);
 
       match /players/{playerId} {
         allow read: if signedIn();
-        // Join a un 4o server bloccato lato server se non gia' membro
         allow create: if signedIn() && request.auth.uid == playerId && underServerLimit(uniId);
-        allow update, delete: if signedIn()
-          && (request.auth.uid == playerId || isFounder(uniId));
+        allow update, delete: if signedIn() && request.auth.uid == playerId;
       }
 
       match /planets/{planetId} {
         allow read: if signedIn();
-        // Creazione: pianeta di casa (join), colonie (risoluzione), avamposti BOT (creazione universo)
-        allow create: if signedIn();
-        // Proprietario: tutto. Altri: solo i campi di risoluzione elencati sopra.
+        allow create: if signedIn() && (
+          request.resource.data.ownerUid == request.auth.uid
+          || (request.resource.data.isNpc == true && isFounder(uniId))
+          || (request.resource.data.isNpc == true
+            && request.resource.data.ownerUid == null
+            && exists(/databases/$(database)/documents/online_universes/$(uniId))
+            && 'botConfig' in get(/databases/$(database)/documents/online_universes/$(uniId)).data)
+        );
         allow update: if signedIn()
           && (
             resource.data.ownerUid == request.auth.uid
-            || request.resource.data.diff(resource.data).affectedKeys().hasOnly(planetFieldsForOthers())
+            || (
+              request.resource.data.diff(resource.data).affectedKeys().hasOnly(planetFieldsForOthers())
+              && (
+                request.resource.data.ownerUid == resource.data.ownerUid
+                || (request.resource.data.ownerUid == request.auth.uid
+                    && hasArrivalEvidence(uniId, planetId))
+              )
+            )
           );
-        // Eliminazione: proprietario (abbandono server) o fondatore (eliminazione server)
         allow delete: if signedIn()
           && (resource.data.ownerUid == request.auth.uid || isFounder(uniId));
       }
 
       match /fleets/{fleetId} {
         allow read: if signedIn();
-        // Una flotta può essere creata solo a proprio nome
-        allow create: if signedIn() && request.resource.data.attackerUid == request.auth.uid;
-        // Aggiornamento aperto: qualunque client risolve arrivi/ritorni/assedi
-        allow update: if signedIn();
+        allow create: if signedIn()
+          && (validHumanFleetCreate(uniId) || validNpcRaidCreate(uniId, fleetId));
+        // P-R3: aggiornamento consentito a chiunque autenticato, MA solo sui campi di risoluzione.
+        // Questo impedisce a un client malevolo di cambiare attackerUid, targetCoords, originCoords,
+        // o di riscrivere ships/cargo con valori inventati durante il volo.
+        allow update: if signedIn() && fleetParty()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(fleetFieldsForUpdate())
+          && (
+            request.resource.data.mission == resource.data.mission
+            || (resource.data.attackerUid == request.auth.uid
+                && resource.data.status == 'outbound'
+                && request.resource.data.mission == 'recall'
+                && request.resource.data.status == 'returning')
+          );
         allow delete: if signedIn()
           && (resource.data.attackerUid == request.auth.uid || isFounder(uniId));
       }
 
       match /messages/{messageId} {
-        // Rapporti: li legge solo il destinatario (il fondatore solo per eliminare il server)
         allow read: if signedIn()
-          && (resource.data.recipientUid == request.auth.uid || isFounder(uniId));
-        // Creazione aperta: la risoluzione scrive rapporti anche per altri giocatori
-        allow create: if signedIn();
+          && resource.data.recipientUid == request.auth.uid;
+        // P-R4: la creazione è aperta (la risoluzione genera rapporti per altri giocatori),
+        // ma lo schema deve essere valido.
+        allow create: if signedIn() && validReport();
         allow update: if false;
         allow delete: if signedIn()
-          && (resource.data.recipientUid == request.auth.uid || isFounder(uniId));
+          && resource.data.recipientUid == request.auth.uid;
       }
 
       match /chat/{messageId} {
-        allow read, write: if signedIn();
+        // P-R5: chiunque autenticato può leggere e creare, ma solo l'autore può eliminare.
+        // Nessuno può modificare un messaggio esistente.
+        allow read: if signedIn();
+        allow create: if signedIn() && request.resource.data.uid == request.auth.uid;
+        allow update: if false;
+        allow delete: if signedIn() && resource.data.uid == request.auth.uid;
       }
 
       match /private_chats/{chatId} {
-        // get su una chat (anche non ancora creata) per id; list solo per i propri partecipanti
         allow get: if signedIn() && (isChatParticipant(chatId) || isFounder(uniId));
         allow list: if signedIn()
           && (request.auth.uid in resource.data.participants || isFounder(uniId));

@@ -33,10 +33,21 @@
         ? (planet.bacinoSpaziale?.crepuscolo?.status === 'active' ? 1 : 0)
         : Number(planet.fleet[shipId] || 0);
     const dist = Galaxy.calculateDistance(planet.coords, st.fleetTarget);
+    // La capacità si calcola dalle navi selezionate, come nei motori offline/online.
+    const cargoCapacity = Object.entries(st.fleetSelection).reduce((sum, [sid, quantity]) => {
+      const validQty = Math.min(getShipAvail(sid), Math.max(0, Math.floor(Number(quantity) || 0)));
+      return sum + validQty * Number(Data.SHIPS[sid]?.cargo || 0);
+    }, 0);
     const flightStats = MCore
       ? MCore.getAdjustedFlightStats(uni, st.fleetSelection, dist, st.fleetFuelPercent, st.fleetExploreHours, st.fleetMission)
       : Galaxy.getFleetSpeedAndFuel(uni, st.fleetSelection, dist);
 
+    // Il carburante occupa spazio in Galaxy.launchFleet: riservarlo anche
+    // nel caricamento assistito evita di suggerire spedizioni non valide.
+    const fuelReserved = Math.max(0, Math.ceil(Number(flightStats.fuelCost) || 0));
+    const cargoUsable = Math.max(0, Math.floor(cargoCapacity - fuelReserved));
+    const cargoLoaded = ['metal', 'crystal', 'deuterium'].reduce((n, key) =>
+      n + Math.max(0, Math.floor(Number(st.fleetCargo[key]) || 0)), 0);
     const embargoHours = (st.fleetMission === 'embargo' && MCore)
       ? MCore.calculateEmbargoHours(st.fleetSelection, st.fleetCargo.deuterium)
       : 0;
@@ -161,18 +172,28 @@
             </div>
           </div>
 
-          <div class="form-grid-3">
-            <div class="form-group">
-              <label>Carico Metallo</label>
-              <input type="number" id="flt-cargo-m" class="form-control" min="0" value="${st.fleetCargo.metal}">
+          <div class="fleet-cargo-panel">
+            <div class="fleet-cargo-heading">
+              <strong>${svgIcon('cargo')} GESTIONE STIVA</strong>
+              <button type="button" id="flt-cargo-thirds" class="btn btn-blue btn-sm" title="Distribuisci un terzo della stiva per ciascuna risorsa disponibile">SMEZZA · ⅓ PER RISORSA</button>
             </div>
-            <div class="form-group">
-              <label>Carico Cristallo</label>
-              <input type="number" id="flt-cargo-c" class="form-control" min="0" value="${st.fleetCargo.crystal}">
+            <div class="fleet-cargo-meter" role="progressbar" aria-label="Occupazione stiva" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${cargoUsable ? Math.min(100, Math.round(cargoLoaded * 100 / cargoUsable)) : 0}">
+              <div id="flt-cargo-meter-fill" style="width:${cargoUsable ? Math.min(100, Math.round(cargoLoaded * 100 / cargoUsable)) : 0}%"></div>
             </div>
-            <div class="form-group">
-              <label>${st.fleetMission === 'embargo' ? 'Riserva Deuterio Embargo' : 'Carico Deuterio'}</label>
-              <input type="number" id="flt-cargo-d" class="form-control" min="0" value="${st.fleetCargo.deuterium}">
+            <p class="text-muted fleet-cargo-status" id="flt-cargo-status" aria-live="polite">Carico ${formatNum(cargoLoaded)} / ${formatNum(cargoUsable)} · Carburante riservato ${formatNum(fuelReserved)} D</p>
+            <div class="fleet-cargo-grid">
+              ${[
+                { key: 'metal', label: 'Metallo', short: 'm' },
+                { key: 'crystal', label: 'Cristallo', short: 'c' },
+                { key: 'deuterium', label: st.fleetMission === 'embargo' ? 'Deuterio Embargo' : 'Deuterio', short: 'd' }
+              ].map((r) => `<div class="fleet-cargo-resource">
+                <label for="flt-cargo-${r.short}">${UI.resIconTag(r.key)} ${r.label}</label>
+                <input type="number" inputmode="numeric" id="flt-cargo-${r.short}" class="form-control fleet-cargo-input" min="0" value="${Math.max(0, Math.floor(Number(st.fleetCargo[r.key]) || 0))}">
+                <div class="fleet-cargo-actions">
+                  <button type="button" class="btn btn-ghost btn-sm fleet-cargo-fill" data-resource="${r.key}" title="Carica al massimo lo spazio rimasto">RIEMPI</button>
+                  <button type="button" class="btn btn-ghost btn-sm fleet-cargo-half" data-resource="${r.key}" title="Carica metà dello spazio ancora libero">METÀ</button>
+                </div>
+              </div>`).join('')}
             </div>
           </div>
 
@@ -188,6 +209,59 @@
         </div>
       </div>
     `;
+
+    const cargoFields = { metal: 'flt-cargo-m', crystal: 'flt-cargo-c', deuterium: 'flt-cargo-d' };
+    const cargoKeys = Object.keys(cargoFields);
+    const cargoInt = (value) => Math.max(0, Math.floor(Number(value) || 0));
+    const cargoRead = () => Object.fromEntries(cargoKeys.map(key =>
+      [key, cargoInt(document.getElementById(cargoFields[key])?.value)]));
+    const cargoAvailable = (key) => uni.creativeMode
+      ? Number.MAX_SAFE_INTEGER
+      : Math.max(0, cargoInt(planet.resources?.[key]) - (key === 'deuterium' ? fuelReserved +
+          (st.fleetMission === 'explore' && st.fleetBlackHole ? 50000 : 0) : 0));
+    const cargoWrite = (values) => {
+      for (const key of cargoKeys) {
+        document.getElementById(cargoFields[key]).value = String(cargoInt(values[key]));
+        st.fleetCargo[key] = cargoInt(values[key]);
+      }
+      cargoUpdateDisplay();
+    };
+    const cargoUpdateDisplay = () => {
+      const current = cargoRead();
+      for (const key of cargoKeys) st.fleetCargo[key] = current[key];
+      const load = Object.values(current).reduce((a,b) => a + b, 0);
+      const percent = cargoUsable ? Math.round(load / cargoUsable * 100) : 0;
+      const fill = document.getElementById('flt-cargo-meter-fill');
+      if (fill) fill.style.width = `${Math.min(100, percent)}%`;
+      const meter = viewport.querySelector('.fleet-cargo-meter');
+      if (meter) meter.setAttribute('aria-valuenow', String(Math.min(100, percent)));
+      const status = document.getElementById('flt-cargo-status');
+      if (status) {
+        status.textContent = `Carico ${formatNum(load)} / ${formatNum(cargoUsable)} · Carburante riservato ${formatNum(fuelReserved)} D`;
+        status.classList.toggle('fleet-cargo-overload', load > cargoUsable || cargoKeys.some(k => current[k] > cargoAvailable(k)));
+      }
+    };
+    const cargoSetOne = (key, part) => {
+      const values = cargoRead();
+      const other = cargoKeys.filter(k => k !== key).reduce((a,k) => a + values[k], 0);
+      const free = Math.max(0, cargoUsable - other);
+      const target = part === 1 ? free : Math.floor(free / 2);
+      values[key] = Math.min(target, cargoAvailable(key));
+      cargoWrite(values);
+    };
+    viewport.querySelectorAll('.fleet-cargo-fill').forEach(btn =>
+      btn.addEventListener('click', () => cargoSetOne(btn.dataset.resource, 1)));
+    viewport.querySelectorAll('.fleet-cargo-half').forEach(btn =>
+      btn.addEventListener('click', () => cargoSetOne(btn.dataset.resource, 2)));
+    document.getElementById('flt-cargo-thirds')?.addEventListener('click', () => {
+      // Ogni risorsa riceve al massimo 1/3 della capienza utile. Non si
+      // spostano arbitrariamente le quote mancanti su altre risorse.
+      const third = Math.floor(cargoUsable / 3);
+      const values = Object.fromEntries(cargoKeys.map(k => [k, Math.min(third, cargoAvailable(k))]));
+      cargoWrite(values);
+    });
+    viewport.querySelectorAll('.fleet-cargo-input').forEach(input =>
+      input.addEventListener('input', cargoUpdateDisplay));
 
     const syncTarget = () => {
       st.fleetTarget.g = Math.max(1, Number(document.getElementById('flt-target-g').value) || 1);
@@ -248,7 +322,7 @@
       UI.renderCurrentView();
     });
 
-    ['flt-target-g', 'flt-target-s', 'flt-target-p', 'flt-explore-hours', 'flt-cargo-d'].forEach((id) => {
+    ['flt-target-g', 'flt-target-s', 'flt-target-p', 'flt-explore-hours'].forEach((id) => {
       document.getElementById(id)?.addEventListener('change', () => {
         syncTarget();
         UI.renderCurrentView();
@@ -357,17 +431,17 @@
             <div>
               <label style="font-size:0.8rem; color:var(--res-crystal);">GALASSIA (1-${uni.galaxies})</label>
               <div style="display:flex; gap:6px; margin-top:4px;">
-                <button type="button" id="gal-prev-g" class="btn btn-blue btn-sm">&lt;</button>
+                <button type="button" id="gal-prev-g" class="btn btn-blue btn-sm gal-nav-btn" aria-label="Precedente"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 5-7 7 7 7"/></svg></button>
                 <input type="number" id="gal-inp-g" class="form-control" value="${sysData.galaxy}" min="1" max="${uni.galaxies}" style="text-align:center;">
-                <button type="button" id="gal-next-g" class="btn btn-blue btn-sm">&gt;</button>
+                <button type="button" id="gal-next-g" class="btn btn-blue btn-sm gal-nav-btn" aria-label="Successivo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m10 5 7 7-7 7"/></svg></button>
               </div>
             </div>
             <div>
               <label style="font-size:0.8rem; color:var(--res-crystal);">SISTEMA (1-${uni.systemsPerGalaxy})</label>
               <div style="display:flex; gap:6px; margin-top:4px;">
-                <button type="button" id="gal-prev-s" class="btn btn-blue btn-sm">&lt;</button>
+                <button type="button" id="gal-prev-s" class="btn btn-blue btn-sm gal-nav-btn" aria-label="Precedente"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 5-7 7 7 7"/></svg></button>
                 <input type="number" id="gal-inp-s" class="form-control" value="${sysData.system}" min="1" max="${uni.systemsPerGalaxy}" style="text-align:center;">
-                <button type="button" id="gal-next-s" class="btn btn-blue btn-sm">&gt;</button>
+                <button type="button" id="gal-next-s" class="btn btn-blue btn-sm gal-nav-btn" aria-label="Successivo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m10 5 7 7-7 7"/></svg></button>
               </div>
             </div>
           </div>
@@ -637,7 +711,7 @@
           <div class="glass-panel" style="padding:14px; border-color:var(--btn-gold);">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
               <h2 style="font-size:1.05rem; color:var(--btn-gold);">SIMULATORE TATTICO — ${escapeHTML(selectedReport.targetName)} [${selectedReport.key}]</h2>
-              <button type="button" id="btn-close-sim" class="btn btn-ghost btn-sm">✕ CHIUDI</button>
+              <button type="button" id="btn-close-sim" class="btn btn-ghost btn-sm"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" style="vertical-align:middle"><path d="M5 5l14 14M19 5L5 19"/></svg> CHIUDI</button>
             </div>
             <div id="sim-results-panel" style="background:rgba(0,0,0,0.45); padding:12px; border-radius:10px; margin-bottom:12px;"></div>
             <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:14px;">
@@ -821,14 +895,103 @@
     const Galaxy = window.UniversumGalaxy;
     const pIdx = UI.getActivePlanetIndex();
     const contracts = uni.contracts || [];
+    // Servizio indipendente dai BOT ordinari: disponibile anche con BOT pacifici
+    // o senza BOT nel server. Selezione libera di tutti i pianeti posseduti.
+    const moonMerchant = window.UniversumMoonMerchant;
+    const ownedPlanets = (uni.planets || []).filter(p => p && p.coords);
+    const initialIndex = ownedPlanets.indexOf(uni.planets[pIdx]);
+    const merchantPanel = (!uni.creativeMode && moonMerchant) ? `
+      <section id="moon-merchant-section" class="glass-panel moon-merchant-panel" style="padding:18px; border:1px solid rgba(124,195,255,.42);">
+        <h2 style="font-size:1.12rem; color:var(--res-crystal); margin-bottom:10px;">${svgIcon('moon')} MERCANTE DI LUNE</h2>
+        <p class="text-muted" style="margin-bottom:10px;">Il Mercante di Lune è un servizio speciale, sempre disponibile anche negli universi con <strong>BOT pacifici</strong> o senza BOT. Non è un attacco ostile automatico: parte <strong>solo dopo la tua conferma</strong>.</p>
+        <p style="margin-bottom:10px;">Un attacco orbitale simulato, con forza schiacciante, distrugge <strong>tutte le navi stazionate</strong> sul pianeta selezionato. <strong>Difese, edifici e pianeta non subiscono danni</strong>. Le flotte in viaggio non vengono coinvolte.</p>
+        <p style="margin-bottom:10px;">Il compenso è <strong>1.000.000 di Deuterio</strong> prelevato dal pianeta scelto, anche se la Luna non si forma. Ogni <strong>100.000 unità di detriti teorici</strong> (30% del metallo e del cristallo delle navi distrutte) forniscono <strong>1%</strong> di probabilità, fino al <strong>20%</strong>. Il Mercante recupera tutti i detriti: non compare nessun campo riciclabile.</p>
+        <p class="text-muted" style="margin-bottom:12px;">La missione viene risolta immediatamente, senza generare un raid BOT PvP e senza dipendere dalla modalità pacifica.</p>
+        <div class="form-group" style="margin-bottom:12px;">
+          <label for="moon-merchant-planet">Pianeta sul quale tentare di creare la Luna</label>
+          <select id="moon-merchant-planet" class="form-control">
+            ${ownedPlanets.map((p, i) => `<option value="${i}" ${i === Math.max(0,initialIndex) ? 'selected' : ''}>${escapeHTML(p.name || 'Pianeta')} [${Number(p.coords.g)}:${Number(p.coords.s)}:${Number(p.coords.p)}]${p.moon ? ' — LUNA PRESENTE' : ''}</option>`).join('')}
+          </select>
+        </div>
+        <div id="moon-merchant-status" aria-live="polite" style="margin-bottom:12px;"></div>
+        <button type="button" id="btn-moon-merchant" class="btn btn-blue" style="width:100%;" disabled>${svgIcon('moon')} INGAGGIA IL MERCANTE · 1.000.000 D</button>
+      </section>` : '';
+
+    const activateMerchant = () => {
+      const selector = viewport.querySelector('#moon-merchant-planet');
+      const status = viewport.querySelector('#moon-merchant-status');
+      const button = viewport.querySelector('#btn-moon-merchant');
+      if (!selector || !status || !button || !moonMerchant) return;
+      let busy = false;
+      const selected = () => ownedPlanets[Number(selector.value)];
+      const renderEstimate = () => {
+        const planet = selected();
+        const check = moonMerchant.inspect(planet);
+        const canHire = Boolean(planet && check.available);
+        button.disabled = busy || !canHire;
+        status.innerHTML = `
+          <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; margin-bottom:10px;">
+            <div><small class="text-muted">Navi da sacrificare</small><br><strong>${formatNum(check.ships)}</strong></div>
+            <div><small class="text-muted">Detriti teorici</small><br><strong>${formatNum(check.debris)}</strong></div>
+            <div><small class="text-muted">Probabilità Luna</small><br><strong>${check.chance}%</strong></div>
+            <div><small class="text-muted">Deuterio disponibile</small><br><strong>${formatNum(planet?.resources?.deuterium || 0)}</strong></div>
+          </div>
+          ${check.reason ? `<p style="color:var(--btn-gold);">${escapeHTML(check.reason)}</p>` : '<p style="color:var(--btn-green);">Missione pronta. Le difese resteranno intatte.</p>'}`;
+        return check;
+      };
+      selector.addEventListener('change', renderEstimate);
+      renderEstimate();
+      button.addEventListener('click', async () => {
+        if (busy) return;
+        const planet = selected();
+        if (!planet) return;
+        // Rileggi il pianeta prima del pagamento, non affidarti al riepilogo mostrato.
+        const check = moonMerchant.inspect(planet);
+        if (!check.available) { renderEstimate(); UI.toast(check.reason, 'error'); return; }
+        if (!window.confirm(`MERCANTE DI LUNE — ${planet.name} [${planet.coords.g}:${planet.coords.s}:${planet.coords.p}]\n\nPerderai ${formatNum(check.ships)} navi stazionate e 1.000.000 Deuterio, anche se il tentativo fallisce.\nProbabilità di Luna: ${check.chance}%.\nDifese ed edifici non saranno colpiti. Nessun detrito resterà sul pianeta.\n\nConfermi il lancio dell'attacco orbitale?`)) return;
+        busy = true;
+        button.disabled = true;
+        selector.disabled = true;
+        try {
+          let result;
+          if (st.isMultiplayerMode) {
+            // Prima consolidiamo le risorse e la flotta locale. La transazione online
+            // è poi l'unica a sottrarre tariffa e navi (anche se altri client sono attivi).
+            await UI.persistUniverseState();
+            result = await window.UniversumMP.hireOnlineMoonMerchant(uni, planet.coords);
+            await window.UniversumMP.syncPlayerState(uni, { force: true });
+            if (result.success) {
+              planet.moon = moonMerchant.createMoonData();
+              const key = `${planet.coords.g}:${planet.coords.s}:${planet.coords.p}`;
+              uni.galaxyDeltas = uni.galaxyDeltas || {};
+              uni.galaxyDeltas[key] = { ...(uni.galaxyDeltas[key] || {}), hasMoon: true, hasBacino: false, moonName: 'Luna' };
+            }
+          } else {
+            result = moonMerchant.applyOffline(uni, uni.planets.indexOf(planet));
+            await UI.persistUniverseState();
+          }
+          UI.refreshPlanetSelector();
+          UI.updateTopBarNumbers();
+          UI.renderCurrentView();
+          UI.toast(result.success ? `Luna formata su ${planet.name}! Probabilità: ${result.chance}%.` : `Attacco su ${planet.name} concluso: nessuna Luna (${result.chance}%). Il Mercante ha raccolto i detriti.`, result.success ? 'success' : 'info');
+        } catch (err) {
+          UI.toast(err.message || 'Operazione Mercante non riuscita.', 'error');
+          busy = false;
+          selector.disabled = false;
+          renderEstimate();
+        }
+      });
+    };
 
     if (st.isMultiplayerMode) {
       viewport.innerHTML = `
         <div style="display:flex; flex-direction:column; gap:14px;">
+          ${merchantPanel}
           <div class="glass-panel" style="padding:14px;">
             <h2 style="font-size:1.05rem; color:var(--res-crystal); margin-bottom:8px;">TRASPORTO & SCAMBIO DIRETTO PvP</h2>
             <p class="text-muted" style="margin-bottom:12px;">In modalità Multiplayer PvP puoi inviare carichi di risorse direttamente ai pianeti di altri giocatori reali o agli Avamposti Neutrali utilizzando la missione <strong>Trasporta</strong> dalla sezione Flotta.</p>
             <button type="button" id="btn-mp-goto-transport" class="btn btn-blue" style="width:100%;">${svgIcon('cargo')} PREPARA CONVOGLIO MERCANTILE</button>
+            <button type="button" id="btn-mp-bot-trade" class="btn btn-green" style="width:100%; margin-top:10px;">${svgIcon('cargo')} COMMERCIA CON UN BOT PACIFICO / NEUTRALE</button>
           </div>
 
           <div class="glass-panel" style="padding:14px;">
@@ -860,6 +1023,8 @@
         </div>
       `;
 
+      activateMerchant();
+      viewport.querySelector('#btn-mp-bot-trade')?.addEventListener('click', () => UI.openOnlineBotTradeModal());
       document.getElementById('btn-mp-goto-transport')?.addEventListener('click', () => {
         st.fleetMission = 'transport';
         UI.switchView('fleet');
@@ -888,6 +1053,7 @@
 
     viewport.innerHTML = `
       <div style="display:flex; flex-direction:column; gap:14px;">
+        ${merchantPanel}
         <div class="glass-panel" style="padding:14px;">
           <h2 style="font-size:1.05rem; color:var(--res-crystal); margin-bottom:10px;">SCAMBIO COMMERCIALE CON BOT</h2>
           <div class="form-grid-3">
@@ -970,6 +1136,7 @@
       </div>
     `;
 
+    activateMerchant();
     document.getElementById('btn-exec-bot-trade')?.addEventListener('click', async () => {
       try {
         const coords = {

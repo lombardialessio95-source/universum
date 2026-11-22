@@ -12,7 +12,7 @@
       Data.RESEARCHES.expeditionTech = {
         id: 'expeditionTech',
         name: 'Esplorazione Spaziale Profonda',
-        icon: '🧭',
+        icon: 'radar',
         description: 'Estende l’autonomia delle sonde e delle flotte esplorative: +1 ora massima di durata missione per livello.',
         baseCost: { metal: 3000, crystal: 6000, deuterium: 3000 },
         factor: 1.85,

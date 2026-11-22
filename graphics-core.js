@@ -6,12 +6,39 @@
 
   const SIZE = 128;
   const cache = {};
+  const offscreenCache = {};
   const ALL_RENDERERS = {};
+
+  let activeTheme = 'default';
+  let activeVersion = 'default';
 
   const offscreenCanvas = document.createElement('canvas');
   offscreenCanvas.width = SIZE;
   offscreenCanvas.height = SIZE;
   const ctx = offscreenCanvas.getContext('2d');
+
+  function _getCacheKey(id, mode) {
+    const baseId = String(id || '');
+    const modeStr = mode ? String(mode) : '';
+    return `${baseId}${modeStr}`;
+  }
+
+  function _resolveRenderer(id, mode) {
+    const combinedKey = _getCacheKey(id, mode);
+    if (typeof ALL_RENDERERS[combinedKey] === 'function') {
+      return ALL_RENDERERS[combinedKey];
+    }
+    if (mode && typeof ALL_RENDERERS[`${id}:${mode}`] === 'function') {
+      return ALL_RENDERERS[`${id}:${mode}`];
+    }
+    if (mode && typeof ALL_RENDERERS[`${id}_${mode}`] === 'function') {
+      return ALL_RENDERERS[`${id}_${mode}`];
+    }
+    if (typeof ALL_RENDERERS[id] === 'function') {
+      return ALL_RENDERERS[id];
+    }
+    return null;
+  }
 
   // =========================================================
   // HELPER DI RENDERING SCI-FI
@@ -260,6 +287,7 @@
   // ICONE RISORSE 32x32 PX & ICONE VETTORIALI HUD
   // =========================================================
   const resourceCache = {};
+  const RESOURCE_TYPES = ['metal', 'crystal', 'deuterium', 'energy'];
   const resCanvas = document.createElement('canvas');
   resCanvas.width = 32;
   resCanvas.height = 32;
@@ -357,6 +385,16 @@
     return resCanvas.toDataURL('image/png');
   }
 
+  function _initResourceIconsOnce() {
+    for (const type of RESOURCE_TYPES) {
+      if (!resourceCache[type]) {
+        resourceCache[type] = _renderResource32(type);
+      }
+    }
+  }
+
+  _initResourceIconsOnce();
+
   const SVG_ICONS = {
     bolt: '<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" style="vertical-align:-2px;margin-right:4px;"><path d="M13 2L4 14h7l-2 8 9-12h-7l2-8z"/></svg>',
     radar: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:4px;"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M12 12l6-6"/></svg>',
@@ -398,34 +436,59 @@
       drawBlueprintBg: _drawBlueprintBg
     },
 
-    getIconDataURL(id) {
-      if (cache[id]) return cache[id];
-      const renderer = ALL_RENDERERS[id];
+    getOffscreenCanvas(id, mode = '') {
+      const key = _getCacheKey(id, mode);
+      if (offscreenCache[key]) return offscreenCache[key];
+
+      const canvas = document.createElement('canvas');
+      canvas.width = SIZE;
+      canvas.height = SIZE;
+      const c = canvas.getContext('2d');
+
+      const renderer = _resolveRenderer(id, mode);
       if (typeof renderer === 'function') {
-        renderer(ctx);
+        renderer(c, mode);
+      } else {
+        _renderFallbackEmblem(c);
+      }
+
+      offscreenCache[key] = canvas;
+      return canvas;
+    },
+
+    getIconDataURL(id, mode = '') {
+      const key = _getCacheKey(id, mode);
+      if (cache[key]) return cache[key];
+
+      const renderer = _resolveRenderer(id, mode);
+      ctx.clearRect(0, 0, SIZE, SIZE);
+      if (typeof renderer === 'function') {
+        renderer(ctx, mode);
       } else {
         _renderFallbackEmblem(ctx);
       }
+
       const dataURL = offscreenCanvas.toDataURL('image/png');
-      cache[id] = dataURL;
+      cache[key] = dataURL;
       return dataURL;
     },
 
-    // Alias compatibile con ui.js
-    getArt(id) {
-      return this.getIconDataURL(id);
+    // Alias compatibile con ui.js e moduli UI
+    getArt(id, mode = '') {
+      return this.getIconDataURL(id, mode);
     },
 
-    getImgTag(id, alt = '', cssClass = 'unit-art') {
+    getImgTag(id, alt = '', cssClass = 'unit-art', mode = '') {
       const safeAlt = String(alt || id)
         .replace(/&/g, '&amp;')
         .replace(/"/g, '&quot;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;');
-      return `<img src="${this.getIconDataURL(id)}" alt="${safeAlt}" class="${cssClass}" loading="lazy">`;
+      const src = this.getIconDataURL(id, mode);
+      return `<img src="${src}" alt="${safeAlt}" class="${cssClass}" width="${SIZE}" height="${SIZE}">`;
     },
 
-    // Restituisce il dataURL 32x32
+    // Restituisce il dataURL 32x32 (pre-generato 1 sola volta all'avvio)
     getResourceDataURL(type) {
       const key = String(type || 'metal').toLowerCase();
       if (!resourceCache[key]) {
@@ -438,16 +501,38 @@
     getResourceIcon(type, cssClass = 'res-icon') {
       const key = String(type || 'metal').toLowerCase();
       const url = this.getResourceDataURL(key);
-      return `<img src="${url}" alt="${key}" class="${cssClass}" width="18" height="18">`;
+      return `<img src="${url}" alt="${key}" class="${cssClass}" width="32" height="32">`;
     },
 
     svg(name) {
       return SVG_ICONS[name] || '';
     },
 
-    clearCache() {
+    clearCache(meta = null) {
+      if (!meta) return;
+
+      let changed = false;
+      if (typeof meta === 'object') {
+        if (meta.force === true) {
+          changed = true;
+        }
+        if (meta.theme && meta.theme !== activeTheme) {
+          activeTheme = meta.theme;
+          changed = true;
+        }
+        if (meta.version && meta.version !== activeVersion) {
+          activeVersion = meta.version;
+          changed = true;
+        }
+      }
+
+      if (!changed) return;
+
       for (const key of Object.keys(cache)) {
         delete cache[key];
+      }
+      for (const key of Object.keys(offscreenCache)) {
+        delete offscreenCache[key];
       }
     }
   };

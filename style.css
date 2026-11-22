@@ -78,8 +78,8 @@ h1, h2, h3, .font-display {
    ILLUSTRAZIONI PROCEDURALI, ICONE RISORSE & SVG HUD
    ========================================================= */
 .unit-art {
-  width: 64px;
-  height: 64px;
+  width: 128px;
+  height: 128px;
   border-radius: 10px;
   border: 1px solid rgba(0, 210, 255, 0.4);
   box-shadow: inset 0 0 10px rgba(0, 210, 255, 0.16), 0 3px 10px rgba(0, 0, 0, 0.55);
@@ -87,13 +87,6 @@ h1, h2, h3, .font-display {
   flex-shrink: 0;
   background: #050814;
   display: block;
-}
-
-@media (min-width: 768px) {
-  .unit-art {
-    width: 76px;
-    height: 76px;
-  }
 }
 
 .unit-art-sm {
@@ -108,8 +101,8 @@ h1, h2, h3, .font-display {
 }
 
 .res-icon {
-  width: 18px;
-  height: 18px;
+  width: 32px;
+  height: 32px;
   vertical-align: -3px;
   margin-right: 4px;
   display: inline-block;
@@ -1253,3 +1246,55 @@ th {
   background: rgba(0, 210, 255, 0.45);
   border-radius: 4px;
 }
+/* Accademia Imperiale: pannello discreto, persistente solo in modalità offline */
+#academy-panel{position:fixed;right:14px;bottom:15px;z-index:850;width:min(335px,calc(100vw - 28px));padding:15px;border:1px solid rgba(0,210,255,.43);border-radius:13px;background:linear-gradient(155deg,rgba(10,27,51,.98),rgba(4,10,25,.98));box-shadow:0 8px 30px rgba(0,0,0,.48);color:#eaf6ff;font-size:13px;line-height:1.45}
+#academy-panel.academy-compact{width:auto;max-width:calc(100vw - 28px);padding:0}
+.academy-heading{display:flex;justify-content:space-between;gap:12px;align-items:center;color:#63d9ff;font-size:12px;letter-spacing:.07em}
+.academy-heading button{background:transparent;color:#d1eafa;border:1px solid #355772;border-radius:6px;cursor:pointer;min-width:28px;font-size:18px}
+.academy-progress-caption{color:#a7c7db;font-size:11px;margin-top:10px}
+.academy-track{height:5px;border-radius:10px;background:#1a3655;overflow:hidden;margin:7px 0 13px}
+.academy-track div{height:100%;background:#00c6ff;transition:width .25s}
+#academy-panel h3{font-size:16px;margin:0 0 7px;color:#fff}
+#academy-panel p{margin:0 0 13px;color:#c7dbe9}
+.academy-actions{display:flex;flex-wrap:wrap;gap:7px}
+.academy-actions button,.academy-minimized{font-size:12px;border-radius:7px;padding:7px 9px;cursor:pointer}
+.academy-primary{border:1px solid #13b6e8;background:#07557e;color:white;font-weight:700;flex:1}
+.academy-secondary{border:1px solid #426079;background:rgba(255,255,255,.04);color:#d1eafa}
+.academy-minimized{display:block;background:#082844;border:0;color:#d5f4ff;font-weight:700}
+@media(max-width:650px){#academy-panel{bottom:74px;right:8px;width:min(310px,calc(100vw - 16px));max-height:47vh;overflow:auto}}
+
+/* Accademia Imperiale — istruzioni progressive e prerequisiti reali */
+#academy-panel .academy-subtitle{margin:10px 0 5px;font-size:10px;letter-spacing:.09em;color:#6ddaff;font-weight:700}
+#academy-panel .academy-subgoals{list-style:none;margin:0 0 9px;padding:0;display:flex;flex-direction:column;gap:4px;max-height:185px;overflow-y:auto}
+#academy-panel .academy-subgoals li{display:flex;align-items:flex-start;gap:7px;padding:4px 6px;border-radius:6px;color:#afc2d2;font-size:12px}
+#academy-panel .academy-subgoals li span:first-child{min-width:14px;font-weight:700}
+#academy-panel .academy-subgoals li.academy-done{color:#79daa8}
+#academy-panel .academy-subgoals li.academy-active{background:rgba(0,200,255,.13);color:#f0fbff;border:1px solid rgba(0,200,255,.26)}
+#academy-panel p.academy-hint{padding:8px 9px;border-left:2px solid #00c6ff;background:rgba(16,68,97,.24);color:#c6e7fa;font-size:12px;margin:0 0 12px}
+@media(max-width:650px){#academy-panel .academy-subgoals{max-height:120px}}
+
+/* Uniforma Comunicazioni alle altre voci della sidebar online. */
+.sidebar-comm-btn { position: relative; justify-content: flex-start; }
+.sidebar-comm-btn .sidebar-comm-label { flex: 1; min-width: 0; text-align: left; }
+.sidebar-comm-btn #sidebar-chat-badge:not(.hidden) { margin-left: auto; flex-shrink: 0; }
+
+/* Flotta & missioni: controlli touch, icone vettoriali e nessuno spinner nativo. */
+input[type="number"] { appearance:textfield; -moz-appearance:textfield; }
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button { -webkit-appearance:none; margin:0; }
+.fleet-cargo-panel { margin:4px 0 14px; padding:12px; border:1px solid rgba(80,190,245,.3); border-radius:10px; background:rgba(4,19,37,.6); }
+.fleet-cargo-heading { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:10px; color:var(--res-crystal); }
+.fleet-cargo-meter {height:7px; border-radius:8px; background:rgba(120,169,202,.18); overflow:hidden;}
+.fleet-cargo-meter>div { height:100%; background:#31bddd; transition:width .12s linear; }
+.fleet-cargo-status { font-size:.82rem; margin:7px 0 12px; }
+.fleet-cargo-overload { color:#ff6b7e!important; }
+.fleet-cargo-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
+.fleet-cargo-resource { display:flex; flex-direction:column; gap:7px; min-width:0; }
+.fleet-cargo-resource label { display:flex; align-items:center; gap:5px; font-size:.88rem; min-height:24px; }
+.fleet-cargo-resource .form-control { width:100%; min-width:0; }
+.fleet-cargo-actions { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+.fleet-cargo-actions .btn { min-height:38px; padding:6px 5px; font-size:.77rem; }
+.gal-nav-btn { display:inline-flex; justify-content:center; align-items:center; flex-shrink:0; min-width:42px; min-height:42px; padding:7px; }
+.gal-nav-btn svg { display:block; width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:2.3; stroke-linecap:round; stroke-linejoin:round; }
+@media(max-width:620px){.fleet-cargo-grid{grid-template-columns:1fr;}.fleet-cargo-resource{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr);align-items:center;}.fleet-cargo-actions{grid-column:1/-1;}.fleet-cargo-heading .btn{width:100%;}.fleet-cargo-actions .btn{min-height:42px;}}
+@media(prefers-reduced-motion:reduce){.fleet-cargo-meter>div{transition:none;}}
