@@ -121,9 +121,10 @@
 
 
   async function processOnlineOccupations(uniId) {
-    const user = getAuth().currentUser;
-    if (!user || !uniId) return;
-    await processAllOccupations(uniId, { onlyUid: user.uid });
+    if (!uniId || !getAuth().currentUser) return;
+    // Il tributo scatta una volta al giorno: e' inutile interrogare Firestore
+    // ogni 30 secondi. La prima scansione resta immediata, le altre ogni 10m.
+    await sweepOccupationsThrottled(uniId);
   }
 
 

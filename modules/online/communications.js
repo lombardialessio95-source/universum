@@ -261,6 +261,7 @@
     await batch.commit();
 
     await uniRef.update({ playerCount: firebase.firestore.FieldValue.increment(-1) }).catch(() => {});
+    G.invalidateOnlineUniverseList?.();
     await releaseServerSlot(db, user.uid, uniId);
   }
 

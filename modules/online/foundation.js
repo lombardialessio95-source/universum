@@ -106,12 +106,39 @@
 
 
   async function migrateOnlineFleets(uniId, { force = false } = {}) {
-    if (!force && _migratedFleetUnis.has(uniId)) return 0;
-    _migratedFleetUnis.add(uniId);
+    const uid = getAuth().currentUser?.uid;
+    if (!uid) return 0;
+    const key = `universum:fleet-migration:v${FLEET_SCHEMA_VERSION}:${uid}:${uniId}`;
+    if (!force && _migratedFleetUnis.has(key)) return 0;
+    if (!force) {
+      try {
+        if (localStorage.getItem(key) === 'done') {
+          _migratedFleetUnis.add(key);
+          return 0;
+        }
+      } catch (_) { /* Storage disabilitato: esegui la migrazione normalmente. */ }
+    }
+    _migratedFleetUnis.add(key);
     const db = getDB();
-    const snap = await db.collection('online_universes').doc(uniId).collection('fleets').limit(100).get().catch(() => ({ docs: [] }));
+    // Migrazione legacy una sola volta; il pulsante RIPARA può forzarla.
+    // Limitare i documenti letti evita scansioni ripetute di 100 flotte completate.
+    let docs;
+    try {
+      // Solo flotte dell'account: mai scandire le flotte di tutto l'universo.
+      // Nessun indice composito richiesto (filtri semplici su UID).
+      const col = db.collection('online_universes').doc(uniId).collection('fleets');
+      const [owned, defended] = await Promise.all([
+        col.where('attackerUid', '==', uid).limit(100).get(),
+        col.where('defenderUid', '==', uid).limit(100).get()
+      ]);
+      docs = [...new Map([...owned.docs, ...defended.docs].map((d) => [d.id, d])).values()];
+    } catch (err) {
+      _migratedFleetUnis.delete(key);
+      throw err;
+    }
     let migrated = 0;
-    for (const d of snap.docs) {
+    let failed = false;
+    for (const d of docs) {
       const raw = d.data() || {};
       const uid = getAuth().currentUser?.uid;
       if (!uid || (raw.attackerUid !== uid && raw.defenderUid !== uid)) continue;
@@ -119,9 +146,16 @@
       const needs = raw.schemaVersion !== FLEET_SCHEMA_VERSION || raw.resolved === undefined || !raw.targetKey || !raw.ships;
       if (needs) {
         const { id: _omit, ...toWrite } = norm;
-        await d.ref.set(toWrite, { merge: true }).catch(() => {});
-        migrated++;
+        try {
+          await d.ref.set(toWrite, { merge: true });
+          migrated++;
+        } catch (e) { failed = true; }
       }
+    }
+    if (!failed) {
+      try { localStorage.setItem(key, 'done'); } catch (_) { /* Memoria locale opzionale. */ }
+    } else {
+      _migratedFleetUnis.delete(key);
     }
     return migrated;
   }

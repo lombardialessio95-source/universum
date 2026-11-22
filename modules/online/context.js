@@ -16,7 +16,9 @@
 
   const SERVER_LIMIT_MESSAGE = 'Hai già raggiunto il limite di 3 server. Abbandona un server per entrarne in un altro.';
 
-  const SYNC_MIN_INTERVAL_MS = 60 * 1000;
+  // La produzione offline e ricostruita da lastUpdated; costruzioni, flotte e
+  // ricerche salvano subito tramite force:true. Il checkpoint passivo e raro.
+  const SYNC_MIN_INTERVAL_MS = 10 * 60 * 1000;
 
   const SYSTEM_CACHE_TTL_MS = 30 * 1000;
 

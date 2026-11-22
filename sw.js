@@ -1,7 +1,7 @@
 /**
  * UNIVERSUM — Service Worker PWA (Offline-First + Network-First per Firebase)
  */
-const CACHE_NAME = 'universum-refactor-modular-v4';
+const CACHE_NAME = 'universum-firestore-spark-optimized-v5';
 
 const ASSETS = [
   './', './index.html', './manifest.json', './style.css',

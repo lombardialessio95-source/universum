@@ -50,3 +50,12 @@ IMPORTANTE
   Sicurezza Firebase: le validazioni lato client non sono un anticheat
   completo. Per indicazioni tecniche consulta documents/mappa.txt e
   documents/audit sicurezza online.txt.
+
+AGGIORNAMENTO FIRESTORE SPARK (22/11/2026)
+- Ridotte interrogazioni e scritture automatiche online, mantenendo eventi
+  realtime, missioni e salvataggi immediati delle azioni volontarie.
+- Vedi documents/ottimizzazione online firestore spark.txt per modifiche,
+  limiti Firebase, formule e stima dei giocatori attivi al giorno.
+- Test: node tests/test_firestore_spark.js
+        node tests/estimate_firestore_spark.js
+- Le regole Firestore NON sono cambiate. Non serve un deploy di nuove Rules.

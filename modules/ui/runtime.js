@@ -101,15 +101,16 @@
       if (st.isMultiplayerMode) {
         mpTickCounter++;
         if (mpTickCounter % 3 === 0 && window.UniversumMP?.resolveArrivedOnlineFleets) {
-          window.UniversumMP.resolveArrivedOnlineFleets(uni.id).catch(() => {});
+          window.UniversumMP.resolveArrivedOnlineFleets(uni.id, uni.speed).catch(() => {});
         }
         if (mpTickCounter % 30 === 0 && window.UniversumMP?.processOnlineOccupations) {
           window.UniversumMP.processOnlineOccupations(uni.id).catch(() => {});
         }
         if (mpTickCounter % 60 === 0) {
-          UI.persistUniverseState().catch(() => {});
-          if (window.UniversumMP?.maybeLaunchBotRaid) {
-            window.UniversumMP.maybeLaunchBotRaid(uni.id).catch((e) => console.warn('[MP Bot] Raid:', e));
+          // Solo checkpoint periodico: le azioni volontarie usano force:true.
+          UI.persistUniverseState({ force: false }).catch(() => {});
+          if (uni.botConfig?.raids && uni.botConfig.personality?.hostile > 0 && window.UniversumMP?.maybeLaunchBotRaid) {
+            window.UniversumMP.maybeLaunchBotRaid(uni.id, uni.botConfig).catch((e) => console.warn('[MP Bot] Raid:', e));
           }
         }
       } else {

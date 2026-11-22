@@ -23,16 +23,59 @@
 
 
 
-  async function resolveArrivedOnlineFleets(uniId) {
+  const _resolutionInFlight = new Map();
+  // Piano B solo quando i listener falliscono: una query per account e non
+  // il vecchio scan globale eseguito ogni 3 secondi.
+  const _fleetListenerFallback = new Map();
+  async function resolveArrivedOnlineFleets(uniId, knownSpeed) {
+    const key = `${uniId}|${getAuth().currentUser?.uid || ''}`;
+    if (_resolutionInFlight.has(key)) return _resolutionInFlight.get(key);
+    const work = _resolveArrivedOnlineFleetsImpl(uniId, knownSpeed)
+      .finally(() => _resolutionInFlight.delete(key));
+    _resolutionInFlight.set(key, work);
+    return work;
+  }
+
+  async function _resolveArrivedOnlineFleetsImpl(uniId, knownSpeed) {
     const db = getDB();
     const uniRef = db.collection('online_universes').doc(uniId);
     const now = Date.now();
 
-    await migrateOnlineFleets(uniId).catch(() => {});
-    await sweepOccupationsThrottled(uniId).catch(() => {});
-
-    const allSnap = await uniRef.collection('fleets').where('arrivalTime', '<=', now).limit(100).get().catch(() => ({ docs: [] }));
-    if (!allSnap.docs || allSnap.docs.length === 0) return;
+    // Gli snapshot delle flotte sono gia' mantenuti in tempo reale dal radar e
+    // dalla lista flotte. Nessuna query periodica e nessun limite che escluda
+    // le nuove flotte per colpa di documenti completed storici.
+    let activeDocs = G.getLiveFleetDocs(uniId);
+    if (activeDocs === null) {
+      const uid = getAuth().currentUser?.uid;
+      if (!uid) return;
+      const key = `${uniId}|${uid}`;
+      const state = _fleetListenerFallback.get(key) || { start: now, queried: 0 };
+      _fleetListenerFallback.set(key, state);
+      // Lascia avviare i normali listener per 15s; dopo un errore riprova
+      // una volta al minuto con query PER UTENTE, non su tutta la galassia.
+      if (now - state.start < 15000 || now - state.queried < 60000) return;
+      state.queried = now;
+      try {
+        const fleetsCol = uniRef.collection('fleets');
+        const [owned, defended] = await Promise.all([
+          fleetsCol.where('attackerUid', '==', uid).limit(100).get(),
+          fleetsCol.where('defenderUid', '==', uid).limit(100).get()
+        ]);
+        activeDocs = [...new Map([...owned.docs, ...defended.docs]
+          .map((d) => [d.id, d])).values()]
+          .filter((d) => {
+            const f = d.data();
+            return !f.resolved && ['outbound','returning','embargo','occupy'].includes(f.status);
+          });
+      } catch (e) {
+        _mpNotifyError('fallback listener flotte', e);
+        return;
+      }
+    } else {
+      _fleetListenerFallback.delete(`${uniId}|${getAuth().currentUser?.uid || ''}`);
+    }
+    if (activeDocs.length === 0) return;
+    const allSnap = { docs: activeDocs };
     // Solo l'attaccante o il difensore puo' risolvere una flotta: una sessione
     // estranea non deve tentare di scrivere sui documenti altrui.
     const resolverUid = getAuth().currentUser?.uid;
@@ -42,10 +85,12 @@
     });
     if (!authorizedDocs.length) return;
 
-    const uniSnap = await uniRef.get();
-    const speed = uniSnap.exists ? (uniSnap.data().speed || 10) : 10;
+    // Speed noto alla sessione: non rileggere online_universes a ogni arrivo.
+    const speed = Number(knownSpeed) > 0 ? Number(knownSpeed)
+      : Number(window.UniversumUI?.state?.currentUniverse?.id === uniId
+        ? window.UniversumUI.state.currentUniverse.speed : 0) || 10;
 
-    // P1 FIX: passa la velocità reale a processEmbargoFleets
+    // I tick dell'embargo vengono aggregati (non 2 scritture ogni 3 secondi).
     await processEmbargoFleets(uniRef, authorizedDocs, now, speed);
 
     const arrivedDocs = authorizedDocs

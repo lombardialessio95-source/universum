@@ -210,7 +210,8 @@
 
     const lastSync = _syncLastByUni.get(universeObj.id) || 0;
     if (!force && Date.now() - lastSync < SYNC_MIN_INTERVAL_MS) return;
-    _syncLastByUni.set(universeObj.id, Date.now());
+    // Aggiorna il timestamp solo DOPO la transazione riuscita: un errore di
+    // rete non deve simulare un checkpoint completato o annullare i retry.
 
     const FV = firebase.firestore.FieldValue;
     const uniRef = db.collection('online_universes').doc(universeObj.id);
@@ -279,6 +280,7 @@
         lastSeen: nowTs
       }, { merge: true });
     });
+    _syncLastByUni.set(universeObj.id, Date.now());
 
     for (const { planet, inbox } of reconciled) {
       planet.resources = Object.assign({ metal: 0, crystal: 0, deuterium: 0 }, planet.resources);
@@ -363,30 +365,30 @@
   }
 
 
+  const _systemLoading = new Map();
   async function getOnlineSystem(uniId, galaxy, system) {
     const cacheKey = `${uniId}:${Number(galaxy)}:${Number(system)}`;
     const cached = _cacheGet(_systemCache, cacheKey, SYSTEM_CACHE_TTL_MS);
-    if (cached) {
-      if (!_systemPending.has(cacheKey)) {
-        _systemPending.add(cacheKey);
-        fetchOnlineSystem(uniId, galaxy, system)
-          .then((fresh) => _systemCache.set(cacheKey, { at: Date.now(), data: fresh }))
-          .catch(() => {})
-          .finally(() => _systemPending.delete(cacheKey));
-      }
-      return cached;
-    }
-    const fresh = await fetchOnlineSystem(uniId, galaxy, system);
-    _systemCache.set(cacheKey, { at: Date.now(), data: fresh });
-    return fresh;
+    if (cached) return cached;
+    // In caso di re-render simultanei una sola query, condivisa dai chiamanti.
+    if (_systemLoading.has(cacheKey)) return _systemLoading.get(cacheKey);
+    const task = fetchOnlineSystem(uniId, galaxy, system)
+      .then((fresh) => {
+        _systemCache.set(cacheKey, { at: Date.now(), data: fresh });
+        return fresh;
+      }).finally(() => _systemLoading.delete(cacheKey));
+    _systemLoading.set(cacheKey, task);
+    return task;
   }
 
 
   async function fetchOnlineSystem(uniId, galaxy, system) {
     const db = getDB();
     const uniRef = db.collection('online_universes').doc(uniId);
-    const uniSnap = await uniRef.get();
-    const speed = uniSnap.exists ? (uniSnap.data().speed || 10) : 10;
+    const activeUni = window.UniversumUI?.state?.currentUniverse;
+    // Se si sta visualizzando l'universo attivo la sua velocita' e' gia' nota.
+    const speed = activeUni?.id === uniId ? (activeUni.speed || 10)
+      : ((await uniRef.get()).data()?.speed || 10);
 
     const snap = await uniRef.collection('planets')
       .where('coords.g', '==', Number(galaxy))

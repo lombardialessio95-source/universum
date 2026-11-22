@@ -64,7 +64,7 @@
 
     document.getElementById('btn-mp-refresh')?.addEventListener('click', async () => {
       playSound('click');
-      await UI.renderOnlineUniversesList();
+      await UI.renderOnlineUniversesList(true);
     });
 
     document.getElementById('btn-mp-create-uni')?.addEventListener('click', () => {
@@ -187,7 +187,7 @@
   };
 
 
-  UI.renderOnlineUniversesList = async function () {
+  UI.renderOnlineUniversesList = async function (force = false) {
     const { escapeHTML, svgIcon, openModal, closeModal, playSound, toast, startOnlineGame } = UI;
     const listEl = document.getElementById('mp-universe-list');
     if (!listEl || !window.UniversumMP) return;
@@ -195,7 +195,7 @@
     listEl.innerHTML = `<div class="glass-panel" style="padding:16px; text-align:center;"><p class="text-muted">Scansione universi online in corso...</p></div>`;
 
     try {
-      const universes = await window.UniversumMP.getOnlineUniverses();
+      const universes = await window.UniversumMP.getOnlineUniverses({ force });
       const membership = window.UniversumMP.getMyServerMembership
         ? await window.UniversumMP.getMyServerMembership().catch(() => ({ serverIds: [], serverCount: 0, limit: 3 }))
         : { serverIds: [], serverCount: 0, limit: 3 };
@@ -311,7 +311,7 @@
               closeModal();
               playSound('success');
               toast('Server abbandonato: slot liberato.', 'success');
-              await UI.renderOnlineUniversesList();
+              await UI.renderOnlineUniversesList(true);
             } catch (err) {
               playSound('error');
               toast(err.message, 'error');

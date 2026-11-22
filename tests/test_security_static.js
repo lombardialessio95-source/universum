@@ -16,7 +16,7 @@ const checks = [
   ['risoluzione flotte limitata ai partecipanti', /const authorizedDocs = allSnap\.docs\.filter/.test(js)],
   ['migrazione e riparazione limitate ai partecipanti', /raw\.attackerUid !== uid && raw\.defenderUid !== uid/.test(js) && /fleet\.attackerUid !== uid && fleet\.defenderUid !== uid/.test(js)],
   ['privacy rapporti: solo destinatario', /allow read: if signedIn\(\)\s*&& resource\.data\.recipientUid == request\.auth\.uid;/.test(rules)],
-  ['cache PWA aggiornata', /universum-refactor-modular-v4/.test(fs.readFileSync(path.join(base,'sw.js'),'utf8'))],
+  ['cache PWA aggiornata', /universum-firestore-spark-optimized-v5/.test(fs.readFileSync(path.join(base,'sw.js'),'utf8'))],
 ];
 for(const [label, value] of checks){ assert(value, 'Fallito: '+label); console.log('✓',label); }
 console.log(`Controlli statici: ${checks.length}/${checks.length} superati`);

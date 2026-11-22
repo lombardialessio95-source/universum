@@ -313,17 +313,17 @@
   }
 
 
-  async function maybeLaunchBotRaid(uniId) {
+  async function maybeLaunchBotRaid(uniId, configFromSession = undefined) {
     const auth = getAuth();
     const db = getDB();
     const user = auth.currentUser;
     if (!user) return;
 
     const uniRef = db.collection('online_universes').doc(uniId);
-    const uniSnap = await uniRef.get();
-    if (!uniSnap.exists) return;
-    const uniData = uniSnap.data();
-    const cfg = uniData.botConfig;
+    // Le opzioni BOT sono fissate alla creazione dell'universo.
+    const cfg = configFromSession === undefined
+      ? (await uniRef.get()).data()?.botConfig
+      : configFromSession;
     if (!cfg || !cfg.raids || !cfg.personality || cfg.personality.hostile <= 0) return;
 
     // Probabilità hostile/100 * 10%

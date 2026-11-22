@@ -218,14 +218,21 @@
   }
 
 
-  async function getOnlineUniverses() {
+  // Il lobby puo' ricalcolare le schede spesso; conservarle 30s non modifica
+  // il server, e il pulsante AGGIORNA forza sempre una lettura fresca.
+  let _universeListCache = null;
+  function invalidateOnlineUniverseList() { _universeListCache = null; }
+  async function getOnlineUniverses({ force = false } = {}) {
+    if (!force && _universeListCache && Date.now() - _universeListCache.at < 30000) {
+      return _universeListCache.data.map((u) => ({ ...u }));
+    }
     const db = getDB();
     const snap = await db.collection('online_universes')
       .orderBy('createdAt', 'desc')
       .limit(30)
       .get();
 
-    return snap.docs.map((doc) => {
+    const result = snap.docs.map((doc) => {
       const d = doc.data();
       return {
         id: doc.id,
@@ -243,6 +250,8 @@
         createdAt: d.createdAt || Date.now()
       };
     });
+    _universeListCache = { at: Date.now(), data: result };
+    return result.map((u) => ({ ...u }));
   }
 
 
@@ -338,6 +347,7 @@
       await generateNeutralOutpostsOnce(uniId, galaxies, systemsPerGalaxy);
     }
 
+    invalidateOnlineUniverseList();
     return await joinOnlineUniverse(uniId, passcode);
   }
 
@@ -452,7 +462,8 @@
       await claimServerSlot(db, user.uid, universeId, { alreadyMember: true }).catch(() => {});
     }
     _invalidateUniCaches(universeId);
-    await migrateOnlineFleets(universeId).catch(() => {});
+    // Un giocatore appena creato non ha flotte legacy da migrare.
+    if (playerSnap.exists) await migrateOnlineFleets(universeId).catch(() => {});
     await cleanupPrivateMessagesOnce(db, universeId, user.uid);
 
     // I bot configurabili vengono distribuiti vicino alla prima colonia.
@@ -485,6 +496,6 @@
     };
   }
 
-  Object.assign(G, { _cacheGet, _invalidateUniCaches, getMembership, claimServerSlot, releaseServerSlot, getMyServerMembership, cleanupPrivateMessagesOnce, sanitizeNickname, nicknameToInternalEmail, generatePlanetSpecs, createStarterPlanetDoc, registerOrLogin, getOnlineUniverses, generateNeutralOutpostsOnce, createOnlineUniverse, findFreeHomeCoords, joinOnlineUniverse });
+  Object.assign(G, { _cacheGet, _invalidateUniCaches, invalidateOnlineUniverseList, getMembership, claimServerSlot, releaseServerSlot, getMyServerMembership, cleanupPrivateMessagesOnce, sanitizeNickname, nicknameToInternalEmail, generatePlanetSpecs, createStarterPlanetDoc, registerOrLogin, getOnlineUniverses, generateNeutralOutpostsOnce, createOnlineUniverse, findFreeHomeCoords, joinOnlineUniverse });
 
 })();

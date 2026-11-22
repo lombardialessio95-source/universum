@@ -1,0 +1,145 @@
+UNIVERSUM — OTTIMIZZAZIONE MULTIPLAYER PER FIREBASE SPARK
+Versione: 22 novembre 2026
+Base: UNIVERSUM_Riorganizzato_Modulare_Completo.zip
+
+OBIETTIVO
+Aumentare il numero di giocatori giornalieri con Firestore Standard su piano Spark,
+senza rimuovere funzioni, velocità dei voli, risoluzione dei combattimenti, radar,
+commercio, Mercante di Lune o aggiornamento in tempo reale.
+
+QUOTE FIRESTORE STANDARD (FONTE UFFICIALE, verificate il 22/11/2026)
+- 50.000 letture documenti / giorno
+- 20.000 scritture documenti / giorno
+- 20.000 cancellazioni documenti / giorno
+- 1 GiB di storage
+- 10 GiB di download al mese
+Le quote sono a livello di progetto, non a livello di singolo universo.
+Fonte: https://firebase.google.com/pricing/
+      https://firebase.google.com/docs/firestore/quotas
+Il billing dei listener fattura letture per documenti aggiunti/aggiornati e
+può fatturare nuovamente le letture su riconnessione:
+https://firebase.google.com/docs/firestore/pricing
+IMPORTANTE: le Security Rules con get/exists possono aggiungere letture.
+
+PROBLEMI MISURABILI NEL CODICE PRECEDENTE
+1. modules/online/combat-resolver.js: query globale a tutte le flotte con
+   arrivalTime <= now, ogni 3 s, anche se complete. 1.200 interrogazioni/h
+   per sessione; se ognuna trova 100 documenti vecchi, fino a 120.000
+   letture/h per UNA sessione. Le missioni recenti potevano restare escluse
+   dal limite(100), anche quando gia' arrivate.
+2. modules/online/sieges.js: scansione delle occupazioni ogni 30 secondi,
+   nonostante il tributo maturi una volta ogni 24 ore.
+3. modules/online/fleet-control.js: embargo con due scritture circa ogni 3 s
+   per flotta in embargo, anche se il deuterio resta disponibile.
+4. modules/ui/runtime.js: salvataggio completo di ogni pianeta e scheda
+   giocatore ogni minuto, indipendentemente dalle azioni compiute.
+5. modules/online/bots.js: lettura del documento universo ogni minuto per
+   verificare configurazioni di raid, persino negli universi pacifici.
+6. modules/online/sync.js: le visite a un sistema in cache lanciavano
+   ugualmente una query di aggiornamento in background a ogni render.
+7. modules/online/sync.js: lettura ulteriore dell'universo per velocita'.
+8. modules/online/foundation.js: migrazione una volta per visita dell'account,
+   scansione dei primi 100 documenti di flotta di tutto l'universo.
+9. modules/online/universes.js: lista 30 universi riletta a ogni visita del lobby.
+
+CORREZIONI APPLICATE
+A. La risoluzione flotte riutilizza gli onSnapshot gia' aperti dal radar e
+   dalla lista flotte. Per flotte senza eventi scaduti non serve alcuna GET.
+   Doppie copie della stessa flotta sono deduplicate con id. Il timer di
+   risoluzione rimane ogni 3 secondi e la risoluzione completa e transazionale.
+   Una protezione anti-concorrenza evita risoluzioni duplicate simultanee
+   dalla stessa sessione. In emergenza, se i listener non sono attivi per
+   oltre 15 s, vengono eseguite al piu' una volta al minuto due query mirate
+   all'utente (max 100 documenti ciascuna). La fallback e' intenzionalmente
+   meno efficiente e va corretta ripristinando gli indici/ascoltatori realtime.
+B. Occupazioni: scansione unica all'avvio, poi non piu' di una ogni 10 min.
+   Il tributo rimane basato sul tempo trascorso (in cicli giornalieri).
+C. Embargo: il consumo deuterio e' calcolato sui secondi realmente trascorsi;
+   durante una normale fase attiva lo stato viene salvato ogni >=30 s,
+   anziche' >=3 s. Se il deuterio finisce, il rientro parte al tick seguente.
+D. Checkpoint economico passivo: ogni 10 min, non piu' ogni minuto.
+   Costruzioni, ricerche, produzione cantieri, cambiamenti del giocatore,
+   lancio flotte e altri eventi che gia' chiamano persistUniverseState()
+   mantengono il salvataggio IMMEDIATO (force:true di default). La
+   produzione quando si e' offline continua a derivare dal lastUpdated.
+E. Raid BOT: nessuna richiesta di controllo ogni minuto per universi
+   pacifici; per i raid usa la configurazione gia' letta all'ingresso.
+F. Galassia: usa la velocita' gia' presente nell'universo, cache reale 30s
+   senza rilettura inutile, deduplica richieste simultanee allo stesso sistema.
+G. Flotte legacy: migrazione solo ai vecchi membri, una volta per account,
+   universo e versione schema (con localStorage), scansione solo per UID.
+   Il pulsante di riparazione puo' forzare la migrazione quando necessario.
+H. Lobby: lista universi memorizzata 30s. Il pulsante Aggiorna forza sempre
+   la consultazione effettiva di Firestore; la cache viene invalidata dopo
+   creazione o uscita dall'universo.
+I. Cache PWA aggiornata, test aggiunti.
+
+FIREBASE RULES E INDICI
+Le regole firestore.rules sono IDENTICHE all'ultima versione di sicurezza.
+Non serve ripubblicarle se sono gia' presenti nella Console Firebase.
+Le query radar/flotte usano filtri compositi (UID + status) gia' esistenti
+prima di questa ottimizzazione per le flotte proprie, estesi ai 3 stati
+in arrivo. Se Firebase segnala FAILED_PRECONDITION / index required, crea
+l'indice indicato nel link presente nel messaggio della Console e riprova.
+Non disabilitare le regole per fare funzionare una query.
+
+SIMULAZIONE CAPACITA'
+Lo script riproducibile e': tests/estimate_firestore_spark.js
+Quote Spark: 50.000 reads/day, 20.000 writes/day.
+Riserva prudenziale: 25% di entrambe le quote per picchi, indici, messaggi,
+comportamenti imprevisti e altri utenti.
+
+Scenario leggero (1 ora, 2 pianeti, 6 azioni economiche, 1 missione):
+  ~112 letture, ~49 scritture per utente/giorno;
+  408 giocatori al limite teorico, ~306 con riserva.
+Scenario medio (2 ore, 3 pianeti, 12 azioni economiche, 3 missioni):
+  ~284 letture, ~133 scritture per utente/giorno;
+  150 giocatori al limite teorico, ~112 con riserva.
+Scenario intenso (2 ore, 5 pianeti, 25 azioni economiche, 10 missioni):
+  ~792 letture, ~362 scritture per utente/giorno;
+  55 giocatori al limite teorico, ~41 con riserva.
+
+Questi numeri NON sono benchmark Firebase. In ogni scenario la formula e':
+  N = floor(min(quotaLetture / letturePerGiocatore,
+                quotaScritture / scritturePerGiocatore))
+Con margine 25% si moltiplicano le quote per 0,75.
+Il numero reale varia con pianeti/colonie, flotte, raid BOT,
+comunicazioni, aperture della Galassia, query extra delle Security Rules,
+riaccessi, contenuto dei rapporti e sincronizzazione simultanea.
+Il modello conta prudenzialmente tutti i checkpoint passivi, anche quando
+la sincronizzazione forzata li ha gia' rimandati: la realta' puo' usare
+meno scritture nei profili con molte azioni regolari.
+
+CONSIGLIO OPERATIVO
+Per sessioni tipiche di 1–2 ore al giorno, partire da un obiettivo di
+90–120 utenti attivi/giorno. La stima centrale riproducibile e' 112 per
+sessioni di 2 ore con 3 pianeti. Non e' il limite degli account registrati.
+Chi gioca con pochi pianeti e meno azioni puo' lasciare spazio a piu'
+utenti; l'attivita' pesante, guerre collettive e attivita' chat massiva
+riducono il valore. La simultaneita' NON ha un limite hardcode: serve uno
+stress test con Firestore vero per stimare il numero contemporaneo.
+
+COME VALIDARE QUANDO PUBBLICATO
+1. Pubblica tutti i file del nuovo ZIP su GitHub Pages, inclusi modules/ e sw.js.
+2. Firebase Console -> Firestore Database -> Usage: prendi la media di
+   document reads e writes in una giornata normale prima del test.
+3. Registra numero di utenti attivi e ore di gioco totali durante il test;
+   osserva per 2-3 giorni e calcola delta readings/writes / utenti attivi.
+4. Il collo di bottiglia e' min(50.000/readsPerUser,20.000/writesPerUser),
+   lasciando almeno 20-25% di sicurezza.
+5. Testa 2 account: lancio, volo, arrivo, rientro, intercettazione,
+   embargo, occupazione, conflitti e raid BOT; non solo UI.
+6. Rileva eventuali errori failed-precondition. Correggere gli indici, non
+   aggirare gli errori disabilitando controlli o ascoltatori.
+7. Lo storage (1 GiB) cresce con flotte finite e rapporti storici. Serve
+   programmare una futura politica di archiviazione/rimozione, con test
+   di compatibilita' e privacy; non viene fatta eliminazione automatica.
+
+LIMITAZIONI IMPORTANTI
+- Questo refactoring non rende il motore online autorevole: l'anticheat
+  client-side rimane parzialmente aggirabile.
+- Non sono stati eseguiti benchmark Firebase dal vivo, test con emulator
+  delle regole o connessioni simultanee reali. I test locali verificano
+  il comportamento dei moduli e la sintassi, non le quote fatturate.
+- Gli indici Firestore potrebbero richiedere un intervento manuale in
+  Console, in particolare per filtri combinati UID + status.

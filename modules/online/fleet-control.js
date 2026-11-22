@@ -13,6 +13,30 @@
   const normalizeOnlineFleet = (...args) => G.normalizeOnlineFleet(...args);
   const syncPlayerState = (...args) => G.syncPlayerState(...args);
 
+  // I listener che alimentano radar e flotta sono anche la fonte per il resolver.
+  // Non interrogare l'intera collezione fleets ogni tre secondi: dopo migliaia di
+  // missioni completate quella query leggeva fino a 100 documenti inutili ogni tick.
+  const _liveFleetDocs = new Map();
+  function _fleetCacheKey(uniId, uid) { return `${uniId}|${uid}`; }
+  function _updateLiveFleetDocs(uniId, uid, kind, docs) {
+    const key = _fleetCacheKey(uniId, uid);
+    const entry = _liveFleetDocs.get(key) || { own: null, incoming: null };
+    entry[kind] = docs;
+    _liveFleetDocs.set(key, entry);
+  }
+  function getLiveFleetDocs(uniId) {
+    const uid = getAuth().currentUser?.uid;
+    const entry = uid ? _liveFleetDocs.get(_fleetCacheKey(uniId, uid)) : null;
+    // null = i listener non sono ancora inizializzati (o hanno dato errore).
+    if (!entry || !entry.own || !entry.incoming) return null;
+    const unique = new Map();
+    for (const d of [...entry.own, ...entry.incoming]) unique.set(d.id, d);
+    return [...unique.values()];
+  }
+  function clearLiveFleetDocs(uniId, uid) {
+    _liveFleetDocs.delete(_fleetCacheKey(uniId, uid));
+  }
+
 
 
   async function launchOnlineFleet(universeObj, originPlanetIndex, targetCoords, mission, shipsSelected, cargo = {}, options = {}) {
@@ -213,6 +237,8 @@
     let msg = null;
     if (code === 'permission-denied') {
       msg = "Il server ha rifiutato un'operazione (permessi insufficienti).";
+    } else if (code === 'failed-precondition') {
+      msg = 'Indice Firestore mancante per il radar/flotte. Controlla la console Firebase.';
     } else if (code === 'unavailable' || code === 'deadline-exceeded') {
       msg = 'Connessione al server instabile: alcune operazioni verranno riprovate.';
     }
@@ -230,15 +256,21 @@
     const user = auth.currentUser;
     if (!user || !universeObj?.id) return () => {};
 
-    return db.collection('online_universes').doc(universeObj.id).collection('fleets')
+    const uniId = universeObj.id;
+    const unsubscribe = db.collection('online_universes').doc(uniId).collection('fleets')
       .where('attackerUid', '==', user.uid)
       .where('status', 'in', ['outbound', 'returning', 'embargo', 'occupy'])
       .onSnapshot((snap) => {
+        _updateLiveFleetDocs(uniId, user.uid, 'own', snap.docs);
         const list = snap.docs
           .map((d) => normalizeOnlineFleet(d.data(), d.id))
           .filter((f) => !f.resolved);
         callback(list);
-      }, (err) => _mpNotifyError('listener flotte proprie', err));
+      }, (err) => {
+        clearLiveFleetDocs(uniId, user.uid);
+        _mpNotifyError('listener flotte proprie', err);
+      });
+    return () => { unsubscribe(); clearLiveFleetDocs(uniId, user.uid); };
   }
 
 
@@ -250,17 +282,21 @@
 
     const hostileMissions = new Set(['attack', 'spy', 'destroyMoon', 'blockade', 'embargo', 'occupy']);
 
-    return db.collection('online_universes').doc(universeObj.id).collection('fleets')
+    const uniId = universeObj.id;
+    const unsubscribe = db.collection('online_universes').doc(uniId).collection('fleets')
       .where('defenderUid', '==', user.uid)
-      .where('status', '==', 'outbound')
+      .where('status', 'in', ['outbound', 'embargo', 'occupy'])
       .onSnapshot((snap) => {
+        _updateLiveFleetDocs(uniId, user.uid, 'incoming', snap.docs);
         const list = snap.docs
           .map((d) => Object.assign({ id: d.id }, d.data()))
-          .filter((f) => f.attackerUid !== user.uid && hostileMissions.has(f.mission));
+          .filter((f) => f.status === 'outbound' && f.attackerUid !== user.uid && hostileMissions.has(f.mission));
         callback(list);
       }, (err) => {
-        console.warn('[MP Radar] Errore listener flotte in arrivo:', err);
+        clearLiveFleetDocs(uniId, user.uid);
+        _mpNotifyError('listener flotte in arrivo', err);
       });
+    return () => { unsubscribe(); clearLiveFleetDocs(uniId, user.uid); };
   }
 
 
@@ -332,6 +368,9 @@
         }
         hourlyBurn = Math.max(40, hourlyBurn);
         let remaining = Math.max(0, Number(fleet.siegeDeuterium || 0) - (hourlyBurn / 3600) * elapsedSec);
+        // Il tempo avanza matematicamente anche senza scrivere ogni 3 secondi.
+        // Quando il carburante termina la transizione avviene al prossimo tick.
+        if (remaining > 0 && elapsedSec < 30) continue;
         const targetRef = uniRef.collection('planets').doc(fleet.targetKey);
         if (remaining > 0) {
           await fDoc.ref.update({ siegeDeuterium: remaining, lastSiegeTickAt: now });
@@ -367,6 +406,6 @@
     }
   }
 
-  Object.assign(G, { launchOnlineFleet, recallOnlineFleet, _mpNotifyError, listenOwnFleets, listenIncomingFleets, _cleanupReasonText, forceCleanupOnlineFleet, processEmbargoFleets });
+  Object.assign(G, { launchOnlineFleet, recallOnlineFleet, _mpNotifyError, listenOwnFleets, listenIncomingFleets, getLiveFleetDocs, clearLiveFleetDocs, _cleanupReasonText, forceCleanupOnlineFleet, processEmbargoFleets });
 
 })();
