@@ -1,0 +1,94 @@
+UNIVERSUM — AUDIT SICUREZZA ONLINE (22 novembre 2026)
+====================================================
+Ambito: multiplayer.js, firestore.rules, interazioni con risoluzione flotte, pianeti,
+conquiste, BOT e messaggi. Il gioco offline non e' stato modificato.
+
+RISULTATI E CORREZIONI APPLICATE
+--------------------------------
+1. [ALTA] Prima: un qualunque utente autenticato poteva aggiornare status,
+   arrivo, navi e carico di TUTTE le flotte dell'universo. Ora gli update
+   sono concessi solo ad attaccante o difensore della flotta. Un partecipante
+   non puo' cambiare la missione, salvo richiamo di una flotta propria in
+   uscita. Il resolver, i tick di embargo, la migrazione e la riparazione
+   ignorano le flotte di cui l'utente corrente non e' partecipante.
+
+2. [ALTA] Prima: un utente autenticato poteva creare un pianeta qualsiasi.
+   Ora puo' creare un proprio pianeta, oppure un NPC nei soli casi previsti:
+   avamposti del fondatore o BOT in universi configurati con botConfig.
+   ATTENZIONE: la creazione BOT rimane client-side e quindi falsificabile.
+
+3. [ALTA] Prima: una scrittura su un pianeta altrui poteva cambiare ownerUid
+   arbitrariamente. Ora una conquista deve almeno citare una flotta d'attacco
+   del richiedente, diretta a quel pianeta e con ora di arrivo trascorsa.
+   Per conservare la compatibilita', il resolver annota lastResolutionFleetId.
+   ATTENZIONE: e' una verifica di provenienza, NON una verifica della vittoria.
+
+4. [MEDIA] Prima: un client poteva creare una flotta umana dichiarando una
+   origine arbitraria. Ora deve dichiarare originKey e l'originKey deve
+   appartenere al suo account. Le nuove flotte sono validate per missione,
+   tempi, status e strutture minime del documento. Una flotta NPC raid deve
+   puntare ad un pianeta dell'account che sta avviando il raid.
+
+5. [MEDIA] I rapporti in messages ora sono leggibili esclusivamente dal
+   destinatario, non anche dal fondatore dell'universo. Le schede player
+   esistenti non possono piu' essere modificate/eliminate dal fondatore.
+
+6. Versione della cache PWA incrementata per aggiornare multiplayer.js.
+
+PROBLEMI CRITICI CHE RESTANO APERTI
+----------------------------------
+A. [CRITICO] Il PROPRIETARIO puo' scrivere risorse, navi, difese e ricerca
+   sul proprio pianeta / scheda giocatore. Un client modificato puo' quindi
+   inventare materiali e tecnologia senza averli prodotti. Le sole regole
+   non possono ricostruire in modo attendibile la simulazione economica e
+   tutti i suoi costi. Anche il Mercante di Lune resta basato su logica client:
+   un utente puo' simulare manualmente un aggiornamento della propria Luna.
+
+B. [CRITICO] Un attaccante o difensore autenticato puo' falsificare la
+   risoluzione della battaglia e le modifiche nel documento del difensore.
+   Le regole adesso impediscono a uno SCONOSCIUTO di intervenire, ma non
+   possono verificare i round matematici di combattimento. La semplice
+   presenza di una flotta arrivata non prova una vittoria. Analogamente,
+   accrediti inbox di risorse/navi su pianeti altrui non hanno una verifica
+   server completa della causa e della quantita'.
+
+C. [ALTA] Le letture degli universi e dei pianeti sono larghe. Il passcode
+   della stanza si trova nel documento online_universes, leggibile da ogni
+   autenticato, dunque non e' un segreto affidabile. La lettura dei pianeti
+   rende inoltre possibile vedere dati che il gameplay vorrebbe rivelare
+   solo tramite spionaggio. Per segreti veri servono documenti pubblici e
+   privati distinti, con regole di lettura separate.
+
+D. [MEDIA] Conteggi dei server e playerCount sono aggiornati anche da client
+   e non sempre in una transazione atomica con l'iscrizione. Esistono margini
+   per valori incoerenti; non usare questi contatori come limiti di sicurezza.
+
+COME ELIMINARE I CHEAT PIU' GRAVI
+--------------------------------
+Per un multiplayer competitivo occorre un servizio server autorevole che:
+- riceva soltanto comandi (costruisci, ricerca, invia flotta, compra, ecc.);
+- controlli sul server risorse, costi, tempi, disponibilita' e proprieta';
+- applichi in transazioni la spesa delle risorse e la partenza della flotta;
+- risolva combattimenti/ricompense/conquiste lato server, con registro eventi;
+- neghi ai browser la scrittura diretta di risorse, navi e proprietari;
+- mantenga i dati sensibili in documenti non pubblici.
+
+Una Cloud Function Firebase richiede normalmente un progetto con fatturazione
+Blaze. In alternativa e' possibile un servizio HTTPS esterno autorevole,
+ma Spark da solo con logica completamente nel browser NON puo' garantire
+protezione anticheat assoluta.
+
+COLLAUDO / DISTRIBUZIONE
+-----------------------
+- Effettuato: node --check su tutti i JavaScript, test_inbox.js: 12 test;
+  test_moon_merchant.js; test_security_static.js: 10 verifiche statiche.
+- NON effettuato: test Firestore Emulator e collaudo su un progetto Firebase
+  reale con due account. Le verifiche statiche NON dimostrano che le regole
+  siano accettate dal server ne' che tutti i flussi PvP funzionino.
+- IMPORTANTE: il file firestore.rules nello ZIP NON si pubblica da solo.
+  Distribuire anche le regole reali su Firebase:
+      firebase deploy --only firestore:rules
+  Utilizzare prima un progetto di staging / emulator e verificare due account,
+  raid BOT, commercio, richiamo, arrivo, conquista, mercante e inbox.
+- I client non aggiornati potrebbero non poter lanciare flotte dopo il deploy
+  delle regole: il nuovo client invia il campo originKey.

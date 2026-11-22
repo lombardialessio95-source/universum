@@ -1,0 +1,325 @@
+UNIVERSUM — STRUTTURA RICERCHE E MISSIONI
+Documento tecnico delle regole di progressione e delle formule effettivamente usate nel codice.
+Fonte: data.js, engine-core.js, engine-actions.js, galaxy.js, missions-core.js, siege-missions.js, tutorial.js.
+Versione: 22/11/2026. Convenzioni: Lv = livello; floor = arrotonda per difetto; ceil = per eccesso; clamp limita in un intervallo.
+
+1. COSTI DI EDIFICI E RICERCHE
+Per ogni risorsa R in {metallo, cristallo, deuterio}:
+C_R(Lv) = floor(C_R_base × fattore^(max(1,Lv) − 1)).
+I fattori variano per elemento e sono elencati sotto; gli zeri restano zero.
+L’upgrade dal livello corrente n al livello n+1 paga C(n+1) e richiede coda libera e prerequisites.
+Le ricerche sono globali all’universo (universe.researches), non legate al singolo pianeta.
+La ricerca deve essere avviata su un pianeta con laboratorio e risorse locali sufficienti.
+
+2. TEMPI DI PROGRESSIONE (engine-core.js)
+Velocità effettiva = max(1, universe.speed); se Turbo attivo ×2. In Creativa tutti i tempi di costruzione/ricerca/unità = 0.
+Tempo edificio sec = max(1, floor( (metallo+cristallo costo target) / (2500×(1+Robotica)×2^Naniti×velocità) ×3600 )).
+Per edificio lunare Robotica è sostituita dal livello Base Lunare e Naniti=0.
+Laboratori collegati: prendi i livelli dei laboratori >0, ordinati dal più alto, somma i primi min(numero laboratori, 1+livello Rete Intergalattica).
+Tempo ricerca sec = max(1, floor( (metallo+cristallo costo target) / (1000×(1+somma laboratori collegati)×velocità) ×3600 )).
+Tempo unità sec = max(1, floor( ((metallo+cristallo costo nave) + (attacco+scudo)×0,5 + complessità×500) / (2500×(1+Cantiere)×2^Naniti×velocità) ×3600 × (1 − bonus cantiere segreto) )).
+Bonus Cantiere Segreto Lunare: min(60%,20%×livello); costo nave +20% se cantiere segreto attivo; difese escluse da questo sovrapprezzo.
+Ogni unità in coda completa dopo unitDurationSec; si producono le quantità in ordine senza parallelismo implicito.
+
+3. ENERGIA, PRODUZIONE, DEPOSITI
+Consumi energetici al livello L≥1: Miniera Metallo = −ceil(10×L×1,1^L); Miniera Cristallo identico; Sintetizzatore Deuterio = −ceil(20×L×1,1^L).
+Energia Centrale Solare = floor(20×L×1,1^L×(1+temperaturaMassima/400)).
+Energia Fusione = floor(30×L×1,05^L) × (1+0,05×Livello Tecnologia Energetica), con floor sul risultato del bonus.
+Energia satelliti = numero satelliti × max(10,floor((temperaturaMassima+140)/6)).
+Energia disponibile = solare+fusione+satelliti; consumo = |metallo|+|cristallo|+|deuterio|; saldo=disponibile−consumo.
+Efficienza miniere = 1 se consumo=0; altrimenti min(1,max(0,1,energiaDisponibile/consumo)).
+Blocco upgrade minerario: se delta energetico del nuovo livello è negativo e saldoAttuale+delta < 0, engine-actions rifiuta l’upgrade.
+Produzione base oraria = Metallo 30×velocità, Cristallo 15×velocità, Deuterio 0.
+Produzione miniera metallo grezza = floor(30×L×1,1^L); cristallo = floor(20×L×1,1^L); deuterio = floor(10×L×1,1^L×max(0,2, 1,36−0,004×temperaturaMassima)).
+Metallo/ora = floor(baseMetallo+(produzioneMinieraMetallo×(1+Plasma×0,01)×efficienza×velocità)).
+Cristallo/ora = floor(baseCristallo+(produzioneMinieraCristallo×(1+Plasma×0,0066)×efficienza×velocità)).
+Deuterio/ora = floor(produzioneSintetizzatore×(1+Plasma×0,0033)×efficienza×velocità − ceil(10×FusioneLv×1,1^FusioneLv×velocità)).
+Produzione/secondo = produzione/ora /3600; il tick accredita quantità per deltaSec e applica limiti dei depositi.
+Capacità deposito Lv = floor(5000×2,5^floor(Lv/2)×1,5^(Lv%2) + (5000 se Lv=0, altrimenti 10000×Lv)).
+Campi planetari: fieldsMax + 5×Terraformer. Luna: Base Lunare conferisce +3 campi per livello (vedere Data.getMoonMaxFields).
+In Modalità Creativa: risorse fissate a 999.999.999, energia a 999.999, tempi a zero.
+
+4. CATALOGO COMPLETO EDIFICI E REQUISITI
+
+EDIFICI PLANETARI
+- Miniera di Metallo [metalMine]: costo base M60 C15 D0; fattore 1.5; requisiti: nessuno.
+- Miniera di Cristallo [crystalMine]: costo base M48 C24 D0; fattore 1.6; requisiti: nessuno.
+- Sintetizzatore di Deuterio [deuteriumSynth]: costo base M225 C75 D0; fattore 1.5; requisiti: nessuno.
+- Centrale Solare [solarPlant]: costo base M75 C30 D0; fattore 1.5; requisiti: nessuno.
+- Reattore a Fusione [fusionReactor]: costo base M900 C360 D180; fattore 1.8; requisiti: buildings: deuteriumSynth Lv.5; researches: energyTech Lv.3.
+- Fabbrica dei Robot [roboticsFactory]: costo base M400 C120 D200; fattore 2; requisiti: nessuno.
+- Cantiere Navale [shipyard]: costo base M400 C200 D100; fattore 2; requisiti: buildings: roboticsFactory Lv.2.
+- Laboratorio di Ricerca [researchLab]: costo base M200 C400 D200; fattore 2; requisiti: nessuno.
+- Fabbrica di Naniti [naniteFactory]: costo base M1000000 C500000 D100000; fattore 2; requisiti: buildings: roboticsFactory Lv.10; researches: computerTech Lv.10.
+- Deposito di Metallo [metalStorage]: costo base M1000 C0 D0; fattore 2; requisiti: nessuno.
+- Deposito di Cristallo [crystalStorage]: costo base M1000 C500 D0; fattore 2; requisiti: nessuno.
+- Cisterna di Deuterio [deuteriumTank]: costo base M1000 C1000 D0; fattore 2; requisiti: nessuno.
+- Terraformer [terraformer]: costo base M0 C50000 D100000; fattore 2; requisiti: buildings: naniteFactory Lv.1; researches: energyTech Lv.12.
+- Bunker Sotterraneo [hiddenBunker]: costo base M2500 C2500 D1000; fattore 1.8; requisiti: buildings: roboticsFactory Lv.3; researches: shieldingTech Lv.2; massimo livello 9.
+
+EDIFICI LUNARI
+- Base Lunare [lunarBase]: costo base M20000 C40000 D20000; fattore 2; requisiti: nessuno.
+- Deposito Orbitale Lunare [lunarStorage]: costo base M10000 C10000 D5000; fattore 2; requisiti: moonBuildings: lunarBase Lv.1.
+- Scudo Gravitazionale Lunare [lunarShield]: costo base M50000 C50000 D25000; fattore 2; requisiti: moonBuildings: lunarBase Lv.2; researches: shieldingTech Lv.8; massimo livello 8.
+- Cantiere Segreto Lunare [secretShipyard]: costo base M40000 C30000 D20000; fattore 2; requisiti: moonBuildings: lunarBase Lv.2; researches: hyperspaceTech Lv.4.
+- Falange di Sensori [sensorPhalanx]: costo base M20000 C40000 D20000; fattore 2; requisiti: moonBuildings: lunarBase Lv.1; researches: espionageTech Lv.4.
+- Portale Iperspaziale [jumpGate]: costo base M2000000 C4000000 D2000000; fattore 2; requisiti: moonBuildings: lunarBase Lv.1; researches: jumpGateTech Lv.1, hyperspaceTech Lv.7; massimo livello 1.
+
+5. CATALOGO RICERCHE: OGNI TECNOLOGIA CON COSTI E PREREQUISITI
+Ogni livello usa il moltiplicatore del suo elemento e i tempi dalla sezione 2.
+
+RICERCA: Tecnologia Energetica [energyTech]
+Costo base Metallo 0, Cristallo 800, Deuterio 400; crescita ×2 per livello.
+Requisiti: buildings: researchLab Lv.1.
+Effetto/desrizione dal catalogo: Ottimizza la distribuzione energetica e aumenta la resa del Reattore a Fusione.
+
+RICERCA: Tecnologia dei Laser [laserTech]
+Costo base Metallo 200, Cristallo 100, Deuterio 0; crescita ×2 per livello.
+Requisiti: buildings: researchLab Lv.1; researches: energyTech Lv.2.
+Effetto/desrizione dal catalogo: Focalizzazione di fasci coerenti ad alta energia per armi leggere e medie.
+
+RICERCA: Tecnologia Ionica [ionTech]
+Costo base Metallo 1000, Cristallo 300, Deuterio 100; crescita ×2 per livello.
+Requisiti: buildings: researchLab Lv.4; researches: laserTech Lv.5, energyTech Lv.4.
+Effetto/desrizione dal catalogo: Accelerazione di fasci ionici capaci di sovraccaricare gli scudi nemici.
+
+RICERCA: Tecnologia Iperspaziale [hyperspaceTech]
+Costo base Metallo 0, Cristallo 4000, Deuterio 2000; crescita ×2 per livello.
+Requisiti: buildings: researchLab Lv.7; researches: energyTech Lv.5, shieldingTech Lv.5.
+Effetto/desrizione dal catalogo: Manipolazione delle dimensioni superiori per propulsione avanzata e stive compresse.
+
+RICERCA: Tecnologia del Plasma [plasmaTech]
+Costo base Metallo 2000, Cristallo 4000, Deuterio 1000; crescita ×2 per livello.
+Requisiti: buildings: researchLab Lv.4; researches: energyTech Lv.8, laserTech Lv.10, ionTech Lv.5.
+Effetto/desrizione dal catalogo: Super-riscaldamento ionico: +1% produzione Metallo, +0.66% Cristallo e +0.33% Deuterio per livello.
+
+RICERCA: Propulsore a Combustione [combustionDrive]
+Costo base Metallo 400, Cristallo 0, Deuterio 600; crescita ×2 per livello.
+Requisiti: buildings: researchLab Lv.1; researches: energyTech Lv.1.
+Effetto/desrizione dal catalogo: Aumenta del +10% per livello la velocità delle navi leggere e dei cargo.
+
+RICERCA: Propulsore a Impulso [impulseDrive]
+Costo base Metallo 2000, Cristallo 4000, Deuterio 600; crescita ×2 per livello.
+Requisiti: buildings: researchLab Lv.2; researches: energyTech Lv.1.
+Effetto/desrizione dal catalogo: Aumenta del +20% per livello la velocità delle navi medie e delle colonizzatrici.
+
+RICERCA: Propulsore Iperspaziale [hyperspaceDrive]
+Costo base Metallo 10000, Cristallo 20000, Deuterio 6000; crescita ×2 per livello.
+Requisiti: buildings: researchLab Lv.7; researches: hyperspaceTech Lv.3.
+Effetto/desrizione dal catalogo: Aumenta del +30% per livello la velocità delle navi pesanti da battaglia.
+
+RICERCA: Tecnologia dello Spionaggio [espionageTech]
+Costo base Metallo 200, Cristallo 1000, Deuterio 200; crescita ×2 per livello.
+Requisiti: buildings: researchLab Lv.3.
+Effetto/desrizione dal catalogo: Migliora i sensori delle sonde spia e riduce il rischio di controspionaggio nemico.
+
+RICERCA: Tecnologia Informatica [computerTech]
+Costo base Metallo 0, Cristallo 400, Deuterio 600; crescita ×2 per livello.
+Requisiti: buildings: researchLab Lv.1.
+Effetto/desrizione dal catalogo: Potenzia il calcolo tattico: sblocca +1 slot flotta simultaneo per livello.
+
+RICERCA: Astrofisica [astrophysics]
+Costo base Metallo 4000, Cristallo 8000, Deuterio 4000; crescita ×1.75 per livello.
+Requisiti: buildings: researchLab Lv.3; researches: espionageTech Lv.4, impulseDrive Lv.3.
+Effetto/desrizione dal catalogo: Permette spedizioni profonde, nuove colonie e sblocca la Nave Madre al livello 8.
+
+RICERCA: Rete Intergalattica di Ricerca [intergalacticNetwork]
+Costo base Metallo 240000, Cristallo 400000, Deuterio 160000; crescita ×2 per livello.
+Requisiti: buildings: researchLab Lv.10; researches: computerTech Lv.8, hyperspaceTech Lv.8.
+Effetto/desrizione dal catalogo: Collega i laboratori dei tuoi pianeti sommando la loro velocità di ricerca.
+
+RICERCA: Tecnologia delle Armi [weaponsTech]
+Costo base Metallo 800, Cristallo 200, Deuterio 0; crescita ×2 per livello.
+Requisiti: buildings: researchLab Lv.4.
+Effetto/desrizione dal catalogo: Potenzia tutte le armi di navi e difese del +10% per livello.
+
+RICERCA: Tecnologia degli Scudi [shieldingTech]
+Costo base Metallo 200, Cristallo 600, Deuterio 0; crescita ×2 per livello.
+Requisiti: buildings: researchLab Lv.6; researches: energyTech Lv.3.
+Effetto/desrizione dal catalogo: Rinforza i campi deflettori di navi e difese del +10% per livello.
+
+RICERCA: Tecnologia delle Corazze [armourTech]
+Costo base Metallo 1000, Cristallo 0, Deuterio 0; crescita ×2 per livello.
+Requisiti: buildings: researchLab Lv.2.
+Effetto/desrizione dal catalogo: Leghe ultra-dense che aumentano l’integrità strutturale dello scafo del +10% per livello.
+
+RICERCA: Ingegneria Lunare [lunarTech]
+Costo base Metallo 25000, Cristallo 50000, Deuterio 25000; crescita ×2 per livello.
+Requisiti: buildings: researchLab Lv.6; researches: astrophysics Lv.4, hyperspaceTech Lv.3.
+Effetto/desrizione dal catalogo: Stabilizzazione gravitazionale dei detriti orbitali: sblocca la creazione della Luna al livello 1.
+
+RICERCA: Teoria dei Ponti Iperspaziali [jumpGateTech]
+Costo base Metallo 100000, Cristallo 200000, Deuterio 100000; crescita ×2 per livello.
+Requisiti: buildings: researchLab Lv.9; researches: hyperspaceTech Lv.7, lunarTech Lv.1.
+Effetto/desrizione dal catalogo: Consente la costruzione del Portale Iperspaziale sulle Lune per salti istantanei.
+
+RICERCA: Tecnologia Gravitonica Suprema [deathStarTech]
+Costo base Metallo 500000, Cristallo 500000, Deuterio 250000; crescita ×2 per livello.
+Requisiti: buildings: researchLab Lv.12; researches: plasmaTech Lv.15, hyperspaceTech Lv.10.
+Effetto/desrizione dal catalogo: Singolarità artificiale controllata richiesta per alimentare la Morte Nera.
+
+RICERCA: Fisica Quantica [quantumPhysics]
+Costo base Metallo 0, Cristallo 400000, Deuterio 200000; crescita ×2 per livello.
+Requisiti: buildings: researchLab Lv.10; researches: energyTech Lv.10, hyperspaceTech Lv.7.
+Effetto/desrizione dal catalogo: Fondamenti teorici del salto quantico: primo requisito della Galattica (serve Lv.10).
+
+RICERCA: Propulsione a Salto [jumpPropulsion]
+Costo base Metallo 300000, Cristallo 300000, Deuterio 150000; crescita ×2 per livello.
+Requisiti: buildings: researchLab Lv.9; researches: quantumPhysics Lv.5, hyperspaceDrive Lv.6.
+Effetto/desrizione dal catalogo: Motori a salto per scafi planetari: requisito Galattica Lv.8.
+
+RICERCA: Struttura Planetaria Mobile [mobilePlanetaryStructure]
+Costo base Metallo 500000, Cristallo 250000, Deuterio 0; crescita ×2 per livello.
+Requisiti: buildings: researchLab Lv.8; researches: jumpPropulsion Lv.4, armourTech Lv.8.
+Effetto/desrizione dal catalogo: Scafo planetario in grado di muoversi: requisito Galattica Lv.5.
+
+RICERCA: Reattore Stellare [stellarReactor]
+Costo base Metallo 0, Cristallo 350000, Deuterio 350000; crescita ×2 per livello.
+Requisiti: buildings: researchLab Lv.10; researches: quantumPhysics Lv.7, plasmaTech Lv.8.
+Effetto/desrizione dal catalogo: Reattore in grado di alimentare una nave-pianeta: requisito Galattica Lv.7.
+
+RICERCA: Terraforming Spaziale [spatialTerraforming]
+Costo base Metallo 450000, Cristallo 450000, Deuterio 200000; crescita ×2 per livello.
+Requisiti: buildings: researchLab Lv.9; researches: mobilePlanetaryStructure Lv.3.
+Effetto/desrizione dal catalogo: Ecosistemi chiusi per navi-pianeta: requisito Galattica Lv.5.
+
+RICERCA REGISTRATA DINAMICAMENTE (missions-core.js)
+Esplorazione Spaziale Profonda [expeditionTech]: costo base M3000 C6000 D3000; fattore 1,85; richiede Laboratorio di Ricerca Lv.4, Astrofisica Lv.1, Propulsore a Impulso Lv.3; +1 ora massima di esplorazione per livello.
+
+6. NAVI E DIFESE: COSTI UNITARI E PREREQUISITI
+Ogni unità ha costo fisso (non costo esponenziale per quantità); la produzione costa quantità×costo unitario.
+Il tempo per unità dipende dal cantiere, naniti, velocità e statistiche come sopra.
+
+NAVI
+- Cargo Leggero [smallCargo]: M2000 C2000 D0, attacco 5, scudo 10, requisiti buildings: shipyard Lv.2; researches: combustionDrive Lv.2.
+- Cargo Pesante [largeCargo]: M6000 C6000 D0, attacco 5, scudo 25, requisiti buildings: shipyard Lv.4; researches: combustionDrive Lv.6.
+- Caccia Leggero [lightFighter]: M3000 C1000 D0, attacco 50, scudo 10, requisiti buildings: shipyard Lv.1; researches: combustionDrive Lv.1.
+- Caccia Pesante [heavyFighter]: M6000 C4000 D0, attacco 150, scudo 25, requisiti buildings: shipyard Lv.3; researches: armourTech Lv.2, impulseDrive Lv.2.
+- Incrociatore [cruiser]: M20000 C7000 D2000, attacco 400, scudo 50, requisiti buildings: shipyard Lv.5; researches: impulseDrive Lv.4, ionTech Lv.2.
+- Nave da Battaglia [battleship]: M45000 C15000 D0, attacco 1000, scudo 200, requisiti buildings: shipyard Lv.7; researches: hyperspaceDrive Lv.4.
+- Bombardiere [bomber]: M50000 C25000 D15000, attacco 1000, scudo 500, requisiti buildings: shipyard Lv.8; researches: impulseDrive Lv.6, plasmaTech Lv.5.
+- Incrociatore da Battaglia [battlecruiser]: M30000 C40000 D15000, attacco 700, scudo 400, requisiti buildings: shipyard Lv.8; researches: hyperspaceTech Lv.5, hyperspaceDrive Lv.5, laserTech Lv.12.
+- Colonizzatrice [colonyShip]: M10000 C20000 D10000, attacco 50, scudo 100, requisiti buildings: shipyard Lv.4; researches: impulseDrive Lv.3, astrophysics Lv.1.
+- Riciclatrice [recycler]: M10000 C6000 D2000, attacco 1, scudo 10, requisiti buildings: shipyard Lv.4; researches: combustionDrive Lv.6, shieldingTech Lv.2.
+- Sonda Spia [espionageProbe]: M0 C1000 D0, attacco 0, scudo 0, requisiti buildings: shipyard Lv.3; researches: combustionDrive Lv.3, espionageTech Lv.2.
+- Satellite Solare [solarSatellite]: M0 C2000 D500, attacco 1, scudo 1, requisiti buildings: shipyard Lv.1.
+- Nave Madre [mothership]: M250000 C150000 D50000, attacco 5000, scudo 2500, requisiti buildings: shipyard Lv.10; researches: astrophysics Lv.8, hyperspaceDrive Lv.6.
+- Morte Nera [deathStar]: M1000000 C500000 D100000, attacco 200000, scudo 50000, requisiti buildings: shipyard Lv.12; researches: deathStarTech Lv.1, hyperspaceDrive Lv.7.
+- Invictus [invictus]: M4000000 C2400000 D1600000, attacco 800000, scudo 50000, requisiti nessuno.
+- Crepuscolo degli Dei [crepuscolo]: M50000000 C30000000 D20000000, attacco 2000000, scudo 50000, requisiti nessuno.
+
+DIFESE
+- Lanciamissili [rocketLauncher]: M2000 C0 D0, attacco 80, scudo 20, requisiti buildings: shipyard Lv.1.
+- Laser Leggero [lightLaser]: M1500 C500 D0, attacco 100, scudo 25, requisiti buildings: shipyard Lv.2; researches: laserTech Lv.3.
+- Laser Pesante [heavyLaser]: M6000 C2000 D0, attacco 250, scudo 100, requisiti buildings: shipyard Lv.4; researches: energyTech Lv.3, laserTech Lv.6.
+- Cannone di Gauss [gaussCannon]: M20000 C15000 D2000, attacco 1100, scudo 200, requisiti buildings: shipyard Lv.6; researches: energyTech Lv.6, weaponsTech Lv.3, shieldingTech Lv.1.
+- Cannone Ionico [ionCannon]: M5000 C3000 D0, attacco 150, scudo 500, requisiti buildings: shipyard Lv.4; researches: ionTech Lv.4.
+- Torretta al Plasma [plasmaTurret]: M50000 C50000 D30000, attacco 3000, scudo 300, requisiti buildings: shipyard Lv.8; researches: plasmaTech Lv.7.
+- Cupola Scudo Leggera [smallShieldDome]: M10000 C10000 D0, attacco 1, scudo 2000, requisiti buildings: shipyard Lv.1; researches: shieldingTech Lv.2, massimo 1.
+- Cupola Scudo Pesante [largeShieldDome]: M50000 C50000 D0, attacco 1, scudo 10000, requisiti buildings: shipyard Lv.6; researches: shieldingTech Lv.6, massimo 1.
+- Missile Anti-Balistico [antiBallisticMissile]: M8000 C0 D2000, attacco 1, scudo 1, requisiti buildings: shipyard Lv.2.
+- Trappola Spaziale (Mina) [spaceTrap]: M12000 C8000 D4000, attacco 2500, scudo 0, requisiti buildings: shipyard Lv.5; researches: espionageTech Lv.5, weaponsTech Lv.4.
+
+7. PERCORSO PRATICO DI PROGRESSIONE
+Costruzione: visita Edifici → verifica prerequisiti/campi/coda → verifica saldo energetico per le miniere → verifica costo M/C/D → startBuilding → spesa immediata → attesa endTime → livello applicato.
+Ricerca: verifica laboratorio, prerequisiti e coda globale → spesa locale → startResearch → endTime → incremento universe.researches.
+Navi: verifica prerequisiti e risorse → buildUnits → nave in shipyardQueue → completamento unità una a una → planet.fleet aggiornato.
+Il motore offline riprende il progresso usando lastSeen e Date.now; processOfflineProgress accredita risorse e termina code già scadute.
+
+8. GALASSIA, DISTANZA, VELOCITÀ E CARBURANTE (galaxy.js)
+Distanza tra galassie diverse = |G1−G2|×20000.
+Stessa galassia, sistemi diversi = |S1−S2|×95+2700.
+Stesso sistema, posizioni diverse = |P1−P2|×5+1000; identiche coordinate = 5.
+Velocità di ogni nave = velocitàBase×(1+livelloPropulsore×bonus). Bonus: Combustione 10%, Impulso 20%, Iperspaziale 30% per livello.
+Velocità flotta=min(velocità delle unità presenti esclusi satelliti); fallback a 5000 in mancanza di navi valide.
+Tempo base in secondi = 10 + (35000/sqrt(velocitàUniverso))×sqrt((distanza×10)/velocitàMinimaFlotta).
+Tempo viaggio = max(5,floor(tempoBase / (percentualeVelocità/100))), con selezione da 10% a 100%; Creativa 3 secondi.
+Consumo base = 1+(somma(consumoNave×quantità)×distanza)/35000.
+Consumo carburante = max(1,floor(consumoBase×[0,2+0,8×(percentuale/100)^2])); Creativa 0.
+NB: MissionsCore.getAdjustedFlightStats applica un modello aggiuntivo: durata max(5,ceil(tempoBase/percentuale)), consumo max(1,ceil(consumoBase×percentuale^1,75)). Le UI che usano il wrapper avanzato vedono questo secondo modello.
+Per esplorazione: durata extra orbita=max(15,floor(ore×3600/sqrt(velocità))); ore max=1+expeditionTech; ogni ora aggiuntiva oltre la prima aumenta il consumo di mantenimento del 25% del fuel già calcolato.
+Slot flotte = 5 + livello Tecnologia Informatica. Slot occupati = voli in corso + assedi attivi + Galattiche costruite.
+Richiamo flotta solo se outbound: il rientro dura il tempo già trascorso (almeno 3 secondi).
+
+9. TIPI DI MISSIONE E CICLO
+La selezione parte dal pianeta con navi disponibili, coordinate destinazione, eventuale cargo, carburante e opzioni.
+Lancio: controlla appartenenza/validità della flotta, disponibilità risorse, durata e slot; sposta subito unità e carburante dal pianeta e memorizza la missione in fleetsInFlight (oppure flotte su Firestore online).
+All’arrivo: galaxy.js.handleMissionArrival instrada attacco, trasporto, colonizzazione, spionaggio, esplorazione e altre operazioni; al rientro reintegra sopravvissuti e cargo.
+Spionaggio: invio Sonde Spia, verifica del bersaglio e rapporto in spyReports; l’esito dipende dalle tecnologie contrapposte e dalle difese; online risoluzione e rapporti sono in multiplayer.js.
+Attacco: battaglia con scudi, corazze, armi, bersaglio casuale, tiro rapido e fino a 6 round, successivo calcolo perdite, riparazioni difese, detriti e bottino.
+Simulatore: galaxy.js.simulateBattle esegue iterazioni usando resolveCombat (default 30) per stimare esiti, non modificare lo stato reale. Questo può consumare CPU in scontri con grandi flotte.
+Colonizzazione: richiede unità/capacità idonee; l’arrivo crea il nuovo pianeta se lo slot è disponibile e rispetta i limiti del gioco.
+Trasporto/dispiegamento: caricano e consegnano risorse/navi secondo la missione; alla fine gestiscono ritorno o trasferimento.
+Esplorazione: tempo in orbita, eventi e probabilità sono determinati nell’arrivo della missione e nella logica missioni.
+Embargo planetario: Siege blocca le rotte e consuma un budget di deuterio; autonomia stimata = deuterioCaricato / max(50, somma(consumoCarburanteNave×quantità)) ore, arrotondato a 2 decimali.
+Occupazione: siege-missions e multiplayer gestiscono controllo orbita, tributi/riscatti e cessazione; non equivale alla colonizzazione.
+Galattica / Invictus / Crepuscolo: strutture speciali con cantieri, pagamenti e giorni reali; i parametri precisi di progetto sono in data.js (GALATTICA, INVICTUS, CREPUSCOLO).
+
+10. COMBATTIMENTO E STIME
+Unità combattente usa attack, shield, hull derivati dal catalogo e dai bonus delle tecnologie (weaponsTech, shieldingTech, armourTech).
+La simulazione esegue massimo 6 round; ogni round ricarica gli scudi e alterna attacchi.
+Trappole Spaziali: danno preventivo totale = numeroTrappole×attaccoBase×(1+0,1×TecnologiaArmiDifensore).
+Soglia di rimbalzo scudi: un colpo con attacco inferiore a 1% dello scudo bersaglio può essere assorbito senza danno; altri dettagli di targeting e fuoco rapido sono implementati in galaxy.js.resolveCombat.
+Le battaglie sono casuali; usare il simulatore per probabilità, non risultati garantiti.
+
+11. TUTORIAL OFFLINE: LE DODICI MISSIONI E QUANDO SCATTANO
+01. Aprire Panoramica.
+02. Miniera di Metallo Lv.1 (prima Centrale Solare Lv.1 e saldo energetico).
+03. Centrale Solare Lv.1.
+04. Miniera Cristallo Lv.1 + Sintetizzatore Deuterio Lv.1.
+05. Laboratorio Ricerca Lv.1.
+06. Propulsore Combustione Lv.1 (Tecnologia Energetica Lv.1 prima).
+07. Fabbrica Robot Lv.2.
+08. Cantiere Navale Lv.1.
+09. Almeno un Caccia Leggero disponibile.
+10. Visitare la schermata Galassia.
+11. Rapporto spionaggio più recente dell’ingresso nella missione.
+12. Inviare un attacco verso BOT (non necessariamente vincere).
+Il tutorial controlla lo stato locale di universe.tutorial; i sotto-obiettivi mostrati in UI possono essere più numerosi del numero di missioni principali.
+La missione 11 usa una baseline temporale per non contare rapporti preesistenti.
+La missione 12 registra un lancio di attacco riuscito tramite wrapper delle azioni di flotta.
+È possibile nascondere, saltare o interrompere il percorso; viene salvato in IndexedDB.
+
+12. ONLINE E DIFFERENZE ARCHITETTURALI
+Online i dati autorevoli sono su Firebase Auth/Firestore. Un client esegue il calcolo e pubblica operazioni consentite dalle security rules.
+Flotte online persistono e vengono risolte tramite query/transazioni, quindi comportamento, proprietà e sicurezza non dipendono solamente dalle formule offline.
+Il ciclo UI invoca risoluzioni flotte circa ogni 3 s, occupazioni ogni 30 s e sincronizzazione periodica ogni 60 s; intervalli approssimati rispetto al tick reale.
+Il gioco non contiene Cloud Functions: la risoluzione distribuita dipende dai client attivi e dalle regole; controllare concorrenza e condizioni di gara.
+
+13. CONTROLLO ERRORI E NOTE DI MANUTENZIONE
+Test automatico incluso: node test_inbox.js multiplayer.js (12 test).
+Una modifica a data.js può invalidare le condizioni del tutorial; aggiornare i sotto-obiettivi in tutorial.js.
+Una modifica ai tempi di ricerca/produzione richiede test con salvataggi e modalità Creativa.
+Le condizioni di battaglia molto grandi possono produrre picchi CPU; la patch inclusa limita gli aggiornamenti grafici, non cambia l’algoritmo di combattimento.
+Verificare il browser reale, Firestore live, Cache PWA e device lenti dopo il rilascio.
+
+MERCANTE DI LUNE — NORMALE OFFLINE / ONLINE
+------------------------------------------
+Costo per tentativo: 1.000.000 unità di Deuterio, prelevate dal pianeta bersaglio.
+Solo navi presenti sul pianeta sacrificato: le flotte in volo non vengono coinvolte.
+Detriti teorici: floor(0,30 * costo_metallo_nave * quantità) + floor(0,30 * costo_cristallo_nave * quantità), sommati per tipologia.
+Probabilità luna (percentuale intera): min(20, floor((detriti_metallo + detriti_cristallo) / 100.000)).
+Richiesto almeno 1% (100.000 detriti teorici) per avviare l'operazione.
+Lancio: il giocatore conferma un attacco orbitale commissionato, risolto immediatamente.
+Esito: sempre distrutte le navi stazionate e addebitato il costo; difese, edifici, risorse diverse dal compenso, pianeta invariati.
+Il mercante ritira i detriti e non compare alcun nuovo campo di detriti; può nascere una Luna anche senza detriti persistenti sulla mappa.
+Offline: applicazione locale e salvataggio in IndexedDB. Online: transazione Firestore su pianeta con scritture inbox (navi e Deuterio), Luna aggiornata sul documento soltanto in caso di successo, report nella collezione messages.
+Creativa: resta la creazione diretta della Luna dalla sua schermata, senza mercante.
+Nota: senza backend autorevole (Cloud Functions), la sicurezza anticheat dei dati propri in multiplayer rimane limitata dalle regole Firestore già esistenti.
+
+
+AGGIORNAMENTO PATH DOPO REFACTOR MODULARE (22/11/2026)
+Per ogni nome funzione e file descritto qui prevalgono i nuovi percorsi di seguito; i coefficienti e le formule originali non sono stati modificati:
+- Data: data.js resta API, mentre BUILDINGS/MOON_BUILDINGS sono in modules/data/buildings.js, RESEARCHES in modules/data/researches.js, SHIPS in modules/data/ships.js e DEFENSES in modules/data/defenses.js.
+- Progetti speciali: modules/data/megastructures.js.
+- Tempi costruzione/ricerca/cantiere: modules/engine/timings.js.
+- Produzione e energia: modules/engine/production.js.
+- Avanzamento code e recupero offline: modules/engine/progress.js.
+- Pagamenti e progressione speciali: modules/engine/megastructure-costs.js e megastructure-progress.js.
+- Distanza e carburante: modules/galaxy/fleet-dispatch.js.
+- Battaglia e rapid-fire: modules/galaxy/combat.js.
+- Missioni offline: modules/galaxy/fleet-arrivals.js, fleet-tick.js, bot-ai.js.
+- Missioni online: modules/online/fleet-control.js, combat-resolver.js, sieges.js.
+- Mercante di Lune: moon-merchant.js + modules/online/bots.js + modules/ui/diplomacy.js.
+- Accademia Imperiale: tutorial.js.
+Consulta documents/mappa.txt per la descrizione analitica di ogni singolo file, architettura e test.

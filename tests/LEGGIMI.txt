@@ -1,0 +1,12 @@
+UNIVERSUM — TEST LOCALI (richiedono Node.js)
+
+Dalla cartella universum-main:
+  node tests/test_moduli.js
+  node tests/test_cache.js
+  node tests/test_inbox.js
+  node tests/test_moon_merchant.js
+  node tests/test_security_static.js
+
+I test usano mock Firestore per alcuni scenari: non sostituiscono Firebase Emulator,
+Firefox/Chrome sul tuo dispositivo o test multiaccount con regole pubblicate.
+L'hosting online, l'autenticazione reale e gli scambi tra client richiedono prove dedicate.

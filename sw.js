@@ -1,36 +1,76 @@
 /**
  * UNIVERSUM — Service Worker PWA (Offline-First + Network-First per Firebase)
  */
-const CACHE_NAME = 'universum-online-security-audit-v3';
+const CACHE_NAME = 'universum-refactor-modular-v4';
 
 const ASSETS = [
-  './',
-  './index.html',
-  './manifest.json',
-  './style.css',
-
-  // Moduli Core Applicazione
-  './db.js',                  // Database locale IndexedDB
-  './data.js',                // Enciclopedia: edifici, ricerche, navi e difese
-  './graphics-core.js',       // Nucleo grafico Canvas/SVG
-  './graphics-ships.js',      // Ritratti procedurali navi e difese
-  './graphics-structures.js', // Ritratti procedurali edifici, luna e ricerche
-  './engine-core.js',         // Motore matematico, produzione e tick
-  './engine-actions.js',      // Azioni giocatore, turbo, creative e autosave
-  './galaxy.js',              // Galassia procedurale, combattimenti e IA BOT
-  './firebase-config.js',     // Configurazione Firebase Auth + Firestore
-  './moon-merchant.js',    // Mercante di Lune offline/online
-  './multiplayer.js',      // Logica PvP online, chat e classifica
-  './ui-core.js',             // Regia UI, loop 1s, Panoramica e salvataggi
-  './ui-economy.js',          // UI Edifici, Ricerche, Cantiere, Difese e Luna
-  './ui-tactical.js',         // UI Flotta, Galassia, Spionaggio e Simulatore
-  './ui-social.js',           // UI Commercio, Classifica e Comunicazioni
-
-  // Moduli Plugin Espansione
-  './missions-core.js',       // Ricerca Esplorazione, spinta 10-100%, slot e richiamo
-  './siege-missions.js',      // Motore Assedi: Embargo Planetario (blocco rotte), Occupazione (5%/giorno + riscatto) e tick orbitale
-  './ui-fleet-movements.js',  // Schermata UI Movimento Flotta e stato assedi
-  './tutorial.js'             // Accademia Imperiale offline
+  './', './index.html', './manifest.json', './style.css',
+  './modules/offline/storage.js',
+  './modules/offline/lobby-starfield.js',
+  './db.js',
+  './modules/data/buildings.js',
+  './modules/data/megastructures.js',
+  './modules/data/researches.js',
+  './modules/data/ships.js',
+  './modules/data/defenses.js',
+  './data.js',
+  './graphics-core.js',
+  './graphics-ships.js',
+  './graphics-structures.js',
+  './modules/engine/context.js',
+  './modules/engine/foundation.js',
+  './modules/engine/timings.js',
+  './modules/engine/production.js',
+  './modules/engine/megastructure-costs.js',
+  './modules/engine/megastructure-progress.js',
+  './modules/engine/progress.js',
+  './engine-core.js',
+  './engine-actions.js',
+  './modules/galaxy/context.js',
+  './modules/galaxy/generation.js',
+  './modules/galaxy/megastructures.js',
+  './modules/galaxy/combat.js',
+  './modules/galaxy/fleet-dispatch.js',
+  './modules/galaxy/fleet-arrivals.js',
+  './modules/galaxy/bot-ai.js',
+  './modules/galaxy/fleet-tick.js',
+  './modules/galaxy/trade.js',
+  './galaxy.js',
+  './firebase-config.js',
+  './moon-merchant.js',
+  './modules/online/context.js',
+  './modules/online/foundation.js',
+  './modules/online/universes.js',
+  './modules/online/sync.js',
+  './modules/online/fleet-control.js',
+  './modules/online/combat-resolver.js',
+  './modules/online/sieges.js',
+  './modules/online/communications.js',
+  './modules/online/bots.js',
+  './multiplayer.js',
+  './ui-core.js',
+  './modules/ui/lobby-online.js',
+  './modules/ui/planet-canvas.js',
+  './modules/ui/navigation.js',
+  './modules/ui/runtime.js',
+  './modules/ui/selects.js',
+  './ui-guide.js',
+  './modules/ui/ui-galattica.js',
+  './modules/ui/ui-buildings.js',
+  './modules/ui/ui-research.js',
+  './modules/ui/ui-shipyard.js',
+  './modules/ui/ui-moon.js',
+  './modules/ui/ui-empire.js',
+  './modules/ui/fleet.js',
+  './modules/ui/galaxy.js',
+  './modules/ui/espionage.js',
+  './modules/ui/simulator.js',
+  './modules/ui/diplomacy.js',
+  './ui-social.js',
+  './missions-core.js',
+  './siege-missions.js',
+  './ui-fleet-movements.js',
+  './tutorial.js',
 ];
 
 self.addEventListener('install', (event) => {

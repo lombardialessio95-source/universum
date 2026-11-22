@@ -1,0 +1,24 @@
+UNIVERSUM - PUBBLICAZIONE REGOLE FIRESTORE
+=======================================
+
+Il file universum-main/firestore.rules e' IDENTICO alle regole di sicurezza aggiornate fornite separatamente.
+
+GITHUB (sito e codice):
+- Carica i file del gioco aggiornati nel repository GitHub che ospita il sito.
+- Puoi mantenere anche firestore.rules nel repository per controllo versione/documentazione.
+- GitHub Pages NON pubblica e NON applica le regole di Firestore.
+
+FIREBASE (sicurezza dei dati):
+1. Apri https://console.firebase.google.com/
+2. Seleziona il progetto Firebase collegato a UNIVERSUM.
+3. Vai in Firestore Database > Rules.
+4. Fai un backup delle regole attuali.
+5. Copia TUTTO il contenuto del file universum-main/firestore.rules nell'editor.
+6. Premi Publish.
+7. Prova l'online con due account (flotte, combattimenti, commerci e mercante di lune).
+
+NOTA: le regole limitano alcune azioni non autorizzate ma non possono rendere
+completamente anti-cheat un gioco con logica autorevole nel browser.
+
+IMPORTANTE: il file e' pronto per la pubblicazione, ma le regole non sono
+state collaudate su una istanza Firebase reale in questa sessione.

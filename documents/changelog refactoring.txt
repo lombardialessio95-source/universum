@@ -1,0 +1,24 @@
+UNIVERSUM — CHANGELOG REFACTOR MODULARE — 22/11/2026
+
+BASE: UNIVERSUM_Completo_Regole_Firestore_Aggiornate.zip
+
+Intervento conservativo: separazione fisica dei moduli a responsabilità più specifiche.
+- Data → 5 cataloghi specializzati + API matematica data.js.
+- Engine → moduli contesto, normalizzazione, tempi, produzione, rate, progressione e API engine-core.js.
+- Galaxy → generazione, megastrutture, battaglie, invio, arrivi, AI BOT, tick, commercio + API galaxy.js.
+- Multiplayer → contesto, schema flotte, universi, sync, controllo flotte, combattimenti, assedi, comunicazioni e BOT + API multiplayer.js.
+- UI core → moduli lobby online, pianeta, navigazione, runtime, select.
+- UI economy → Galattica, Edifici, Ricerche, Cantiere/Difese, Luna, Imperiale.
+- UI tactical → Flotta, Galassia, Spionaggio, Simulatore, Commercio e BOT.
+- DB → IndexedDB in modules/offline/storage.js, grafica lobby in modules/offline/lobby-starfield.js e lobby in db.js.
+- engine.js storico spostato in legacy/; ui-tactical.js e ui-economy.js originali sostituiti da moduli dedicati.
+- Caricamento 66 script locali con defer (download concorrente, esecuzione nell’ordine), servizio PWA aggiornato a universum-refactor-modular-v4.
+- Test aggiornati e organizzati nella cartella tests/. Documentazione rigenerata.
+
+NON MODIFICATI intenzionalmente: valori economici, algoritmi delle flotte, meccaniche battaglie, compatibilità formati offline, condizioni dell’Accademia, regole firestore.rules, API pubbliche dei principali namespace.
+Le regole Firestore sono identiche al file di sicurezza aggiornato precedentemente pubblicato: pubblicarle su Firebase resta un passaggio separato.
+
+CHECK PRINCIPALI ESEGUITI: sintassi JS; 64 verifiche di parità API/calcoli con la build precedente; 12 test inbox/conquiste/BOT/tributi; test Mercante; 10 controlli statici sicurezza; caricamento 66 script in VM e controllo della cache.
+LIMITI: nessun test con account Firebase reali. Browser Chromium nell’ambiente di esecuzione ha bloccato le navigazioni di test con errore ERR_BLOCKED_BY_ADMINISTRATOR, quindi il collaudo visivo finale deve essere eseguito da chi distribuisce la release.
+
+ATTENZIONE: caricare tutta la cartella modules/ insieme a index.html. Il codice della versione precedente NON funziona se si caricano soltanto i nuovi file API senza i nuovi moduli.

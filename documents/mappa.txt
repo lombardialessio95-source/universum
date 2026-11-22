@@ -1,0 +1,909 @@
+UNIVERSUM — MAPPA TECNICA INTEGRALE DEL PROGETTO MODULARE
+Data revisione: 22 novembre 2026
+Versione: riorganizzazione strutturale mantenendo il gameplay dell’ultima release con le regole Firestore aggiornate.
+====================================================================================================
+
+A. ARCHITETTURA IN BREVE
+----------------------------------------------------------------------------------------------------
+Il repository ospitato su GitHub Pages contiene soltanto codice client statico. La progressione offline è salvata in IndexedDB; l’online usa Firebase Authentication e documenti Firestore, governati da firestore.rules pubblicate separatamente nella console Firebase.
+Non sono introdotti Cloud Functions, pacchetti npm di produzione o un sistema di compilazione obbligatorio: ogni modulo è un semplice script JavaScript caricato da index.html con defer.
+La modularizzazione è conservativa: non cambia formule, nomi delle API window.Universum*, formato salvataggi né regole Firestore. Le classiche API pubbliche rimangono in data.js, db.js, engine-core.js, galaxy.js, multiplayer.js e ui-core.js; le implementazioni sono suddivise sotto modules/.
+
+B. COSA AVVIENE QUANDO APRI IL GIOCO
+----------------------------------------------------------------------------------------------------
+1) Il browser legge index.html e style.css; scarica gli SDK Firebase esterni (se raggiungibili).
+2) Gli script locali defer vengono scaricati in parallelo, ma ESEGUITI nello stesso ordine dei tag in index.html prima di DOMContentLoaded.
+3) modules/offline/storage.js apre l’accesso IndexedDB tramite db.js; modules/data/* registra i cataloghi ed espone UniversumData.
+4) modules/engine/* crea Engine; engine-actions.js aggiunge le azioni. modules/galaxy/* crea la galassia offline; Firebase e modules/online/* preparano MP.
+5) ui-core.js prepara UI.state e gli helper; modules/ui/* e ui-social.js/ui-guide.js registrano renderer; missions-core.js, siege-missions.js e tutorial.js attivano plugin.
+6) Con DOMContentLoaded la lobby mostra gli universi locali. All’entrata offline UI.startGame carica uno stato esistente. Online UI.startOnlineGame gestisce listener e sync con Firestore.
+7) UI.startGameLoop esegue tick simulativo periodico. Il rendering costoso è in parte sospeso in background, ma la progressione economica resta attiva. All’apertura di un salvataggio offline processOfflineProgress recupera il tempo trascorso.
+
+C. STRUTTURA DEI DATI E DEI FLUSSI
+----------------------------------------------------------------------------------------------------
+OFFLINE: modules/offline/storage.js ↔ IndexedDB (universes, id); engine/actions ↔ universe.planets e researches; modules/galaxy/*.js ↔ galaxyDeltas/fleetsInFlight/messages; UI legge lo stato corrente e lo salva via UniversumDB.
+ONLINE: modules/online/universes.js ↔ online_universes + players + planets; sync.js ↔ lastUpdated + inbox; fleet-control/combat-resolver.js ↔ fleets e pianeti; communications.js ↔ messages/chat/private_chats; bots.js ↔ pianeti BOT e Mercante.
+SICUREZZA: Firestore verifica request.auth e regole del file. Non è presente un calcolatore autorevole di produzione e PvP lato server: un client alterato può ancora falsificare dati propri non verificati dalle regole.
+ASSET: graphics-core, ships, structures generano illustrazioni Canvas; non sono sorgenti di regole economiche.
+ESTENSIONI: missions-core registra una ricerca aggiuntiva dopo il caricamento base; siege-missions aggiunge tick assedi; tutorial.js opera solo offline.
+
+D. ORDINE EFFETTIVO DEI FILE JAVASCRIPT (dal codice index.html)
+----------------------------------------------------------------------------------------------------
+01. modules/offline/storage.js
+02. modules/offline/lobby-starfield.js
+03. db.js
+04. modules/data/buildings.js
+05. modules/data/megastructures.js
+06. modules/data/researches.js
+07. modules/data/ships.js
+08. modules/data/defenses.js
+09. data.js
+10. graphics-core.js
+11. graphics-ships.js
+12. graphics-structures.js
+13. modules/engine/context.js
+14. modules/engine/foundation.js
+15. modules/engine/timings.js
+16. modules/engine/production.js
+17. modules/engine/megastructure-costs.js
+18. modules/engine/megastructure-progress.js
+19. modules/engine/progress.js
+20. engine-core.js
+21. engine-actions.js
+22. modules/galaxy/context.js
+23. modules/galaxy/generation.js
+24. modules/galaxy/megastructures.js
+25. modules/galaxy/combat.js
+26. modules/galaxy/fleet-dispatch.js
+27. modules/galaxy/fleet-arrivals.js
+28. modules/galaxy/bot-ai.js
+29. modules/galaxy/fleet-tick.js
+30. modules/galaxy/trade.js
+31. galaxy.js
+32. firebase-config.js
+33. moon-merchant.js
+34. modules/online/context.js
+35. modules/online/foundation.js
+36. modules/online/universes.js
+37. modules/online/sync.js
+38. modules/online/fleet-control.js
+39. modules/online/combat-resolver.js
+40. modules/online/sieges.js
+41. modules/online/communications.js
+42. modules/online/bots.js
+43. multiplayer.js
+44. ui-core.js
+45. modules/ui/lobby-online.js
+46. modules/ui/planet-canvas.js
+47. modules/ui/navigation.js
+48. modules/ui/runtime.js
+49. modules/ui/selects.js
+50. ui-guide.js
+51. modules/ui/ui-galattica.js
+52. modules/ui/ui-buildings.js
+53. modules/ui/ui-research.js
+54. modules/ui/ui-shipyard.js
+55. modules/ui/ui-moon.js
+56. modules/ui/ui-empire.js
+57. modules/ui/fleet.js
+58. modules/ui/galaxy.js
+59. modules/ui/espionage.js
+60. modules/ui/simulator.js
+61. modules/ui/diplomacy.js
+62. ui-social.js
+63. missions-core.js
+64. siege-missions.js
+65. ui-fleet-movements.js
+66. tutorial.js
+
+E. CATALOGO ANALITICO — TUTTI I FILE DEL REPOSITORY
+====================================================================================================
+
+## PORTALE E FILE RADICE
+----------------------------------------------------------------------------------------------------
+
+FILE: README.txt
+Ruolo: Istruzioni di installazione e distribuzione
+Dimensione attuale: 2,345 byte | Caricato direttamente dalla pagina: NO
+COSA CONTIENE E COME FUNZIONA:
+  Presenta la struttura a cartelle della release, ricorda di caricare tutti i moduli su GitHub Pages e pubblicare le regole Firestore solo su Firebase, e riporta i comandi di test.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Leggere questo file prima di distribuire lo ZIP. Non viene caricato dal browser.
+
+FILE: data.js
+Ruolo: API dei dati e formule
+Dimensione attuale: 5,769 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Riunisce cataloghi caricati da modules/data/* nel namespace window.UniversumData. Calcola getBuildingCost, getResearchCost, getBuildingEnergyDelta, getBaseHourlyProduction, getStorageCapacity, getMaxFields/getUsedFields, verifiche dei prerequisiti. Il catalogo unico condiviso è modificabile dalle estensioni come missions-core.js.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Non aggiungere definizioni statiche direttamente qui se appartengono ai cataloghi; per nuove tecnologie editare modules/data/researches.js e assicurarsi che il nome sia riconosciuto nella UI.
+Funzioni e helper nominati presenti: getBuildingCost, getResearchCost, getBuildingEnergyDelta, getBaseHourlyProduction, getStorageCapacity, getMaxFields, getUsedFields, getMoonMaxFields, getMoonUsedFields, checkRequirements.
+
+FILE: db.js
+Ruolo: Interfaccia lobby e coordinamento IndexedDB
+Dimensione attuale: 22,292 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Gestisce render elenco universi, creazione partita in modale, esportazione/importazione, rinomina, eliminazione, avvio partita, installazione PWA e interazioni con la pagina lobby. Le operazioni di I/O reali sono in modules/offline/storage.js; lo sfondo stellato è in modules/offline/lobby-starfield.js. Espone window.UniversumDB per compatibilità col codice esistente.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Usa UniversumDBStore interno, UniversumUI.startGame e gli elementi #screen-lobby / #screen-game. Su DOMContentLoaded apre IndexedDB e disegna la lobby.
+Funzioni e helper nominati presenti: showToastFallback, formatBotLabel, formatDate, renderLobbyList, escapeHTML, openModal, closeModal, openCreateUniverseModal, launchUniverse, setupPWAInstall, bindLobbyEvents.
+
+FILE: engine-actions.js
+Ruolo: Comandi economici e salvataggio
+Dimensione attuale: 14,711 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Applica azioni per edifici, ricerche, cantiere, difese, funzioni Creative, turbo e salvataggio. Verifica requisiti e disponibilità delle risorse, paga i costi e avvia le code; aggiunge metodi a window.UniversumEngine già inizializzato.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Dipende da data.js e engine-core.js; da verificare sempre la coerenza tra consumo risorse offline e sync online dopo modifiche.
+Funzioni e helper nominati presenti: canAfford, deductResources, startBuilding, startResearch, buildUnits, activateTurbo, applyCreativeCheat, renamePlanet, renameMoon, bindAutoSave.
+
+FILE: engine-core.js
+Ruolo: API pubblica del motore economico
+Dimensione attuale: 1,011 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  È il punto di aggregazione che espone window.UniversumEngine, ottenendo le funzioni da modules/engine/*. Mantiene _internal.getData e _internal.normalizePlanet perché engine-actions.js li utilizza. Non contiene più le centinaia di righe dei calcoli.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Cambiare produzione/tempi in modules/engine; se si introduce una nuova API pubblica aggiungere il riferimento qui. engine-actions.js estende questo stesso oggetto.
+
+FILE: firebase-config.js
+Ruolo: Configurazione client Firebase
+Dimensione attuale: 1,330 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Inizializza SDK Firebase compat usando projectId e parametri pubblici, espone window.fbAuth e window.fbDB. Se gli SDK non sono disponibili imposta i riferimenti null e l’offline resta indipendente dal backend.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Fornisce connessione a modules/online/*; la sicurezza non dipende dalla segretezza di apiKey pubblica, ma dall’autenticazione, dalle regole e dalla validazione delle operazioni.
+
+FILE: firestore.rules
+Ruolo: Regole di autorizzazione Firebase Firestore
+Dimensione attuale: 12,498 byte | Caricato direttamente dalla pagina: NO
+COSA CONTIENE E COME FUNZIONA:
+  Regole eseguite dal servizio Firebase (non da GitHub Pages). Controllano documenti users, online_universes, players, planets, fleets, messages, chat e private_chats. Usano funzioni signedIn, fleetParty, validHumanFleetCreate, validNpcRaidCreate, hasArrivalEvidence ecc. Limitano le operazioni non autorizzate, ma non rappresentano un server autorevole capace di verificare la produzione fisica delle risorse.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Pubblicare separatamente in Firebase Console → Firestore Database → Rules → Publish. Tenere qui una copia versionata su GitHub NON rende attive le regole; leggere documents/audit sicurezza online.txt.
+
+FILE: galaxy.js
+Ruolo: API pubblica galassia offline
+Dimensione attuale: 2,692 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Unisce metodi implementati nei moduli modules/galaxy/* senza duplicarne il codice. Espone window.UniversumGalaxy: sistema generato, costruzione lune/megastrutture, risoluzione battaglie, lancio/arrivo flotte, BOT e commercio.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Va caricato DOPO tutti i modules/galaxy. I nomi pubblici sono invariati rispetto alla versione monolitica, così la UI e gli assedi possono continuare a chiamarli.
+
+FILE: graphics-core.js
+Ruolo: Primitive grafiche e icone
+Dimensione attuale: 20,140 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Costruisce cache immagini, risorse e helper Canvas/SVG. Prepara gli asset grafici procedurali richiamati dalla UI. Genera le piccole illustrazioni nel browser senza scaricare grandi immagini raster.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Deve essere caricato prima di graphics-ships.js e graphics-structures.js; le cache limitano il lavoro CPU/GPU durante i render ripetuti.
+Funzioni e helper nominati presenti: _getCacheKey, _resolveRenderer, _hexToRgba, _drawCardBg, _drawMetallicHull, _drawEngineGlow, _drawPanelLines, _drawPlanetarySurface, _drawLunarSurface, _drawBlueprintBg, _renderFallbackEmblem, _renderResource32, _initResourceIconsOnce.
+
+FILE: graphics-ships.js
+Ruolo: Renderer procedurali di navi e difese
+Dimensione attuale: 27,681 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Contiene sagome e disegni per unità spaziali e installazioni difensive, con canvas offscreen e riutilizzo del risultato per id/stile. Utilizza le primitive di graphics-core.js.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Non cambia le statistiche delle navi, che restano in modules/data/ships.js e modules/data/defenses.js.
+Funzioni e helper nominati presenti: _createOffscreen, _wrapPreRendered, _drawCrepuscolo.
+
+FILE: graphics-structures.js
+Ruolo: Renderer di edifici, tecnologie e luna
+Dimensione attuale: 34,145 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Contiene disegni procedurali di strutture planetarie, lunari e tecnologie; usa cache di canvas per ridurre il ridisegno. È distinto dal catalogo matematico delle costruzioni.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Le definizioni economiche sono in modules/data/buildings.js e modules/data/researches.js; questo file disegna soltanto.
+Funzioni e helper nominati presenti: _createOffscreen, _wrapPreRendered, _drawBacino.
+
+FILE: index.html
+Ruolo: Punto d’ingresso HTML e ordine dei moduli
+Dimensione attuale: 26,302 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Definisce la pagina con lobby offline/online, gioco, pannello risorse, barra laterale, navigazione mobile, viewport e finestre modali. I tag script defer ordinati consentono download concorrenti ed esecuzione nell’ordine scritto. Gli SDK Firebase compat v10 sono caricati prima dei moduli locali. Non è presente un bundler a runtime.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Rinomina di vista -> data-view, renderCurrentView in modules/ui/navigation.js; aggiunta file JS -> nuovo script nell’ordine corretto e voce nella cache sw.js.
+
+FILE: manifest.json
+Ruolo: Identità e installabilità PWA
+Dimensione attuale: 791 byte | Caricato direttamente dalla pagina: NO
+COSA CONTIENE E COME FUNZIONA:
+  Contiene nome app, descrizione, orientamento, colori e metadati dell’app installabile. Non salva i progressi.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Collegato da index.html e incluso nel precache del service worker.
+
+FILE: missions-core.js
+Ruolo: Plugin missioni spaziali
+Dimensione attuale: 5,654 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Registra la ricerca Esplorazione Profonda sul catalogo a runtime, calcola capacità slot missione, tempi e carburante per percentuali di velocità, richiami e utility trasporto. Estende le funzioni senza sostituire il motore base.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Dipende da dati, galassia e motore; viene caricato dopo la UI principale, prima degli assedi e del pannello movimenti.
+Funzioni e helper nominati presenti: registerExplorationResearch.
+
+FILE: moon-merchant.js
+Ruolo: Calcolatore Mercante di Lune
+Dimensione attuale: 4,076 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Offre inspect, applyOffline, createMoonData, report e costante FEE. Valuta detriti teorici al 30% di metallo+cristallo delle navi; 1% ogni 100.000 detriti fino al massimo 20%; paga 1.000.000 deuterio e sacrifica la flotta senza lasciare campo recuperabile. In Creativa la Luna resta creabile direttamente tramite comando separato.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  La versione online chiama modules/online/bots.js → hireOnlineMoonMerchant. Il pannello di selezione pianeta e conferma è in modules/ui/diplomacy.js.
+Funzioni e helper nominati presenti: createMoonData, inspect, report, applyOffline.
+
+FILE: multiplayer.js
+Ruolo: API pubblica multiplayer
+Dimensione attuale: 2,830 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Espone window.UniversumMP con metodi di autenticazione, lobby server, sync, voli, risoluzione missioni, rapporti, chat, BOT e mercante. Tutta la logica operativa è sotto modules/online/*; la compatibilità con vecchi chiamanti è mantenuta.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  I controlli server-side si trovano in firestore.rules. Il browser non è autorevole per produzione e risultati di combattimento; non confondere questo refactoring con una soluzione anticheat completa.
+
+FILE: siege-missions.js
+Ruolo: Motore di embargo e occupazioni
+Dimensione attuale: 27,475 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Gestisce le missioni di assedio orbital, embargo, occupazione, rimborsi/tributi, riscatto e difesa da flotta bloccante. Aggancia il tick economico con un wrapper (origTick) per aggiornare lo stato degli assedi anche in offline.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Esegue operazioni su universo e pianeti; collaborazioni con UniversumGalaxy e UniversumMissionsCore. Su online la controparte è modules/online/sieges.js.
+
+FILE: style.css
+Ruolo: Foglio di stile globale del gioco
+Dimensione attuale: 31,188 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Contiene variabili CSS dei colori, griglie, layout responsive, componenti glass-panel, pulsanti, modali, navigazione e stati visivi. Gli stili restano centralizzati perché sono condivisi tra molte schermate. Nessuna animazione JavaScript viene creata da questo file.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Le classi vengono richieste dal markup HTML e dalle stringhe HTML prodotte dai renderer UI. Verificare desktop/mobile dopo modifiche di classi globali.
+
+FILE: sw.js
+Ruolo: Service Worker e cache PWA
+Dimensione attuale: 3,612 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Precarica pagina principale, CSS, manifest e ogni script locale presente in index.html; la cache ha nome universum-refactor-modular-v4. Per richieste GET effettua network-first con ripiego sulla cache in caso di errore. Non intercetta le API Firebase elencate nei domini esclusi. All’attivazione rimuove le vecchie cache dello stesso ambito.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Ogni nuovo modulo script deve apparire nell’array ASSETS. Quando si pubblicano cambi di file aggiornare CACHE_NAME; altrimenti una PWA può servire vecchi script.
+
+FILE: tutorial.js
+Ruolo: Accademia Imperiale offline
+Dimensione attuale: 16,725 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Definisce le dodici missioni principali con sotto-obiettivi, verifica progressi ed eventi nel salvataggio, costruisce il pannello e collega alle viste pertinenti. In modalità multiplayer non avvia questa esperienza didattica.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Dipende da UniversumUI, UniversumData e stato dell’universo locale. Se si rinominano chiavi edificio/tecnologia aggiornare anche le condizioni del tutorial.
+Funzioni e helper nominati presenti: energyFor, subgoals, activeHint, save, ensureUI, render, label, setBaseline, advance, check, onView, onStart, clear, interceptLaunch.
+
+FILE: ui-core.js
+Ruolo: Stato UI e strumenti condivisi
+Dimensione attuale: 15,666 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Inizializza window.UniversumUI e lo stato corrente; fornisce escapeHTML, formatNum, formatDuration, SVG, rendering icone, audio, toast/modali, pianeta attivo, sincronizzazione/conciliazione, badge notifiche e apertura chat privata.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  È caricato prima di qualsiasi modulo modules/ui. Lo stato UI.state mantiene currentUniverse, isMultiplayerMode, currentView, dati vista e listener attivi.
+Metodi UI definiti: UI.artTag, UI.resIconTag, UI.svgIcon, UI.generateDynamicPWAIcon, UI.playSound, UI.escapeHTML, UI.formatNum, UI.formatDuration, UI.toast, UI.openModal, UI.closeModal, UI.getActivePlanetIndex, UI.getActivePlanet, UI._resetSyncRetry, UI._scheduleSyncRetry, UI.persistUniverseState, UI._requestReconcileSync, UI.onOnlineReconciled, UI.closePrivateMessageStream, UI.updateCommBadges, UI.openPrivateChatWith.
+
+FILE: ui-fleet-movements.js
+Ruolo: Interfaccia delle flotte in movimento
+Dimensione attuale: 25,188 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Rende stato missioni in volo, timer, elenco flotte, richiamo, pianeti bersaglio, informazioni su assedi/occupazioni e slot in uso. Legge movimenti offline dall’universo e online dalla sincronizzazione.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Plugin caricato dopo missions-core.js e siege-missions.js; registra le funzioni UI per vista movements.
+Metodi UI definiti: UI.renderFleetMovements.
+
+FILE: ui-guide.js
+Ruolo: Manuale integrato nel gioco
+Dimensione attuale: 36,966 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Costruisce dinamicamente la pagina Guida e Aiuto, indicizza capitoli e termini di ricerca usando il catalogo di gioco e stato locale per le sezioni aperte.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Registrazione di UI.renderGuide. Legge UniversumData: non è una fonte separata per costi e requisiti.
+Metodi UI definiti: UI.renderGuide, UI.renderGuideView.
+Funzioni e helper nominati presenti: _esc, _num, _linkTo, _sectionHeader, _dataCard, _missionCard, _imageHeader, renderIntro, renderResources, renderBuildings, renderResearch, renderShips, renderDefenses, renderMoon, renderBacino, renderInvictus, renderCrepuscolo, renderGalattica, renderMissions, renderSlots, renderSpy, renderTrade, renderSieges, renderCreative, renderTips.
+
+FILE: ui-social.js
+Ruolo: Schermate social, rapporti e classifica
+Dimensione attuale: 22,865 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Rende rapporti di combattimento/spionaggio, chat pubblica/privata, classifica e funzioni social; distingue risorse locali offline da listener Firestore online dove previsto.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  È caricato dopo UI core e moduli di navigazione; per storage, rapporti e chat online usa window.UniversumMP.
+Metodi UI definiti: UI.renderReports, UI.renderHighscoreAndQuests, UI.renderCommunications, UI.renderGalacticChatTab, UI.renderGalacticChatMessagesDOM, UI.renderPrivateMessagesTab, UI.renderPrivateMessagesDOM.
+
+## MODULI: CATALOGHI
+----------------------------------------------------------------------------------------------------
+
+FILE: modules/data/buildings.js
+Ruolo: Catalogo edifici planetari e lunari
+Dimensione attuale: 8,035 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Dichiara BUILDINGS e MOON_BUILDINGS con id, nome, descrizione, baseCost, factor e requirements per ciascun edificio. Comprende miniere, generatori, impianti, laboratori, bunker e strutture lunari.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Registra i due cataloghi nel contenitore __UniversumCatalog. data.js vi applica le formule e i controlli prerequisiti.
+
+FILE: modules/data/defenses.js
+Ruolo: Catalogo difese
+Dimensione attuale: 5,410 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Definisce DEFENSES con costi, resistenza, scudo, attacco e requisiti. I combattimenti legano queste definizioni alla produzione di difese sui pianeti.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  La UI difese usa modules/ui/ui-shipyard.js; rendering grafico in graphics-ships.js.
+
+FILE: modules/data/megastructures.js
+Ruolo: Catalogo megastrutture e progetti speciali
+Dimensione attuale: 3,357 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Definisce BACINO_SPAZIALE, INVICTUS, CREPUSCOLO, GALATTICA, GALATTICA_STRUCTURES: durata in giorni, costi totali/giornalieri, massimali e coefficienti di salto e specializzazioni.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Sono definizioni statiche, non le transazioni: i costi a rate sono applicati dai modules/engine/megastructure-* e i comandi di attivazione da modules/galaxy/megastructures.js.
+
+FILE: modules/data/researches.js
+Ruolo: Catalogo ricerche
+Dimensione attuale: 9,167 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Definisce tutte le tecnologie iniziali con costo base, fattore di crescita, prerequisiti, descrizione e livelli richiesti. Espone RESEARCHES nel catalogo condiviso.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  La durata concreta viene calcolata da modules/engine/timings.js; la UI ricerche è in modules/ui/ui-research.js.
+
+FILE: modules/data/ships.js
+Ruolo: Catalogo unità navali
+Dimensione attuale: 10,976 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Dichiara SHIPS, con costi, scafo, scudi, attacco, velocità, motore, capacità di carico, combustibile, rapid fire e prerequisiti. È la fonte delle statistiche per battaglie, stiva e Mercante di Lune.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  L’interfaccia Flotta legge queste definizioni. Le immagini procedurali si trovano invece in graphics-ships.js.
+
+## MODULI: MOTORE
+----------------------------------------------------------------------------------------------------
+
+FILE: modules/engine/context.js
+Ruolo: Costanti e registro privato motore
+Dimensione attuale: 372 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Inizializza __UniversumEngineModules e le costanti relative ai massimali Creative, condivise tra il tick e le altre parti dell’Engine. Questo registro consente di separare le funzioni mantenendo un’unica API pubblica.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Deve essere il primo script di modules/engine. Il registro interno non rappresenta un confine di sicurezza.
+
+FILE: modules/engine/foundation.js
+Ruolo: Normalizzazione stato pianeti
+Dimensione attuale: 3,867 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Fornisce getData e normalizePlanet; aggiorna campi legacy come deuteriumSynthesizer, inizializza code e raccolte mancanti per vecchi salvataggi.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Chiamato da progressione e actions. È il punto da modificare se cambia il formato dei pianeti compatibile all’indietro.
+Metodi condivisi nel registro motore: getData, normalizePlanet.
+
+FILE: modules/engine/megastructure-costs.js
+Ruolo: Rate e pagamenti progetti maggiori
+Dimensione attuale: 5,523 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Contiene calcoli mancanze giornaliere, controlli di solvibilità e applicazioni rate del Bacino, oltre a logiche di continuazione durante il recupero offline.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Condivide l’API interna motore con modules/engine/megastructure-progress.js e progress.js; legge definizioni modules/data/megastructures.js.
+Metodi condivisi nel registro motore: getProjectMissingForDay, getBacinoMissingForDay, getInvictusMissingForDay, getCrepuscoloMissingForDay, getGalatticaMissingForDay, getGalatticaStructureCost, canPayDaily, canPayBacinoDay, payBacinoDay, settleBacinoDue, settleBacinoOffline.
+
+FILE: modules/engine/megastructure-progress.js
+Ruolo: Avanzamento megastrutture, Invictus e Galattica
+Dimensione attuale: 14,635 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Gestisce pagamenti di Invictus, Crepuscolo, Galattica, sviluppo/normalizzazione Galattiche e loro produzione, scadenze, riparazioni e trasformazioni.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Mantiene la progressione dei progetti a giorni reali anche dopo inattività attraverso processOfflineProgress. Il sistema di assedio si integra più avanti via siege-missions.js.
+Metodi condivisi nel registro motore: payInvictusDay, payCrepuscoloDay, payGalatticaDay, settleGalatticaDue, transformCompletedGalattiche, normalizeGalattica, getGalatticaProduction, addGalatticaProduction, settleCrepuscoloDue, checkCrepuscoloLimbo, collectDoneInvictus, settleInvictusDue, settleInvictusOffline.
+
+FILE: modules/engine/production.js
+Ruolo: Produzione di risorse ed energia
+Dimensione attuale: 4,230 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Calcola energia da centrali e satelliti, consumo miniere, efficienza energetica, bonus Plasma, produzione per secondo/ora e limiti di stoccaggio.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  È usato dal tick offline, dalla vista risorse e dal ricalcolo online locale. Modifiche ai coefficienti richiedono ricalcolo e test di economia.
+Metodi condivisi nel registro motore: getPlanetProduction.
+
+FILE: modules/engine/progress.js
+Ruolo: Tick, recupero offline e completamento code
+Dimensione attuale: 8,698 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Accredita risorse entro i limiti, risolve code completate al timestamp corretto, applica avanzamento offline recuperato e tick a intervalli di gioco. Gestisce reset dei limiti risorse in Creative.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Definisce processOfflineProgress e tick esportati dall’aggregatore. UI startGameLoop li richiama ogni secondo; `lastSeen` permette il recupero al rientro.
+Metodi condivisi nel registro motore: addResourcesWithCap, advanceQueuesAtTimestamp, processOfflineProgress, tick.
+
+FILE: modules/engine/timings.js
+Ruolo: Tempi di produzione, costruzione e ricerca
+Dimensione attuale: 3,980 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Calcola velocità effettiva con turbo, tempi dei livelli edificio/ricerca, livello totale laboratori collegati, tempi unitari cantiere e costi unità modificati da specializzazioni lunari.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Legge requisiti e costi dai cataloghi e stato del pianeta; conserva esattamente le formule della versione precedente.
+Metodi condivisi nel registro motore: getEffectiveSpeed, getBuildingBuildTime, getTotalLabLevel, getResearchTime, getSingleUnitTime, getUnitCostAdjusted.
+
+## MODULI: GALASSIA OFFLINE
+----------------------------------------------------------------------------------------------------
+
+FILE: modules/galaxy/bot-ai.js
+Ruolo: Comportamento automatico BOT offline
+Dimensione attuale: 6,302 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Regola la logica delle IA BOT che intervengono nell’universo e nei sistemi; dipende dai parametri impostati (pacifico/ostile, livello e altri dati di universo).
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Separato dal Mercante di Lune: il Mercante è un servizio determinato dalla UI e non viene disabilitato dai BOT pacifici.
+Metodi condivisi nel registro galassia: processBotAI.
+
+FILE: modules/galaxy/combat.js
+Ruolo: Simulazione e risoluzione battaglie
+Dimensione attuale: 15,969 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Espande flotte/difese in unità, effettua cicli di battaglia e rapid-fire, calcola esito, sopravvissuti, perdite, detriti e report. `resolveCombat` e `simulateBattle` sono esposti nel namespace pubblico Galaxy.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Le statistiche sono esclusivamente quelle del catalogo SHIPS/DEFENSES; per bug di combattimento ispezionare questo file e il resolver online, non le viste.
+Metodi condivisi nel registro galassia: expandUnitPool, summarizePool, resolveCombat, simulateBattle.
+
+FILE: modules/galaxy/context.js
+Ruolo: Registro privato galassia
+Dimensione attuale: 130 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Inizializza __UniversumGalaxyModules; i singoli script si registrano con Object.assign e chiamano altri moduli tramite bridge a risoluzione ritardata.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Caricare prima di tutte le sezioni galaxy e prima del file aggregatore galaxy.js.
+
+FILE: modules/galaxy/fleet-arrivals.js
+Ruolo: Arrivi missioni e report offline
+Dimensione attuale: 29,857 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Normalizza liste navi per i messaggi, gestisce i diversi tipi di arrivo delle missioni (trasporti, spionaggio, attacchi, esplorazioni, occupazioni e ricadute); aggiorna pianeti/delta e crea i rapporti.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Chiama il simulatore di combattimento e registra i messaggi. È la prima area da verificare se una missione offline arriva ma non applica l’effetto.
+Metodi condivisi nel registro galassia: formatUnitList, formatCombatDetails, addMessage, handleMissionArrival.
+
+FILE: modules/galaxy/fleet-dispatch.js
+Ruolo: Distanze e invio flotta offline
+Dimensione attuale: 9,522 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Calcola distanza, velocità e carburante, controlla blocchi di rotta/missione e crea il record di flotta in volo. Il carico dipende dalle risorse realmente disponibili e dalla stiva utile.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Il pannello di scelta navi/carico e Riempi/Metà/Smezza è in modules/ui/fleet.js; questo modulo verifica e applica le operazioni.
+Metodi condivisi nel registro galassia: calculateDistance, getFleetSpeedAndFuel, findEmbargoAt, launchFleet.
+
+FILE: modules/galaxy/fleet-tick.js
+Ruolo: Ciclo flotte, ritorni e BOT offline
+Dimensione attuale: 12,749 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Processa periodicamente voli in partenza/ritorno, arrivi Galattica, completamenti di missioni e IA. È richiamato dal game loop senza modificare la logica dell’economia.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Toccare con cautela: un errore di timestamp può bloccare o duplicare una flotta. Testare missioni in partenza e ritorno.
+Metodi condivisi nel registro galassia: handleGalatticaReturnArrival, processFleetsAndBots.
+
+FILE: modules/galaxy/generation.js
+Ruolo: Generazione procedurale deterministica
+Dimensione attuale: 12,096 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Gestisce hashString e PRNG mulberry32, chiavi/coordinate, temperature e campi di pianeti, generazione slot da seed, personalità e livello BOT, delta salvati e lettura di sistemi.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Una posizione con gli stessi parametri genera lo stesso BOT, salvo gli aggiornamenti dipendenti dal tempo e i delta persistiti. Espone getSystemData/generateProceduralSlot.
+Metodi condivisi nel registro galassia: hashString, mulberry32, coordKey, parseCoordKey, calculatePlanetTemperature, calculateSlotMaxFields, generateProceduralSlot, getSystemData.
+
+FILE: modules/galaxy/megastructures.js
+Ruolo: Lune, Bacino Spaziale, Invictus, Crepuscolo e Galattica
+Dimensione attuale: 26,938 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Implementa creazione Luna in condizioni previste, avvio e avanzamento strutture speciali, calcolo costi dei salti, spostamento Galattiche, cancellazione/trasformazione Bacino, Gate lunare e Falange.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Collabora con modules/data/megastructures.js e modules/engine; gestisce cambiamenti su pianeta, luna, flotte e deltas della galassia offline.
+Metodi condivisi nel registro galassia: getMoonCreationCost, makeMoon, createMoon, startBacinoSpaziale, getInvictusCount, getInvictusJumpCost, addInvictusDebris, startInvictusConstruction, isBacinoVuoto, getCrepuscoloState, makeCrepuscoloProject, beginCrepuscoloBattleRepair, startCrepuscoloConstruction, assignCrepuscoloWreck, findGalatticaAt, getGalatticaCount, findGalattica, startGalatticaConstruction, getGalatticaJumpCost, jumpGalattica, upgradeGalatticaStructure, buildGalatticaDefense, buildGalatticaShip, cancelBacinoConstruction, destroyBacinoAndFormMoon, useJumpGate, scanWithPhalanx.
+
+FILE: modules/galaxy/trade.js
+Ruolo: Commercio e contratti BOT offline
+Dimensione attuale: 4,326 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Implementa tradeWithBot, blackMarketTrade e signBotContract, costi di scambio, effetti sui pianeti e registrazione messaggi, contratti di supporto.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  È distinto dal commercio online in modules/online/bots.js. UI unificata nell’area Commercio e BOT.
+Metodi condivisi nel registro galassia: tradeWithBot, blackMarketTrade, signBotContract.
+
+## MODULI: SALVATAGGIO OFFLINE
+----------------------------------------------------------------------------------------------------
+
+FILE: modules/offline/lobby-starfield.js
+Ruolo: Animazione sfondo lobby ottimizzata
+Dimensione attuale: 3,227 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Contiene initStarfield, attiva un Canvas nel lobby con stelle, nebulose precalcolate, ridimensionamento al bisogno e limitazione frame rate. Esporta UniversumLobbyStarfield.start.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Solo decorazione: non deve alterare tick, risorse o salvataggi. Sospende lavoro quando la scheda non è visibile.
+Funzioni e helper nominati presenti: initStarfield, rebuildNebulaLayer, render.
+
+FILE: modules/offline/storage.js
+Ruolo: Salvataggi locali e creazione universi
+Dimensione attuale: 9,084 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Possiede connessione IndexedDB UniversumDB versione 1, store universes, getAll/create/save/load/remove/rename/exportJSON/importJSON. Crea lo stato iniziale, pianeta madre, campi, risorse, ricerche, flotte, opzioni bot e seed galattico. Espone window.__UniversumDBStore al modulo db.js.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Il formato salvato non è stato modificato dalla modularizzazione. Gli altri moduli usano window.UniversumDB invece di accedere a IndexedDB direttamente.
+Funzioni e helper nominati presenti: init, getAll, resolveStartingResources, create, save, load, remove, rename, exportJSON, importJSON.
+
+## MODULI: MULTIPLAYER
+----------------------------------------------------------------------------------------------------
+
+FILE: modules/online/bots.js
+Ruolo: BOT online, Mercante di Lune, commercio e raid
+Dimensione attuale: 15,900 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Normalizza configurazione BOT; genera statistiche e documenti, popola vicinanze home; esegue hireOnlineMoonMerchant e tradeWithOnlineBot con operazioni Firestore; pianifica eventuali raid NPC.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Il Mercante è disponibile anche negli universi con BOT pacifici. Le azioni dei BOT normali e i limiti anticheat sono diversi dall’offline: non presumere equivalenza totale.
+Metodi condivisi nel registro online: normalizeBotConfig, _botHashString, _botMulberry32, _botShuffle, _pickBotPersonality, _generateOnlineBotStats, _buildBotDoc, ensureBotsAroundHome, hireOnlineMoonMerchant, tradeWithOnlineBot, maybeLaunchBotRaid.
+
+FILE: modules/online/combat-resolver.js
+Ruolo: Risoluzione missioni e combattimenti online
+Dimensione attuale: 30,733 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Contiene resolveArrivedOnlineFleets, che cerca flotte scadute/arrivate, verifica partecipazione e tipo missione, aggiorna documenti con transazioni, report e stati ritorno.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  È il nucleo più sensibile per PvP: l’esecuzione resta sul client, quindi le regole Firestore possono limitare l’accesso, ma non validare ogni esito matematico. Necessari test multiaccount reali.
+Metodi condivisi nel registro online: resolveArrivedOnlineFleets.
+
+FILE: modules/online/communications.js
+Ruolo: Rapporti, classifiche, chat e messaggi privati
+Dimensione attuale: 11,392 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Fornisce getReports, cancellazione rapporti, leaderboard, chat pubblica, canali privati, listener conversazioni, leave e delete universi, listener cancellazioni.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Le regole di accesso per messages/chat/private_chats sono in firestore.rules. La UI è in ui-social.js e modules/ui/lobby-online.js.
+Metodi condivisi nel registro online: getReports, deleteReport, deleteAllReports, getLeaderboard, sendChatMessage, listenChat, _getPrivateChatId, getUniversePlayers, sendPrivateMessage, listenPrivateConversations, listenPrivateMessages, _deleteCollectionDocs, leaveOnlineUniverse, deleteOnlineUniverse, listenUniverseDeleted.
+
+FILE: modules/online/context.js
+Ruolo: Stato condiviso e configurazioni online
+Dimensione attuale: 1,830 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Definisce la versione dello schema flotte, limiti server, frequenze refresh, cache sistemi/classifiche, set e mappe per sincronizzazione e notifiche, e il registro __UniversumMPModules.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  È il primo script online. Attenzione: questi dati sono solo cache locali di client, NON un sistema autorevole di sicurezza.
+
+FILE: modules/online/fleet-control.js
+Ruolo: Lancio, richiamo, listener flotte e blocchi
+Dimensione attuale: 16,494 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Implementa lancio online, verifica proprietà pianeta di origine, richiamo, listener flotte proprie e in arrivo, messaggi di errore e trattamento embargo.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  La creazione e modifica sono autorizzate da firestore.rules; il codice usa transazioni Firestore dove previsto. Non è possibile fidarsi di una flotta soltanto perché il client la dichiara.
+Metodi condivisi nel registro online: launchOnlineFleet, recallOnlineFleet, _mpNotifyError, listenOwnFleets, listenIncomingFleets, _cleanupReasonText, forceCleanupOnlineFleet, processEmbargoFleets.
+
+FILE: modules/online/foundation.js
+Ruolo: Normalizzazione schema flotte Firebase
+Dimensione attuale: 5,165 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Gestisce getAuth/getDB, chiavi coordinate, timestamp, sanitizzazione flotte, migrazione di documenti più vecchi a schemaVersion 2 e calcolo scadenze.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Il resto del multiplayer chiama normalizeOnlineFleet; cambiare qui uno schema richiede compatibilità dei salvataggi Firestore e regole.
+Metodi condivisi nel registro online: getAuth, getDB, coordsToKey, _tsToMs, _parseKeyCoords, _cleanShips, normalizeOnlineFleet, _fleetDueTime, migrateOnlineFleets.
+
+FILE: modules/online/sieges.js
+Ruolo: Assedi e riscatti online
+Dimensione attuale: 13,130 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Esegue riparazione flotte bloccate, processi occupazione (periodici), sweeping temporizzato, transizione flotte da assedio a ritorno, riscatti e rimozione assedi.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Controparte della simulazione offline in siege-missions.js. Scrive su Firestore; testare sicurezza e doppie esecuzioni concorrenti.
+Metodi condivisi nel registro online: repairStuckMissions, processAllOccupations, sweepOccupationsThrottled, processOnlineOccupations, _transitionSiegeFleetToReturning, payOnlineSiegeRansom, liftOnlineSiege.
+
+FILE: modules/online/sync.js
+Ruolo: Risorse live, inbox e sincronizzazione pianeti
+Dimensione attuale: 16,734 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Calcola produzione da lastUpdated, punti giocatore, applicazione inbox di risorse/navi/difese, differenze da scrivere, pagamenti crediti, syncPlayerState, listener pianeti, rinomina e cache lettura sistemi.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Il modello inbox permette che modifiche da battaglie e trasporti non siano sovrascritte dal successivo salvataggio del proprietario. Rimane la vulnerabilità generale di client non autorevole per risorse proprie.
+Metodi condivisi nel registro online: calculateLiveResources, computePlayerPoints, _applyUnitDelta, _hasInbox, _effectivePlanetView, _snapshotForDiff, _writePlanetResult, _inboxCredit, _resolveCreditRef, syncPlayerState, listenOwnPlanets, renameOnlinePlanet, renameOnlineMoon, getOnlineSystem, fetchOnlineSystem.
+
+FILE: modules/online/universes.js
+Ruolo: Autenticazione, membership e fondazione universi online
+Dimensione attuale: 16,549 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Gestisce nickname e registrazione/accesso, limite di 3 server, acquisizione/rilascio slot, creazione universo e pianeti home, join e scelta coordinate, generazione avamposti.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Produce e modifica documenti users, online_universes, players e planets. Rispetta i controlli dell’ultima versione firestore.rules.
+Metodi condivisi nel registro online: _cacheGet, _invalidateUniCaches, getMembership, claimServerSlot, releaseServerSlot, getMyServerMembership, cleanupPrivateMessagesOnce, sanitizeNickname, nicknameToInternalEmail, generatePlanetSpecs, createStarterPlanetDoc, registerOrLogin, getOnlineUniverses, generateNeutralOutpostsOnce, createOnlineUniverse, findFreeHomeCoords, joinOnlineUniverse.
+
+## MODULI: INTERFACCE
+----------------------------------------------------------------------------------------------------
+
+FILE: modules/ui/diplomacy.js
+Ruolo: Commercio e BOT, Mercante di Lune UI
+Dimensione attuale: 17,223 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Renderizza la sezione Commercio e BOT offline/online, contratti, azioni di scambio e pannello dedicato del Mercante: selezione pianeta, numero navi, detriti, probabilità, prezzo e conferma. Permette la scelta anche con BOT pacifici.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Le operazioni offline sono in galaxy/trade.js e moon-merchant.js; online usa modules/online/bots.js. Non fissa manualmente la probabilità: la legge da UniversumMoonMerchant.inspect.
+Metodi UI definiti: UI.renderDiplomacy.
+
+FILE: modules/ui/espionage.js
+Ruolo: Vista Spionaggio e simulatore
+Dimensione attuale: 7,415 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Mostra spionaggio, selezione bersagli e report di analisi e prepara la UI del simulatore.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Le vere formule di combattimento appartengono a modules/galaxy/combat.js e al resolver online; non sono implementate nel markup.
+Metodi UI definiti: UI.renderEspionageAndSim.
+
+FILE: modules/ui/fleet.js
+Ruolo: Vista composizione flotte e stiva
+Dimensione attuale: 22,675 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Permette scelta navi, missione e destinazione, verifica carico e carburante, pulsanti Riempi/Metà per risorsa e Smezza (un terzo a testa quando disponibile). Avvia flotta online via UniversumMP o offline via UniversumGalaxy.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Per il calcolo fisico si appoggia a catalogo SHIPS e a motori di volo. L’interfaccia non sostituisce la validazione della capacità nel lancio.
+Metodi UI definiti: UI.renderFleet.
+
+FILE: modules/ui/galaxy.js
+Ruolo: Vista Mappa Galassia
+Dimensione attuale: 18,125 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Renderizza coordinate, navigazione per sistemi/galassie, slot pianeti, bot e azioni disponibili. In online interroga UniversumMP.getOnlineSystem; offline usa UniversumGalaxy.getSystemData.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Evita ricalcoli/nuove richieste quando possibile grazie alla cache di multiplayer/sync; le icone di navigazione sono SVG.
+Metodi UI definiti: UI.renderGalaxy.
+
+FILE: modules/ui/lobby-online.js
+Ruolo: Autenticazione e lobby multiplayer UI
+Dimensione attuale: 19,864 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Collega i tab offline/online, form login/registrazione, fondazione universi, ingresso, lista e rinnovo dei server e modali per rinominare pianeta/luna online.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Usa UniversumMP e UI.shared; non effettua direttamente transazioni Firestore salvo i metodi chiamati.
+Metodi UI definiti: UI.setupLobbyTabs, UI.refreshOnlineLobbyState, UI.renderOnlineUniversesList, UI.openRenamePlanetModal, UI.openRenameMoonModal.
+
+FILE: modules/ui/navigation.js
+Ruolo: Routing interno delle schermate e panoramica
+Dimensione attuale: 26,536 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Avvia/ferma listener chat, cambia vista con switchView, richiama renderCurrentView, apre pannello commercio BOT online, rende Panoramica e Salvataggi.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Collega i data-view di index.html ai renderer UI; per aggiungere una schermata si introduce un metodo render e una voce nel dispatch.
+Metodi UI definiti: UI.startChatListeners, UI.stopChatListeners, UI.switchView, UI.renderCurrentView, UI.openOnlineBotTradeModal, UI.renderOverview, UI.renderSavesMenu.
+
+FILE: modules/ui/planet-canvas.js
+Ruolo: Canvas del pianeta e barra risorse
+Dimensione attuale: 8,155 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Gestisce sfondo/pianeta animato nel gioco, selettore pianeti attivi e aggiornamento HUD delle tre risorse. Limita FPS e sospende rendering non visibile per ridurre uso CPU/GPU.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Legge UI.state e UniversumEngine; non aggiorna di per sé le risorse salvate.
+Metodi UI definiti: UI.startPlanetCanvas, UI.refreshPlanetSelector, UI.updateTopBarNumbers.
+Funzioni e helper nominati presenti: drawFrame.
+
+FILE: modules/ui/runtime.js
+Ruolo: Ciclo di vita partita e input generali
+Dimensione attuale: 14,422 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Definisce startGameLoop/stopGameLoop, tick ogni secondo, sincronizzazione ricorrente online, rendering su eventi, uscita/rientro, setup shell gioco, avvio offline/online, associazione eventi globali e init.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Registra DOMContentLoaded per inizializzare l’app. Il tick continua anche con pagina nascosta; il lavoro DOM oneroso viene saltato quando document.hidden.
+Metodi UI definiti: UI.exitActiveGameToLobby, UI.exitToLobbyAfterServerRemoval, UI.cleanupMultiplayerListeners, UI.stopGameLoop, UI.startGameLoop, UI.configureGameShellUI, UI.startGame, UI.startOnlineGame, UI.bindGlobalUIEvents, UI.init.
+
+FILE: modules/ui/selects.js
+Ruolo: Personalizzazione menu select
+Dimensione attuale: 4,037 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Applica stile Sci-Fi agli elementi select con menu accessibili, gestione focus e chiusura; si inizializza su DOMContentLoaded.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  È puramente di presentazione. Le scelte effettive rimangono nei valori dei controlli HTML.
+Metodi UI definiti: UI.initSciFiSelects.
+Funzioni e helper nominati presenti: closeMenu, enhanceSelect.
+
+FILE: modules/ui/simulator.js
+Ruolo: Calcolo simulatore debounced
+Dimensione attuale: 3,600 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Contiene runDebouncedSimulation che ritarda brevemente la simulazione mentre l’utente modifica dati, evitando calcoli ripetuti per ogni battitura.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  L’implementazione esegue simulazioni locali e non muta le flotte online.
+Metodi UI definiti: UI.runDebouncedSimulation.
+
+FILE: modules/ui/ui-buildings.js
+Ruolo: Vista Edifici
+Dimensione attuale: 7,056 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Genera card edifici, livelli, costi, requisiti, pulsanti e coda costruzione sul pianeta attivo.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Clic su azione -> UniversumEngine.startBuilding -> mutazione stato -> persistenza UI. Se manca energia rimanda alle regole del motore.
+Metodi UI definiti: UI.renderBuildings.
+
+FILE: modules/ui/ui-empire.js
+Ruolo: Vista Imperiale e Quest
+Dimensione attuale: 3,319 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Rende la panoramica imperiale, strutture speciali, progresso e altre informazioni strategiche di alto livello.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Dipende da dati universe e megastrutture; non è la fonte delle formule di produzione.
+Metodi UI definiti: UI.renderEmpire.
+
+FILE: modules/ui/ui-galattica.js
+Ruolo: UI gestione Galattica e flotta Galattica
+Dimensione attuale: 29,933 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Rende schede Galattiche, strutture, risorse, difese, unità, movimenti e comandi di navigazione; include helper HTML e binding specifici del pannello.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Usa UniversumGalaxy e data/engine per dati e costi. Non modificarlo per cambiare statistiche.
+Metodi UI definiti: UI.renderGalatticaManage, UI.renderGalatticaManageView, UI.renderGalatticaFleet, UI.renderGalatticaFleetView.
+Funzioni e helper nominati presenti: _renderGalatticaPanelHTML, _bindGalatticaPanelHandlers.
+
+FILE: modules/ui/ui-moon.js
+Ruolo: Vista Luna e Falange
+Dimensione attuale: 20,531 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Mostra luna, edifici lunari, costruzioni specifiche, Gate, Falange e gestione della presenza/assenza Luna sul pianeta selezionato. In Creativa può presentare la creazione diretta.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Il Mercante normale è nella vista Diplomazia/Commercio, non qui. I dati lunari sono in modules/data/buildings.js e i comandi galaxy/megastructures.js.
+Metodi UI definiti: UI.renderMoon.
+
+FILE: modules/ui/ui-research.js
+Ruolo: Vista Ricerche
+Dimensione attuale: 4,480 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Genera card tecnologie, prerequisiti, costi/tempi e pulsanti avvio ricerca dal catalogo universale.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Richiama engine-actions.startResearch; i dati base sono in modules/data/researches.js e i tempi in modules/engine/timings.js.
+Metodi UI definiti: UI.renderResearch.
+
+FILE: modules/ui/ui-shipyard.js
+Ruolo: Vista Cantiere/Difese e costo accessibile
+Dimensione attuale: 10,104 byte | Caricato direttamente dalla pagina: SI
+COSA CONTIENE E COME FUNZIONA:
+  Renderizza costruzione navi e difese, quantità selezionate, costo del lotto e aggiornamento visivo della disponibilità dei pulsanti.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Legge SHIPS/DEFENSES e usa engine-actions.buildUnits; include refreshAffordabilityButtons usata dal loop UI.
+Metodi UI definiti: UI.renderShipyardAndDefense, UI.refreshAffordabilityButtons.
+
+## TEST E RIFERIMENTI
+----------------------------------------------------------------------------------------------------
+
+FILE: documents/audit sicurezza online.txt
+Ruolo: Relazione sicurezza precedente
+Dimensione attuale: 5,500 byte | Caricato direttamente dalla pagina: NO
+COSA CONTIENE E COME FUNZIONA:
+  Descrive vulnerabilità precedentemente corrette e limiti residui dell’architettura multiplayer su Firebase Spark. Le nuove regole restano identiche all’ultima patch di sicurezza.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Riferimento: firestore.rules, modules/online/combat-resolver.js e modules/online/sync.js.
+
+FILE: documents/changelog refactoring.txt
+Ruolo: Registro interventi versione modulare
+Dimensione attuale: 2,371 byte | Caricato direttamente dalla pagina: NO
+COSA CONTIENE E COME FUNZIONA:
+  Riassume quali grandi file sono stati separati, quali API e dati sono rimasti invariati, tutti i controlli automatici effettuati e i limiti del collaudo.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Da leggere prima di pubblicare il nuovo ZIP e aggiornare una vecchia installazione PWA.
+
+FILE: documents/come pubblicare firestore.txt
+Ruolo: Istruzioni pubblicazione regole
+Dimensione attuale: 1,145 byte | Caricato direttamente dalla pagina: NO
+COSA CONTIENE E COME FUNZIONA:
+  Spiega come aprire Firebase Console e pubblicare firestore.rules, distinto dal caricamento file su GitHub Pages.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  In caso di modifica regole, aggiornare anche questa guida.
+
+FILE: documents/mappa.txt
+Ruolo: La mappa che stai leggendo
+Dimensione attuale: 65,832 byte | Caricato direttamente dalla pagina: NO
+COSA CONTIENE E COME FUNZIONA:
+  Inventario file, funzioni, dipendenze, flussi offline/online, punti di intervento, deployment, test e limiti. Viene aggiornata assieme ai moduli.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Da conservare sotto documents/ per manutenzione futura.
+
+FILE: documents/struttura ricerche e missioni.txt
+Ruolo: Enciclopedia tecnica di formule e missioni
+Dimensione attuale: 28,036 byte | Caricato direttamente dalla pagina: NO
+COSA CONTIENE E COME FUNZIONA:
+  Documenta formule economiche, tempi e prerequisiti, unità, missioni, assedi e progressione. Il presente refactoring non cambia i coefficienti; solo le posizioni del codice.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Per la localizzazione dei moduli aggiornati consultare la sezione INDICE RAPIDO di questa mappa.
+
+FILE: legacy/engine.js
+Ruolo: Archivio storico NON caricato
+Dimensione attuale: 29,487 byte | Caricato direttamente dalla pagina: NO
+COSA CONTIENE E COME FUNZIONA:
+  Contiene una precedente versione monolitica di logica economica, conservata come riferimento. La versione attiva è engine-core.js più modules/engine e engine-actions.js. NON viene inclusa in index.html né nel precache.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Non modificare questo file per correggere il gameplay; evitare di caricarlo insieme al nuovo motore, perché ridefinirebbe API e formule.
+Funzioni e helper nominati presenti: getData, normalizePlanet, getEffectiveSpeed, getBuildingBuildTime, getTotalLabLevel, getResearchTime, getSingleUnitTime, getUnitCostAdjusted, getPlanetProduction, addResourcesWithCap, advanceQueuesAtTimestamp, processOfflineProgress, tick, canAfford, deductResources, startBuilding, startResearch, buildUnits, activateTurbo, applyCreativeCheat, renamePlanet, renameMoon, bindAutoSave.
+
+FILE: tests/LEGGIMI.txt
+Ruolo: Istruzioni esecuzione test
+Dimensione attuale: 489 byte | Caricato direttamente dalla pagina: NO
+COSA CONTIENE E COME FUNZIONA:
+  Elenca i comandi Node da eseguire dalla cartella del gioco, e dichiara i limiti delle simulazioni rispetto a browser/Firestore reali.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Non viene caricato dal gioco.
+
+FILE: tests/test_cache.js
+Ruolo: Test asset e ordine di cache
+Dimensione attuale: 1,299 byte | Caricato direttamente dalla pagina: NO
+COSA CONTIENE E COME FUNZIONA:
+  Confronta gli script elencati in index.html con i path di sw.js; verifica esistenza, assenza duplicati e caricamento defer.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Eseguire dopo ogni nuovo file, spostamento o rinomina.
+
+FILE: tests/test_inbox.js
+Ruolo: Test Firestore simulato e regressioni sync
+Dimensione attuale: 15,224 byte | Caricato direttamente dalla pagina: NO
+COSA CONTIENE E COME FUNZIONA:
+  Usa database fake con transazioni per verificare crediti inbox, eventi concorrenti, conquista, BOT e tributi, inclusa resistenza a duplicazioni.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Le 12 verifiche sono simulate; non eseguono le regole reali Firestore.
+Funzioni e helper nominati presenti: mergeDeep, applyUpdate, docRef, colRef, ok.
+
+FILE: tests/test_moduli.js
+Ruolo: Test di caricamento e API modulari
+Dimensione attuale: 3,662 byte | Caricato direttamente dalla pagina: NO
+COSA CONTIENE E COME FUNZIONA:
+  Carica i JS in sandbox Node senza browser e senza Firebase reale, controlla registri pubblici, funzioni fondamentali, formule esempio e sistema galattico.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  È un test smoke non un controllo visivo, non sostituisce integrazione nel browser.
+
+FILE: tests/test_moon_merchant.js
+Ruolo: Test Mercante lunare e pannelli
+Dimensione attuale: 3,890 byte | Caricato direttamente dalla pagina: NO
+COSA CONTIENE E COME FUNZIONA:
+  Esegue casi in memoria per generazione Luna riuscita/fallita, costi, integrità difese, pannello offline/online e modalità pacifica.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Include un mock UI invece di un browser completo.
+Funzioni e helper nominati presenti: assertPanel.
+
+FILE: tests/test_security_static.js
+Ruolo: Test statico delle regole e client
+Dimensione attuale: 2,120 byte | Caricato direttamente dalla pagina: NO
+COSA CONTIENE E COME FUNZIONA:
+  Verifica la presenza di alcune restrizioni e controlli su fleetParty, proprietà origine, raid NPC, prova arrivo conquiste, rapporti e cache.
+DIPENDENZE / PUNTO DI MANUTENZIONE:
+  Non prova che le regole Firestore siano resistenti a ogni attacco; richiede il Firebase Emulator per i casi di permessi reali.
+
+F. INDICE RAPIDO — COSA MODIFICARE PER UNA NUOVA FUNZIONALITÀ
+----------------------------------------------------------------------------------------------------
+Nuova tecnologia: modules/data/researches.js; verifica requisiti in data.js, durata engine/timings.js, UI ui-research.js e guida ui-guide.js.
+Nuovo edificio: modules/data/buildings.js; costo ed energia data.js; disponibilità engine-actions.js; UI modules/ui/ui-buildings.js.
+Nuova nave: modules/data/ships.js; grafica graphics-ships.js; costruzione UI shipyard; flotta UI fleet; combattimento galaxy/combat.
+Modifica CPU/energia/produzione: modules/engine/production.js e modules/engine/progress.js; verifica sync online.
+Bug missione offline: modules/galaxy/fleet-dispatch.js, fleet-arrivals.js e fleet-tick.js.
+Bug combattimento: modules/galaxy/combat.js e modules/online/combat-resolver.js (meccaniche equivalenti dove previste).
+Bug luna: moon-merchant.js, modules/online/bots.js, modules/galaxy/megastructures.js, modules/ui/diplomacy.js.
+Bug accademia: tutorial.js; modifica obiettivi e sottoobiettivi senza cambiare i dati tecnici nei cataloghi.
+Bug multiplayer accessi/conquiste: firestore.rules, modules/online/fleet-control.js, combat-resolver.js e sync.js.
+Bug chat/report: modules/online/communications.js, ui-social.js; usare test_security_static.js e test_inbox.js.
+Bug PWA/cache: sw.js e index.html; eseguire tests/test_cache.js e cambiare versione CACHE_NAME.
+Bug tasti/icone mobile: style.css e moduli UI competenti; testare viewport stretto.
+
+G. CONTRATTI CHE NON DEVONO CAMBIARE IN FUTURI REFACTOR
+----------------------------------------------------------------------------------------------------
+1. Le API window.UniversumData, window.UniversumEngine, window.UniversumGalaxy, window.UniversumMP, window.UniversumDB, window.UniversumUI restano stabili per compatibilità con il codice esistente.
+2. I registri privati window.__Universum*Modules servono come collegamento tra funzioni estratte. I bridge const nome = (...args) => G.nome(...args) risolvono le dipendenze tra moduli anche in presenza di cicli; non sostituiscono validazioni server.
+3. Ogni file modules/* è una funzione anonima immediata (IIFE) in strict mode. index.html deve sempre caricare context prima delle implementazioni e il file API pubblico dopo.
+4. Le chiavi di universe.planets, fleet, defenses, researches, galaxyDeltas e lastSeen sono salvate su IndexedDB: per cambiarle serve normalizzazione/migrazione in engine/foundation e offline/storage.
+5. La versione schema flotte online (FLEET_SCHEMA_VERSION = 2) è in modules/online/context.js; cambiare formato richiede regole Firestore e migrazioni.
+6. I plugin vengono caricati DOPO i motori e la UI perché estendono cataloghi/tick/API.
+7. Non caricare legacy/engine.js: ridefinisce il motore e appartiene all’archivio storico.
+8. Non introdurre nuove scritture Firestore senza aggiornare le rules e testare accessi con più account.
+
+H. COLLAUDO E DEPLOY
+----------------------------------------------------------------------------------------------------
+Dalla cartella universum-main con Node.js:
+  node tests/test_moduli.js
+  node tests/test_cache.js
+  node tests/test_inbox.js
+  node tests/test_moon_merchant.js
+  node tests/test_security_static.js
+  find . -name "*.js" -exec node --check {} \;     [Linux/macOS]
+Non basta un test sintattico: dopo il deploy verificare nuova partita offline, partita esistente, edifici/ricerche, flotta, spionaggio, Mercante, tutorial, mobile, online con due account e update Firestore Rules.
+PUBBLICAZIONE: copiare TUTTA la cartella universum-main su GitHub Pages; includere modules/ ed escludere browser-test temporanei. Su Firebase pubblicare separatamente il CONTENUTO di firestore.rules via Console (o CLI). Non fare deploy di regole vecchie.
+PWA: dopo pubblicazione forzare refresh; installazioni precedenti possono trattenere cache finché la nuova versione del Service Worker non si attiva.
+TEST REALI NON ESEGUITI QUI: Firebase Emulator/servizio live, stress CPU/GPU di dispositivi reali, compatibilità Safari mobile. I controlli automatici coprono la logica disponibile senza backend.
+
+I. FORMULE E SISTEMI DA LEGGERE NEL DOCUMENTO SPECIALISTICO
+----------------------------------------------------------------------------------------------------
+Matrice costi: modules/data/* + data.js; moltiplicatori per livello baseCost * factor^(livello-1), arrotondamento con Math.floor.
+Tempi: modules/engine/timings.js; produzione, bilancio energia e limiti: modules/engine/production.js.
+Risoluzione 6 round e rapid-fire: modules/galaxy/combat.js; distanza e carburante: modules/galaxy/fleet-dispatch.js.
+Missioni e arrivi: modules/galaxy/fleet-arrivals.js; equivalenti online: modules/online/combat-resolver.js.
+Lune e Supernavi: moon-merchant.js, modules/data/megastructures.js, modules/galaxy/megastructures.js, modules/online/bots.js.
+Per numeri, esempi e progressione completa leggere documents/struttura ricerche e missioni.txt. Gli algoritmi e coefficienti non sono stati modificati da questo intervento.
+
+====================================================================================================
+FINE MAPPA — 84 file documentati, 66 script client caricati da index.html.
+La documentazione descrive i sorgenti inclusi, non presume l’esito di un collaudo Firebase live.

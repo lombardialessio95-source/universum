@@ -328,27 +328,89 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 
   <!-- MODULI CORE APPLICAZIONE -->
-  <script src="./db.js"></script>                  <!-- Database locale IndexedDB (salvataggi offline, export/import JSON) -->
-  <script src="./data.js"></script>                <!-- Enciclopedia: costi, requisiti e formule di edifici, ricerche, navi e difese -->
-  <script src="./graphics-core.js"></script>       <!-- Nucleo grafico: cache immagini, SVG interfaccia e helper Canvas -->
-  <script src="./graphics-ships.js"></script>      <!-- Ritratti procedurali Canvas 128x128: 14 navi e difese -->
-  <script src="./graphics-structures.js"></script> <!-- Ritratti procedurali Canvas 128x128: edifici, luna e tecnologie -->
-  <script src="./engine-core.js"></script>         <!-- Motore matematico: tempi, produzione risorse/energia, code, tick e offline -->
-  <script src="./engine-actions.js"></script>      <!-- Azioni giocatore: avvio costruzioni/ricerche/navi, turbo, cheat e autosave -->
-  <script src="./galaxy.js"></script>              <!-- Generatore galassia da seed, combattimenti 6 round, spionaggio e IA BOT -->
-  <script src="./firebase-config.js"></script>     <!-- Chiavi e inizializzazione Firebase Auth + Firestore -->
-  <script src="./moon-merchant.js"></script>
-  <script src="./multiplayer.js"></script>         <!-- Logica PvP online: auth, universi condivisi, flotte live, chat e classifica -->
-  <script src="./ui-core.js"></script>             <!-- Regia UI: stato globale, loop 1s, audio WebAudio, Panoramica e salvataggi -->
-  <script src="./ui-guide.js"></script>            <!-- Pagina Guida/Aiuto: sezioni generate dinamicamente da data.js -->
-  <script src="./ui-economy.js"></script>          <!-- Schermate UI: Edifici, Ricerche, Cantiere Navale, Difese e Luna -->
-  <script src="./ui-tactical.js"></script>         <!-- Schermate UI: Flotta, Galassia, Spionaggio, Simulatore e Imperiale/Quest -->
-  <script src="./ui-social.js"></script>           <!-- Schermate UI: Commercio BOT, Classifica e Comunicazioni (Chat/MP) -->
+
+  <!-- ARCHIVIO OFFLINE E LOBBY -->
+  <script src="./modules/offline/storage.js" defer></script>
+  <script src="./modules/offline/lobby-starfield.js" defer></script>
+  <script src="./db.js" defer></script>
+
+  <!-- CATALOGO DATI E FORMULE -->
+  <script src="./modules/data/buildings.js" defer></script>
+  <script src="./modules/data/megastructures.js" defer></script>
+  <script src="./modules/data/researches.js" defer></script>
+  <script src="./modules/data/ships.js" defer></script>
+  <script src="./modules/data/defenses.js" defer></script>
+  <script src="./data.js" defer></script>
+  <script src="./graphics-core.js" defer></script>       <!-- Nucleo grafico: cache immagini, SVG interfaccia e helper Canvas -->
+  <script src="./graphics-ships.js" defer></script>      <!-- Ritratti procedurali Canvas 128x128: 14 navi e difese -->
+  <script src="./graphics-structures.js" defer></script> <!-- Ritratti procedurali Canvas 128x128: edifici, luna e tecnologie -->
+
+  <!-- MOTORE ECONOMICO E PROGRESSIONE -->
+  <script src="./modules/engine/context.js" defer></script>
+  <script src="./modules/engine/foundation.js" defer></script>
+  <script src="./modules/engine/timings.js" defer></script>
+  <script src="./modules/engine/production.js" defer></script>
+  <script src="./modules/engine/megastructure-costs.js" defer></script>
+  <script src="./modules/engine/megastructure-progress.js" defer></script>
+  <script src="./modules/engine/progress.js" defer></script>
+  <script src="./engine-core.js" defer></script>
+  <script src="./engine-actions.js" defer></script>      <!-- Azioni giocatore: avvio costruzioni/ricerche/navi, turbo, cheat e autosave -->
+
+  <!-- GALASSIA, COMBATTIMENTO, FLOTTE E BOT OFFLINE -->
+  <script src="./modules/galaxy/context.js" defer></script>
+  <script src="./modules/galaxy/generation.js" defer></script>
+  <script src="./modules/galaxy/megastructures.js" defer></script>
+  <script src="./modules/galaxy/combat.js" defer></script>
+  <script src="./modules/galaxy/fleet-dispatch.js" defer></script>
+  <script src="./modules/galaxy/fleet-arrivals.js" defer></script>
+  <script src="./modules/galaxy/bot-ai.js" defer></script>
+  <script src="./modules/galaxy/fleet-tick.js" defer></script>
+  <script src="./modules/galaxy/trade.js" defer></script>
+  <script src="./galaxy.js" defer></script>
+  <script src="./firebase-config.js" defer></script>     <!-- Chiavi e inizializzazione Firebase Auth + Firestore -->
+  <script src="./moon-merchant.js" defer></script>
+
+  <!-- MULTIPLAYER FIRESTORE -->
+  <script src="./modules/online/context.js" defer></script>
+  <script src="./modules/online/foundation.js" defer></script>
+  <script src="./modules/online/universes.js" defer></script>
+  <script src="./modules/online/sync.js" defer></script>
+  <script src="./modules/online/fleet-control.js" defer></script>
+  <script src="./modules/online/combat-resolver.js" defer></script>
+  <script src="./modules/online/sieges.js" defer></script>
+  <script src="./modules/online/communications.js" defer></script>
+  <script src="./modules/online/bots.js" defer></script>
+  <script src="./multiplayer.js" defer></script>
+
+  <!-- UI: CORE, LOBBY, NAVIGAZIONE E AVVIO -->
+  <script src="./ui-core.js" defer></script>
+  <script src="./modules/ui/lobby-online.js" defer></script>
+  <script src="./modules/ui/planet-canvas.js" defer></script>
+  <script src="./modules/ui/navigation.js" defer></script>
+  <script src="./modules/ui/runtime.js" defer></script>
+  <script src="./modules/ui/selects.js" defer></script>
+  <script src="./ui-guide.js" defer></script>            <!-- Pagina Guida/Aiuto: sezioni generate dinamicamente da data.js -->
+
+  <!-- UI: ECONOMIA E MEGASTRUTTURE -->
+  <script src="./modules/ui/ui-galattica.js" defer></script>
+  <script src="./modules/ui/ui-buildings.js" defer></script>
+  <script src="./modules/ui/ui-research.js" defer></script>
+  <script src="./modules/ui/ui-shipyard.js" defer></script>
+  <script src="./modules/ui/ui-moon.js" defer></script>
+  <script src="./modules/ui/ui-empire.js" defer></script>
+
+  <!-- UI: FLOTTE, MAPPA, SPIONAGGIO, COMMERCIO -->
+  <script src="./modules/ui/fleet.js" defer></script>
+  <script src="./modules/ui/galaxy.js" defer></script>
+  <script src="./modules/ui/espionage.js" defer></script>
+  <script src="./modules/ui/simulator.js" defer></script>
+  <script src="./modules/ui/diplomacy.js" defer></script>
+  <script src="./ui-social.js" defer></script>           <!-- Schermate UI: Commercio BOT, Classifica e Comunicazioni (Chat/MP) -->
 
   <!-- MODULI PLUGIN ESPANSIONE -->
-  <script src="./missions-core.js"></script>       <!-- Plugin Missioni: ricerca Esplorazione Profonda, carburante/spinta 10-100%, slot e richiamo -->
-<script src="./siege-missions.js"></script>      <!-- Motore Assedi: Embargo Planetario (blocco rotte), Occupazione (5%/giorno + riscatto) e tick orbitale -->
-<script src="./ui-fleet-movements.js"></script>  <!-- Schermata UI: Movimento Flotta, conteggio slot (5+lv), countdown, richiamo e stato assedi -->
-  <script src="./tutorial.js"></script> <!-- Accademia Imperiale offline -->
+  <script src="./missions-core.js" defer></script>       <!-- Plugin Missioni: ricerca Esplorazione Profonda, carburante/spinta 10-100%, slot e richiamo -->
+<script src="./siege-missions.js" defer></script>      <!-- Motore Assedi: Embargo Planetario (blocco rotte), Occupazione (5%/giorno + riscatto) e tick orbitale -->
+<script src="./ui-fleet-movements.js" defer></script>  <!-- Schermata UI: Movimento Flotta, conteggio slot (5+lv), countdown, richiamo e stato assedi -->
+  <script src="./tutorial.js" defer></script> <!-- Accademia Imperiale offline -->
 </body>
 </html>
