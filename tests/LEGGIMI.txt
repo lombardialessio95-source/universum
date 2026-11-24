@@ -15,3 +15,7 @@ Dalla cartella universum-main:
 I test usano mock Firestore per alcuni scenari: non sostituiscono Firebase Emulator,
 Firefox/Chrome sul tuo dispositivo o test multiaccount con regole pubblicate.
 L'hosting online, l'autenticazione reale e gli scambi tra client richiedono prove dedicate.
+
+Depositi OGame: node tests/test_depositi_ogame.js
+454 verifiche sul sistema capacità 0-35, costi, retrocompatibilità,
+parità produzione offline/online e barra superiore.

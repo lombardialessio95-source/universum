@@ -1,0 +1,168 @@
+UNIVERSUM — RAPPORTO TECNICO DEPOSITI OGAME
+Data: 24 novembre 2026
+Branch: main, GitHub lombardialessio95-source/universum
+Commit di partenza VERIFICATO: 400c1d7d9a4ff36a5fe9f23d847adf1c74db1d2f
+Backup GitHub: backup/pre-depositi-ogame-2026-11-24 (punta al commit iniziale)
+Backup ZIP: BACKUP_UNIVERSUM_MAIN_400c1d7.zip
+
+1. SCOPO
+Sostituzione della sola formula centrale dei depositi in data.js con quella
+specificata dal richiedente. Aggiornata la ricostruzione temporale delle risorse
+nel multiplayer utilizzando lo STESSO helper addResourcesWithCap() dell'offline.
+Nessun costo/tempo, attività di combattimento, flotta, trasporto o bottino è stato
+modificato. Le Firestore Rules sono invariate.
+
+2. FORMULA ESATTA IMPLEMENTATA (data.js)
+function getStorageCapacity(level) {
+  const lv = Math.max(0, Math.floor(Number(level) || 0));
+  return 5000 * Math.floor(2.5 * Math.exp((20 * lv) / 33));
+}
+La funzione già esistente viene richiamata da getPlanetProduction()
+(modules/engine/production.js) per metalStorage, crystalStorage e deuteriumTank.
+Nessuna formula parallela in UI o nelle regole Firebase.
+
+3. LIVELLI 0–35 E VINCOLO DI AUTOFINANZIAMENTO
+Colonne: livello attuale, capacità per ciascuno dei 3 depositi, costo in metallo
+per costruire il livello indicato, finanziabilità usando la capacità del
+livello precedente (esclusi trasporti, bonus o risorse fuori capacità).
+
+Lv | Capacità OGame   | Metallo per upgrade | Aut.
+---|-------------------|--------------------|-----
+ 0 |            10,000 |                  0 | n/d
+ 1 |            20,000 |              1,000 |  SÌ
+ 2 |            40,000 |              2,000 |  SÌ
+ 3 |            75,000 |              4,000 |  SÌ
+ 4 |           140,000 |              8,000 |  SÌ
+ 5 |           255,000 |             16,000 |  SÌ
+ 6 |           470,000 |             32,000 |  SÌ
+ 7 |           865,000 |             64,000 |  SÌ
+ 8 |         1,590,000 |            128,000 |  SÌ
+ 9 |         2,920,000 |            256,000 |  SÌ
+10 |         5,355,000 |            512,000 |  SÌ
+11 |         9,820,000 |          1,024,000 |  SÌ
+12 |        18,005,000 |          2,048,000 |  SÌ
+13 |        33,005,000 |          4,096,000 |  SÌ
+14 |        60,510,000 |          8,192,000 |  SÌ
+15 |       110,925,000 |         16,384,000 |  SÌ
+16 |       203,350,000 |         32,768,000 |  SÌ
+17 |       372,785,000 |         65,536,000 |  SÌ
+18 |       683,385,000 |        131,072,000 |  SÌ
+19 |     1,252,785,000 |        262,144,000 |  SÌ
+20 |     2,296,600,000 |        524,288,000 |  SÌ
+21 |     4,210,115,000 |      1,048,576,000 |  SÌ
+22 |     7,717,970,000 |      2,097,152,000 |  SÌ
+23 |    14,148,545,000 |      4,194,304,000 |  SÌ
+24 |    25,937,050,000 |      8,388,608,000 |  SÌ
+25 |    47,547,690,000 |     16,777,216,000 |  SÌ
+26 |    87,164,210,000 |     33,554,432,000 |  SÌ
+27 |   159,789,040,000 |     67,108,864,000 |  SÌ
+28 |   292,924,545,000 |    134,217,728,000 |  SÌ
+29 |   536,987,950,000 |    268,435,456,000 |  SÌ
+30 |   984,403,885,000 |    536,870,912,000 |  SÌ
+31 | 1,804,604,750,000 |  1,073,741,824,000 |  NO
+32 | 3,308,193,270,000 |  2,147,483,648,000 |  NO
+33 | 6,064,564,940,000 |  4,294,967,296,000 |  NO
+34 | 11,117,533,015,000 |  8,589,934,592,000 |  NO
+35 | 20,380,611,235,000 | 17,179,869,184,000 |  NO
+
+Dati critici verificati:
+- Lv.0: 10.000, Lv.1: 20.000, Lv.2: 40.000, Lv.3: 75.000.
+- Lv.10: 5.355.000, Lv.12: 18.005.000, Lv.15: 110.925.000.
+- Dal livello 1 al 30 il metallo necessario per ciascun deposito può essere
+  accumulato entro la capacità del deposito di metallo di livello precedente.
+- BLOCCO MATEMATICO 30 -> 31: capacità Lv.30 = 984.403.885.000;
+  costo in metallo Lv.31 = 1.073.741.824.000;
+  differenza = 89.337.939.000. Non è stato aggirato il vincolo alterando
+  la formula o i costi. Le meccaniche già esistenti che permettono eccedenze
+  oltre capacità (p.es. trasporti) restano invarianti.
+
+4. COSTI DEI TRE DEPOSITI — INVARIATI
+- Deposito Metallo: 1000 M, 0 C, 0 D; fattore di livello 2.
+- Deposito Cristallo: 1000 M, 500 C, 0 D; fattore 2.
+- Cisterna Deuterio: 1000 M, 1000 C, 0 D; fattore 2.
+Costo per livello n >= 1: baseCost * 2^(n-1) (getBuildingCost invariata).
+Tutti i costi di edifici (anche lunari), ricerche, navi e difese sono stati
+confrontati tra main originale e aggiornato mediante checksum SHA-256 di
+71 voci di catalogo, con costi di costruzione/ricerca livelli 1–35.
+Risultato IDENTICO:
+e4664999747bdb4cb9771b035c4534806ee129d2ad49a444f847c9d04b9a5079
+
+5. APPLICAZIONE OFFLINE
+L'attuale getPlanetProduction() restituisce prod.caps ricavata da
+getStorageCapacity() per il livello reale del deposito sul pianeta.
+I tick e il recupero offline usano da sempre addResourcesWithCap():
+* produzione positiva: min(cap, vecchie risorse + produzione), ma soltanto
+  quando le risorse iniziali sono sotto la capienza;
+* quantità iniziali superiori alla capienza: preservate senza sottrazioni;
+* produzione negativa di deuterio: sottratta fino a un minimo di zero.
+Nessuna modifica ai moduli di produzione, ai tempi, o al formato dei salvataggi.
+
+6. APPLICAZIONE ONLINE
+modules/online/sync.js::calculateLiveResources() applica adesso:
+window.__UniversumEngineModules.addResourcesWithCap(cloned,
+  metalPerHour * elapsedHours,
+  crystalPerHour * elapsedHours,
+  deuteriumPerHour * elapsedHours,
+  prod.caps);
+Mantiene l'arrotondamento finale a interi già adottato nel multiplayer,
+e lastUpdated aggiornato. Si conserva la semantica di inbox: accrediti da
+trasporto, combattimento o BOT sono sommati DOPO la ricostruzione produttiva;
+le eccedenze non sono tagliate e non si crea un secondo limite sui trasporti.
+Il codice fa parte della pagina statica in cui il motore offline è caricato
+PRIMA dei moduli online (ordine verificato da test_cache/test_moduli).
+
+7. INTERFACCIA RISORSE
+Il modulo modules/ui/resource-deposits.js già utilizza prod.caps senza formule
+proprie. Percentuale, colore, capacità e tempo restante cambiano automaticamente
+con getStorageCapacity. Energia rimane distinta. Nessuna modifica CSS o HTML.
+
+8. FILE MODIFICATI / NUOVI
+- data.js: unica formula di capacità modificata.
+- modules/online/sync.js: riutilizzo helper di avanzamento offline.
+- sw.js: nuovo identificatore cache PWA (no asset aggiunti).
+- tests/test_depositi_ogame.js: nuova batteria di test deterministici.
+- README.txt: note di versione.
+- tests/LEGGIMI.txt: comando del nuovo test.
+- documents/mappa.txt: riferimenti tecnici aggiornati.
+- documents/struttura ricerche e missioni.txt: appendice della capacità.
+- documents/rapporto depositi ogame.txt: questo rapporto.
+
+9. TEST E DEBUG
+Base: tutte le suite preesistenti superate prima della modifica.
+Dopo: nuova suite con 454 asserzioni superate, comprensive di:
+* vettori ufficiali e livelli 0–35;
+* tutti i costi dei 3 depositi Lv.0–35;
+* finanziabilità dei livelli 1–30, limite matematico 30->31;
+* checksum costi di 71 cataloghi invariato rispetto alla versione originale;
+* confronto dei risultati numerici del motore offline e della ricostruzione
+  multiplayer con orologio deterministico;
+* stop della produzione al pieno, cap superata preservata;
+* consumo negativo di deuterio e arresto a zero;
+* salvataggio offline vecchio con livelli inalterati;
+* accrediti inbox da trasporto superiori alla capacità;
+* indicatori della UI (80%, 100%, cambio pianeta, stima riempimento).
+Sono stati eseguiti anche tutti i test tests/test_*.js e controlli sintattici
+per i JavaScript attivi. Test multiplayer con stub, non Firebase reale.
+Prova Chromium con HTML/CSS/script autentici caricati in ambiente isolato:
+- Desktop 1440x900, mobile 375x812, mobile piccolo 320x690: superati.
+- Stati e pannello per risorse al limite, cambio livello di stoccaggio,
+  assenza di overflow orizzontale e assenza di pageerror nel percorso testato.
+- Non e' un test sul sito GitHub Pages o sull'endpoint Firebase: la
+  navigazione verso il server locale e' bloccata nell'ambiente di prova.
+
+10. PRESTAZIONI E LIMITI
+Nessun nuovo listener, interval, fetch Firestore o libreria.
+Solo una chiamata dell'helper già presente durante il calcolo di ricostruzione
+online (attivato dagli stessi eventi della versione precedente).
+Non risultano modifiche alla CPU/GPU per animazioni o renderer.
+Limiti da verificare con un test live: sincronizzazione simultanea di più client
+su Firebase reale e comportamento PWA su diversi dispositivi.
+La sincronizzazione online continua a ricostruire la produzione dal timestamp
+usando lo stato attuale degli edifici: eventuali cambiamenti di edificio non
+salvati durante una lunga assenza sono una limitazione preesistente, non creata
+da questa patch.
+
+11. PUBBLICAZIONE
+La pubblicazione GitHub va effettuata DOPO i test finali. Verificare
+l'ID commit e i blob SHA Git di ogni file ZIP contro il branch main effettivo.
+Conservare il ramo backup.

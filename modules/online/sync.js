@@ -25,9 +25,19 @@
 
     if (elapsedHours > 0 && window.UniversumEngine?.getPlanetProduction) {
       const prod = window.UniversumEngine.getPlanetProduction(cloned, { speed, creativeMode: false });
-      cloned.resources.metal = Math.floor(cloned.resources.metal + prod.metalPerHour * elapsedHours);
-      cloned.resources.crystal = Math.floor(cloned.resources.crystal + prod.crystalPerHour * elapsedHours);
-      cloned.resources.deuterium = Math.max(0, Math.floor(cloned.resources.deuterium + prod.deuteriumPerHour * elapsedHours));
+      // Stessa regola usata dal tick offline: la produzione positiva si ferma
+      // alla capienza, i trasporti preesistenti oltre soglia non vengono tagliati
+      // e il consumo negativo di deuterio continua anche a deposito pieno.
+      window.__UniversumEngineModules.addResourcesWithCap(
+        cloned,
+        prod.metalPerHour * elapsedHours,
+        prod.crystalPerHour * elapsedHours,
+        prod.deuteriumPerHour * elapsedHours,
+        prod.caps
+      );
+      cloned.resources.metal = Math.floor(cloned.resources.metal);
+      cloned.resources.crystal = Math.floor(cloned.resources.crystal);
+      cloned.resources.deuterium = Math.max(0, Math.floor(cloned.resources.deuterium));
     }
 
     cloned.lastUpdated = now;

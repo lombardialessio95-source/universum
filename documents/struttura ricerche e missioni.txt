@@ -340,3 +340,19 @@ Bacino nuovo: stessa verifica + Ingegneria locale5, 20 giorni reali con
 rate 250000 M/150000 C/50000 D; preesistenti esentati dalla verifica.
 Migrazione globale Galattica legacy: livelli assegnati a una sola capitale.
 Test e dettagli: documents/rapporto fase1 ricerche miste.txt.
+
+
+APPENDICE DEPOSITI OGame — 24/11/2026
+Capacità in unità di risorsa per tutti e tre i depositi:
+  C(L) = 5000 × floor(2.5 × e^(20 × floor(max(0,L)) / 33))
+  L0=10.000; L1=20.000; L2=40.000; L3=75.000; L10=5.355.000;
+  L12=18.005.000; L15=110.925.000.
+Costo dei depositi al livello n>=1: M=1000×2^(n-1);
+C=0/500/1000 × 2^(n-1) per Metallo/Cristallo/Deuterio; D=0.
+Nessuna modifica ai prezzi, alle altre produzioni, ai tempi o alle ricerche.
+Il limite matematico 30->31 sussiste: per Lv.31 occorre
+1.073.741.824.000 M contro 984.403.885.000 di capacità Lv.30.
+La produzione positiva si arresta alla capacità, non cancella materiali
+importati oltre capacità; consumo negativo di deuterio continua fino a zero.
+Offline e online condividono addResourcesWithCap() e getPlanetProduction().
+Vedi documents/rapporto depositi ogame.txt per tabella completa Lv.0-35.

@@ -978,3 +978,18 @@ modules/ui/runtime.js: include completamenti locali nei checkpoint immediati.
 tests/test_ricerche_miste.js: 17 casi nuovo modello.
 documents/rapporto fase1 ricerche miste.txt: limiti e risultati dei controlli.
 Backup GitHub: backup/pre-fase1-ricerche-miste-2026-11-24.
+
+
+APPENDICE — 24/11/2026 — CAPACITÀ DEPOSITI OGAME
+- data.js::getStorageCapacity(level) implementa ora 5000 * floor(2.5 * exp(20*level/33))
+  con normalizzazione level = max(0,floor(Number(level)||0)).
+- modules/engine/production.js::getPlanetProduction() usa questa unica API
+  per metalStorage, crystalStorage e deuteriumTank; nessun duplicato UI.
+- modules/engine/progress.js::addResourcesWithCap() è la regola comune
+  per prod. positiva, overflow conservato e consumo negativo deuterio.
+- modules/online/sync.js::calculateLiveResources() ora riutilizza lo stesso
+  helper dall'engine già caricato; accrediti inbox successivi senza tagli.
+- modules/ui/resource-deposits.js consuma prod.caps e non è stato modificato.
+- tests/test_depositi_ogame.js copre livelli/costi 0-35, UI, offline/online
+  e checksum di tutti i costi preesistenti.
+- Dettagli, limite al Lv.31 e prove: documents/rapporto depositi ogame.txt.

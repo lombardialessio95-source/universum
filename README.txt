@@ -67,3 +67,10 @@ FASE 1 — RICERCHE MISTE E BACINO (24/11/2026)
   Migrazione idempotente dai livelli Galattica globali; backup GitHub disponibile.
   Test: node tests/test_ricerche_miste.js
   Rapporto: documents/rapporto fase1 ricerche miste.txt
+
+DEPOSITI OGAME (24/11/2026)
+  Formula capacità ufficiale in data.js (Lv.0=10.000), uguale per i 3 depositi.
+  Produzione online e offline applicano lo stesso helper di limitazione;
+  non vengono cancellate le risorse preesistenti sopra soglia. Costi invariati.
+  Test: node tests/test_depositi_ogame.js
+  Rapporto: documents/rapporto depositi ogame.txt

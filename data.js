@@ -75,8 +75,9 @@
 
 
   function getStorageCapacity(level) {
-    const lv = Math.max(0, Number(level) || 0);
-    return Math.floor(5000 * Math.pow(2.5, Math.floor(lv / 2)) * Math.pow(1.5, lv % 2) + (lv === 0 ? 5000 : 10000 * lv));
+    // Capacita' OGame: valore identico per metallo, cristallo e deuterio.
+    const lv = Math.max(0, Math.floor(Number(level) || 0));
+    return 5000 * Math.floor(2.5 * Math.exp((20 * lv) / 33));
   }
 
 
