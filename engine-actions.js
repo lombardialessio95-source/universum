@@ -141,46 +141,50 @@
     const Data = getData();
     const def = Data.RESEARCHES[researchId];
     if (!def) throw new Error('Ricerca sconosciuta.');
-
-    const planet = universe.planets[planetIndex] || universe.planets[0];
+    const planet = universe.planets?.[planetIndex];
+    if (!planet) throw new Error('Pianeta non trovato.');
     normalizePlanet(planet);
-
-    const curLv = Number(universe.researches[researchId] || 0);
-    const targetLv = curLv + 1;
-
-    if (!universe.creativeMode) {
-      if (universe.researchQueue) {
-        throw new Error('Un’altra ricerca è già in corso nei laboratori.');
-      }
-      const reqCheck = Data.checkRequirements(def.requirements, planet, universe, false);
-      if (!reqCheck.met) {
-        throw new Error(`Requisiti mancanti: ${reqCheck.missing.join(', ')}`);
-      }
-    }
-
-    if (universe.creativeMode) {
-      universe.researches[researchId] = targetLv;
-      return { instant: true, targetLevel: targetLv };
-    }
-
-    const cost = Data.getResearchCost(researchId, targetLv);
-    if (!canAfford(planet.resources, cost)) {
-      throw new Error('Risorse insufficienti sul pianeta attivo per questa ricerca.');
-    }
-
-    deductResources(planet.resources, cost);
-    const durationSec = Engine.getResearchTime(universe, researchId, targetLv);
+    Engine.normalizeResearchState(universe);
+    const local = def.scope === 'planetary';
     const now = Date.now();
-    universe.researchQueue = {
-      id: researchId,
-      targetLevel: targetLv,
-      planetId: planet.id,
-      startTime: now,
-      endTime: now + durationSec * 1000,
-      durationSec
-    };
-
-    return { instant: false, targetLevel: targetLv, durationSec };
+    Engine.advanceResearchQueues(universe, now);
+    const current = Data.getResearchLevel(universe, planet, researchId);
+    if (def.maxLevel && current >= def.maxLevel) throw new Error(`${def.name}: livello massimo ${def.maxLevel} raggiunto.`);
+    const targetLevel = current + 1;
+    if (!universe.creativeMode) {
+      if (local ? planet.localResearchQueue : universe.researchQueue) {
+        throw new Error(local ? 'Laboratorio locale già occupato su questo pianeta.' : 'Una ricerca imperiale è già in corso.');
+      }
+      const req = Data.checkRequirements(def.requirements, planet, universe, false);
+      if (!req.met) throw new Error(`Requisiti mancanti: ${req.missing.join(', ')}`);
+      if (Number(planet.buildings?.researchLab || 0) <= 0) throw new Error('Serve un Laboratorio di Ricerca attivo.');
+      if (!local && Engine.getTotalLabLevel(universe, now) <= 0) throw new Error('Non ci sono laboratori liberi per la ricerca imperiale.');
+    }
+    if (universe.creativeMode) {
+      const into = local ? planet.localResearches : universe.researches;
+      into[researchId] = targetLevel;
+      return { instant: true, targetLevel, planetId: local ? planet.id : null };
+    }
+    const cost = Data.getResearchCost(researchId, targetLevel);
+    if (!canAfford(planet.resources, cost)) throw new Error('Risorse insufficienti sul pianeta attivo per questa ricerca.');
+    const durationSec = Engine.getResearchTime(universe, researchId, targetLevel, planet);
+    if (!Number.isFinite(durationSec) || durationSec < 1) throw new Error('Impossibile calcolare il tempo di ricerca.');
+    deductResources(planet.resources, cost);
+    const queue = { id: researchId, targetLevel, planetId: planet.id, startTime: now,
+      endTime: now + durationSec * 1000, durationSec,
+      ownerUid: local ? (planet.ownerUid || null) : null };
+    if (local) {
+      planet.localResearchQueue = queue;
+      Engine.refreshImperialETA(universe, now);
+    } else {
+      // Work is tracked in laboratory-seconds, preventing retroactive speed changes.
+      queue.workTotal = Math.max(1, (cost.metal + cost.crystal) * 3.6);
+      queue.workDone = 0;
+      queue.lastProgressAt = now;
+      universe.researchQueue = queue;
+      Engine.refreshImperialETA(universe, now);
+    }
+    return { instant: false, targetLevel, durationSec, planetId: local ? planet.id : null };
   }
 
   function buildUnits(universe, planetIndex, unitId, count = 1, isDefense = false) {
@@ -285,6 +289,13 @@
         }
         for (const p of universe.planets) {
           normalizePlanet(p);
+          if (p.localResearchQueue) {
+            p.localResearches[p.localResearchQueue.id] = p.localResearchQueue.targetLevel;
+            p.localResearchQueue = null;
+          }
+        }
+        for (const p of universe.planets) {
+          normalizePlanet(p);
           while (p.buildQueue.length > 0) {
             const b = p.buildQueue.shift();
             p.buildings[b.id] = b.targetLevel;
@@ -307,8 +318,14 @@
         return 'Tutte le code di costruzione, ricerca e cantiere completate!';
 
       case 'unlock-tech':
+        Engine.normalizeResearchState(universe);
         for (const rId of Object.keys(Data.RESEARCHES)) {
-          universe.researches[rId] = Math.max(15, Number(universe.researches[rId] || 0));
+          const def = Data.RESEARCHES[rId];
+          if (def.scope === 'planetary') {
+            planet.localResearches[rId] = Math.max(Number(planet.localResearches[rId]) || 0, def.maxLevel || 15);
+          } else {
+            universe.researches[rId] = Math.max(15, Number(universe.researches[rId] || 0));
+          }
         }
         return 'Tutte le tecnologie sbloccate al Livello 15!';
 

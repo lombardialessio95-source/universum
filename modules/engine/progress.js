@@ -38,17 +38,8 @@
     const Data = getData();
     let queueCompleted = false;
 
-    // 1. Ricerca Globale
-    if (universe.researchQueue && nowTs >= universe.researchQueue.endTime) {
-      const rq = universe.researchQueue;
-      universe.researches[rq.id] = rq.targetLevel;
-      universe.researchQueue = null;
-      queueCompleted = true;
-      if (summary) {
-        const rName = Data.RESEARCHES[rq.id]?.name || rq.id;
-        summary.completedResearches.push(`${rName} Lv.${rq.targetLevel}`);
-      }
-    }
+    // Ricerca imperiale + ricerche locali; evento in ordine cronologico.
+    queueCompleted = G.advanceResearchQueues(universe, nowTs, summary);
 
     // 2. Code per ogni pianeta e luna
     for (const planet of universe.planets || []) {
@@ -144,6 +135,7 @@
     };
 
     if (universe.creativeMode) {
+      G.normalizeResearchState(universe);
       for (const p of universe.planets || []) {
         normalizePlanet(p);
         p.resources.metal = CREATIVE_RESOURCE_CAP;

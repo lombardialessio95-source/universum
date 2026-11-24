@@ -168,6 +168,7 @@
     },
     quantumPhysics: {
       id: 'quantumPhysics',
+      scope: 'planetary',
       name: 'Fisica Quantica',
       icon: '⚛️',
       description: 'Fondamenti teorici del salto quantico: primo requisito della Galattica (serve Lv.10).',
@@ -177,6 +178,7 @@
     },
     jumpPropulsion: {
       id: 'jumpPropulsion',
+      scope: 'planetary',
       name: 'Propulsione a Salto',
       icon: '🌀',
       description: 'Motori a salto per scafi planetari: requisito Galattica Lv.8.',
@@ -186,6 +188,7 @@
     },
     mobilePlanetaryStructure: {
       id: 'mobilePlanetaryStructure',
+      scope: 'planetary',
       name: 'Struttura Planetaria Mobile',
       icon: '🏗️',
       description: 'Scafo planetario in grado di muoversi: requisito Galattica Lv.5.',
@@ -195,6 +198,7 @@
     },
     stellarReactor: {
       id: 'stellarReactor',
+      scope: 'planetary',
       name: 'Reattore Stellare',
       icon: '☀️',
       description: 'Reattore in grado di alimentare una nave-pianeta: requisito Galattica Lv.7.',
@@ -202,8 +206,19 @@
       factor: 2.0,
       requirements: { buildings: { researchLab: 10 }, researches: { quantumPhysics: 7, plasmaTech: 8 } }
     },
+    megastructureEngineering: {
+      id: 'megastructureEngineering',
+      scope: 'planetary',
+      maxLevel: 5,
+      name: 'Ingegneria Megastrutturale',
+      description: 'Progettazione locale dei cantieri orbitali. Il livello 5 abilita il Bacino Spaziale solo sul pianeta che ha condotto la ricerca.',
+      baseCost: { metal: 120000, crystal: 80000, deuterium: 40000 },
+      factor: 2,
+      requirements: { buildings: { researchLab: 10, roboticsFactory: 10, shipyard: 12 }, researches: { hyperspaceTech: 6 } }
+    },
     spatialTerraforming: {
       id: 'spatialTerraforming',
+      scope: 'planetary',
       name: 'Terraforming Spaziale',
       icon: '🌍',
       description: 'Ecosistemi chiusi per navi-pianeta: requisito Galattica Lv.5.',

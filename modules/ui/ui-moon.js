@@ -70,10 +70,10 @@
 
       const crepuscoloHtml = b.status === 'active' ? `
           <div style="margin-top:14px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.12);">
-            <p style="margin-bottom:8px; display:flex; align-items:center; gap:8px;">${artTag(crepuscoloArtId, 'unit-art-sm', 'Crepuscolo degli Dei')}<span><strong>CREPUSCOLO DEGLI DEI</strong> · Bacino: <strong>${isVuoto ? 'VUOTO (mai usato)' : 'non vuoto'}</strong>${limboHere ? ' · <strong>LIMBO su questo pianeta madre</strong>' : ''}</span></p>
+            <p style="margin-bottom:8px; display:flex; align-items:center; gap:8px;">${artTag(crepuscoloArtId, 'unit-art-sm', 'Crepuscolo degli Dei')}<span><strong>CREPUSCOLO DEGLI DEI</strong> · Bacino: <strong>${isVuoto ? 'VUOTO (attualmente libero)' : 'non vuoto'}</strong>${limboHere ? ' · <strong>LIMBO su questo pianeta madre</strong>' : ''}</span></p>
             ${crep ? `<p class="text-muted" style="margin-bottom:8px;">Stato: <strong>${escapeHTML(crep.status)}</strong>${crep.status !== 'active' ? ` · Giorni ${Number(crep.daysPaid) || 0} / ${Number(crep.daysTotal) || crepDef.buildDays} · Mancanti oggi: ${formatNum(crepMissing.metal)} M · ${formatNum(crepMissing.crystal)} C · ${formatNum(crepMissing.deuterium)} D` : ' · Operativa'}</p>` : '<p class="text-muted" style="margin-bottom:8px;">Nessuna Crepuscolo legata a questo Bacino.</p>'}
             ${!crep && isVuoto ? `<p class="text-muted" style="margin-bottom:10px;">Costruzione: ${crepDef.buildDays} giorni reali, rata ${formatNum(crepDef.dailyCost.metal)} M / ${formatNum(crepDef.dailyCost.crystal)} C / ${formatNum(crepDef.dailyCost.deuterium)} D al giorno. Max 1 per impero.</p><button type="button" id="btn-start-crepuscolo" class="btn btn-creative">COSTRUISCI CREPUSCOLO DEGLI DEI</button>` : ''}
-            ${!crep && !isVuoto ? '<p class="text-muted">Costruzione Crepuscolo disponibile solo in un Bacino mai usato da nessuna nave.</p>' : ''}
+            ${!crep && !isVuoto ? '<p class="text-muted">Costruzione Crepuscolo disponibile solo in un Bacino attualmente libero.</p>' : ''}
           </div>` : '';
 
       const galDef = Data.GALATTICA;
@@ -153,6 +153,7 @@
     if (!planet.moon) {
       const cost = Galaxy.getMoonCreationCost(uni);
       const bDef = Data.BACINO_SPAZIALE;
+      const bacinoReq = Data.getBacinoStartRequirements(uni, planet);
       viewport.innerHTML = `
         <div class="glass-panel" style="padding:20px; text-align:center;">
           <div style="margin-bottom:12px; display:flex; justify-content:center;">${artTag('lunarBase', 'unit-art', 'Base Lunare')}</div>
@@ -166,7 +167,8 @@
           <button type="button" id="btn-create-moon" class="btn btn-green">${svgIcon('moon')} CREA LUNA ORA</button>` : `<button type="button" id="btn-go-moon-merchant" class="btn btn-blue">${svgIcon('moon')} VAI AL MERCANTE DI LUNE</button>`}
           <div style="margin-top:18px; padding-top:14px; border-top:1px solid rgba(255,255,255,0.12);">
             <p class="text-muted" style="margin-bottom:10px;">Oppure, al posto della Luna: Bacino Spaziale in ${bDef.totalDays} giorni reali, rate di ${formatNum(bDef.dailyCost.metal)} M / ${formatNum(bDef.dailyCost.crystal)} C / ${formatNum(bDef.dailyCost.deuterium)} D al giorno (totale ${formatNum(bDef.totalCost.metal)} M / ${formatNum(bDef.totalCost.crystal)} C / ${formatNum(bDef.totalCost.deuterium)} D).</p>
-            <button type="button" id="btn-start-bacino" class="btn btn-blue">AVVIA BACINO SPAZIALE</button>
+            ${!isCreative && !bacinoReq.met ? `<p style="color:var(--btn-red);font-size:0.87rem;margin-bottom:10px">${svgIcon('lock')} Requisiti mancanti: ${escapeHTML(bacinoReq.missing.join(', '))}</p>` : ''}
+            <button type="button" id="btn-start-bacino" class="btn btn-blue" ${!isCreative && !bacinoReq.met ? 'disabled' : ''}>AVVIA BACINO SPAZIALE</button>
           </div>
         </div>
       `;

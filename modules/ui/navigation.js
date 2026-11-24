@@ -191,13 +191,18 @@
         </div>
       `);
     }
+    if (planet.localResearchQueue) {
+      const r = planet.localResearchQueue;
+      const name = Data.RESEARCHES[r.id]?.name || r.id;
+      queueRows.push(`<div class="glass-panel" style="padding:10px"><strong>${escapeHTML(name)}</strong> · ricerca planetaria Lv.${r.targetLevel} · <span class="live-timer" data-end="${r.endTime}">${formatDuration((r.endTime - Date.now()) / 1000)}</span></div>`);
+    }
     if (uni.researchQueue) {
       const r = uni.researchQueue;
       const name = Data.RESEARCHES[r.id]?.name || r.id;
       queueRows.push(`
         <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(0,0,0,0.35); padding:10px; border-radius:8px;">
           <span style="display:inline-flex; align-items:center; gap:8px;">${artTag(r.id, 'unit-art-sm', name)} <strong>${escapeHTML(name)}</strong> → Lv.${r.targetLevel}</span>
-          <span class="font-display text-crystal live-timer" data-end="${r.endTime}">${formatDuration((r.endTime - Date.now()) / 1000)}</span>
+          ${r.endTime ? `<span class="font-display text-crystal live-timer" data-end="${r.endTime}">${formatDuration((r.endTime - Date.now()) / 1000)}</span>` : '<span class="text-muted">In pausa: laboratori occupati</span>'}
         </div>
       `);
     }

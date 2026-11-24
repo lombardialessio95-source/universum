@@ -157,11 +157,11 @@
     document.querySelectorAll('.btn-start-research').forEach((btn) => {
       const r = Data.RESEARCHES[btn.dataset.rid];
       if (!r) return;
-      const curLv = Number(uni.researches?.[r.id] || 0);
+      const curLv = Data.getResearchLevel(uni, planet, r.id);
       const cost = Data.getResearchCost(r.id, curLv + 1);
       const req = Data.checkRequirements(r.requirements, planet, uni, false);
-      const canResearch = isCreative || (req.met && res.metal >= cost.metal && res.crystal >= cost.crystal && res.deuterium >= cost.deuterium && !uni.researchQueue);
-      btn.disabled = !canResearch;
+      const canResearch = isCreative || (req.met && res.metal >= cost.metal && res.crystal >= cost.crystal && res.deuterium >= cost.deuterium && !(r.scope === 'planetary' ? planet.localResearchQueue : uni.researchQueue));
+      btn.disabled = !canResearch || Boolean(r.maxLevel && curLv >= r.maxLevel);
     });
 
     const isDef = st.shipyardTab === 'defense';

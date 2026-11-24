@@ -159,6 +159,8 @@
           buildQueue: [],
           shipyardQueue: [],
           defenseQueue: [],
+          localResearches: {},
+          localResearchQueue: null,
           moon: null,
           bacinoSpaziale: null
         }

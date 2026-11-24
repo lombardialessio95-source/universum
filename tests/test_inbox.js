@@ -208,6 +208,27 @@ function ok(name, fn) { return Promise.resolve().then(fn).then(() => { passed++;
     assert.strictEqual(store.get('online_universes/U/players/u1').planetCount, 1);
   });
 
+  await ok('ricerche planetarie e coda locale persistono nel documento online, non nel giocatore', async () => {
+    const uni = { id: 'U', researchModelVersion: 1, researches: { hyperspaceTech: 8 },
+      planets: [{ id: 'Casa', name: 'Casa', coords: { g: 1, s: 1, p: 1 },
+        resources: { metal: 1000, crystal: 600, deuterium: 250 }, buildings: { researchLab: 10 },
+        fleet: {}, defenses: {}, localResearches: { megastructureEngineering: 3, quantumPhysics: 2 },
+        localResearchQueue: { id: 'megastructureEngineering', planetId: 'Casa', targetLevel: 4,
+          startTime: 10000, endTime: 20000, durationSec: 10 } }] };
+    await MP.syncPlayerState(uni, { force: true });
+    const planet = store.get(P(1, 1, 1));
+    const player = store.get('online_universes/U/players/u1');
+    assert.strictEqual(planet.localResearches.megastructureEngineering, 3);
+    assert.strictEqual(planet.localResearches.quantumPhysics, 2);
+    assert.strictEqual(planet.localResearchQueue.planetId, 'Casa');
+    assert.strictEqual(player.researches.megastructureEngineering, undefined);
+    assert.strictEqual(player.researchModelVersion, 1);
+    assert.strictEqual(player.researches.hyperspaceTech, 8);
+    // A second sync never creates a new slot or credits research twice.
+    await MP.syncPlayerState(uni, { force: true });
+    assert.strictEqual(store.get(P(1, 1, 1)).localResearches.megastructureEngineering, 3);
+  });
+
   await ok('un secondo sync non applica due volte la stessa inbox', async () => {
     const uni = { id: 'U', planets: [{ id: 'Casa', name: 'Casa', coords: { g: 1, s: 1, p: 1 },
       resources: { metal: 1700, crystal: 600, deuterium: 250 }, fleet: { lightFighter: 6 }, defenses: { rocketLauncher: 3 }, buildings: {} }] };

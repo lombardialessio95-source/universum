@@ -176,6 +176,8 @@
       buildQueue: [],
       shipyardQueue: [],
       defenseQueue: [],
+      localResearches: {},
+      localResearchQueue: null,
       moon: null,
       debris: { metal: 0, crystal: 0 },
       embargo: null,
@@ -418,6 +420,7 @@
         nickname: playerName,
         researches: {},
         researchQueue: null,
+        researchModelVersion: 1,
         points: 0,
         planetCount: 1,
         joinedAt: Date.now(),
@@ -473,8 +476,9 @@
         .catch((e) => console.warn('[MP Bot] Generazione bot fallita:', e));
     }
 
-    return {
+    const output = {
       id: universeId,
+      researchModelVersion: playerState.researchModelVersion || 0,
       founderUid: uniData.founderUid || uniData.ownerUid || null,
       ownerUid: uniData.ownerUid || uniData.founderUid || null,
       name: uniData.name,
@@ -494,6 +498,8 @@
       spyReports: [],
       messages
     };
+    window.UniversumEngine?.normalizeResearchState(output);
+    return output;
   }
 
   Object.assign(G, { _cacheGet, _invalidateUniCaches, invalidateOnlineUniverseList, getMembership, claimServerSlot, releaseServerSlot, getMyServerMembership, cleanupPrivateMessagesOnce, sanitizeNickname, nicknameToInternalEmail, generatePlanetSpecs, createStarterPlanetDoc, registerOrLogin, getOnlineUniverses, generateNeutralOutpostsOnce, createOnlineUniverse, findFreeHomeCoords, joinOnlineUniverse });

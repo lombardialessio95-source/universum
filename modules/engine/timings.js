@@ -33,29 +33,20 @@
   }
 
 
-  function getTotalLabLevel(universe) {
-    const netLv = Number(universe.researches?.intergalacticNetwork || 0);
-    const labLevels = (universe.planets || [])
-      .map((p) => Number(p.buildings?.researchLab || 0))
-      .filter((lv) => lv > 0)
-      .sort((a, b) => b - a);
-
-    if (labLevels.length === 0) return 0;
-    const countToSum = Math.min(labLevels.length, 1 + netLv);
-    let sum = 0;
-    for (let i = 0; i < countToSum; i++) {
-      sum += labLevels[i];
-    }
-    return sum;
+  function getTotalLabLevel(universe, timestamp = Date.now()) {
+    return G.getFreeLabTotal(universe, timestamp);
   }
 
 
-  function getResearchTime(universe, researchId, targetLevel) {
+  function getResearchTime(universe, researchId, targetLevel, planet = null) {
     if (universe.creativeMode) return 0;
     const Data = getData();
     const cost = Data.getResearchCost(researchId, targetLevel);
     const effectiveSpeed = getEffectiveSpeed(universe);
-    const totalLabLv = getTotalLabLevel(universe);
+    const local = Data.RESEARCHES[researchId]?.scope === 'planetary';
+    const source = typeof planet === 'number' ? universe.planets?.[planet] : planet;
+    if (local && !source) return 0;
+    const totalLabLv = local ? Math.max(0, Number(source.buildings?.researchLab) || 0) : getTotalLabLevel(universe);
 
     const rawSeconds = ((cost.metal + cost.crystal) /
       (1000 * (1 + totalLabLv) * effectiveSpeed)) * 3600;

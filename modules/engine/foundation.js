@@ -11,6 +11,9 @@
 
   // Normalizza campi del pianeta per retrocompatibilità
   function normalizePlanet(planet) {
+    if (!planet || typeof planet !== 'object') return planet;
+    if (!planet.localResearches || typeof planet.localResearches !== 'object' || Array.isArray(planet.localResearches)) planet.localResearches = {};
+    if (planet.localResearchQueue === undefined) planet.localResearchQueue = null;
     if (!planet.buildings) planet.buildings = {};
     if (planet.buildings.deuteriumSynthesizer !== undefined && planet.buildings.deuteriumSynth === undefined) {
       planet.buildings.deuteriumSynth = planet.buildings.deuteriumSynthesizer;

@@ -323,3 +323,20 @@ Per ogni nome funzione e file descritto qui prevalgono i nuovi percorsi di segui
 - Mercante di Lune: moon-merchant.js + modules/online/bots.js + modules/ui/diplomacy.js.
 - Accademia Imperiale: tutorial.js.
 Consulta documents/mappa.txt per la descrizione analitica di ogni singolo file, architettura e test.
+
+
+APPENDICE - 24/11/2026 - MODELLO SCIENTIFICO MISTO (FASE 1)
+Le parti precedenti che descrivono una coda globale unica per TUTTE le tecnologie
+sono storiche e sono superate dal modello attuale.
+IMPERIALI: tutte le normali ricerche; una sola coda universe.researchQueue.
+PLANETARIE: Fisica Quantica, Propulsione a Salto, Struttura Planetaria Mobile,
+Reattore Stellare, Terraforming Spaziale, Ingegneria Megastrutturale.
+Coda locale per ogni pianeta; livelli nel rispettivo planet.localResearches.
+La Rete Lv.N collega al massimo N+1 laboratori NON impegnati in lavori locali.
+Quando si libera un laboratorio la ricerca globale accelera da quel momento.
+Ingegneria Megastrutturale MAX5: costo M/C/D Lv.n = (120000/80000/40000)*2^(n-1).
+Prer.: Lab10, Robotica10, Cantiere12 sul pianeta; Iperspaziale6 imperiale.
+Bacino nuovo: stessa verifica + Ingegneria locale5, 20 giorni reali con
+rate 250000 M/150000 C/50000 D; preesistenti esentati dalla verifica.
+Migrazione globale Galattica legacy: livelli assegnati a una sola capitale.
+Test e dettagli: documents/rapporto fase1 ricerche miste.txt.

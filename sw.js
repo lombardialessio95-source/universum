@@ -1,7 +1,7 @@
 /**
  * UNIVERSUM — Service Worker PWA (Offline-First + Network-First per Firebase)
  */
-const CACHE_NAME = 'universum-deposits-firestore-v6';
+const CACHE_NAME = 'universum-fase1-mixed-research-v1';
 
 const ASSETS = [
   './', './index.html', './manifest.json', './style.css',
@@ -19,6 +19,7 @@ const ASSETS = [
   './graphics-structures.js',
   './modules/engine/context.js',
   './modules/engine/foundation.js',
+  './modules/engine/research-model.js',
   './modules/engine/timings.js',
   './modules/engine/production.js',
   './modules/engine/megastructure-costs.js',

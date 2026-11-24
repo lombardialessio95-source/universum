@@ -207,6 +207,7 @@
     const db = getDB();
     const user = auth.currentUser;
     if (!user || !universeObj?.id) return;
+    window.UniversumEngine?.normalizeResearchState(universeObj);
 
     const syncKey = JSON.stringify([user.uid, universeObj.id]);
     const lastSync = _syncLastByUni.get(syncKey);
@@ -257,6 +258,9 @@
           buildQueue: p.buildQueue || [],
           shipyardQueue: p.shipyardQueue || [],
           defenseQueue: p.defenseQueue || [],
+          localResearches: p.localResearches || {},
+          localResearchQueue: p.localResearchQueue || null,
+          bacinoSpaziale: p.bacinoSpaziale || null,
           lastUpdated: nowTs
         };
         if (data.inbox !== undefined) payload.inbox = FV.delete();
@@ -276,6 +280,7 @@
         nickname: universeObj.emperor || user.displayName || 'Comandante',
         researches: universeObj.researches || {},
         researchQueue: universeObj.researchQueue || null,
+        researchModelVersion: universeObj.researchModelVersion || 1,
         points: computePlayerPoints(universeObj),
         planetCount: planets.length - lost.length,
         lastSeen: nowTs

@@ -1,6 +1,7 @@
 UNIVERSUM — TEST LOCALI (richiedono Node.js)
 
 Dalla cartella universum-main:
+  node tests/test_ricerche_miste.js
   node tests/test_depositi.js
   node tests/test_debug_fixes.js
   node tests/test_moduli.js

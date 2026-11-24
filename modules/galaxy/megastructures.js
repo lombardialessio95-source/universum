@@ -93,6 +93,10 @@
     if (planet.moon) throw new Error('Questo pianeta possiede già una Luna: niente Bacino Spaziale.');
     if (planet.galatticaOrigin) throw new Error('Slot orbitale consumato dalla Galattica: niente Bacino su questo pianeta.');
     if (planet.bacinoSpaziale) throw new Error('Bacino Spaziale già presente su questo pianeta.');
+    if (!universe.creativeMode) {
+      const check = Data.getBacinoStartRequirements(universe, planet);
+      if (!check.met) throw new Error(`Requisiti Bacino mancanti: ${check.missing.join(', ')}`);
+    }
     const now = Date.now();
     if (universe.creativeMode) {
       planet.bacinoSpaziale = {
@@ -185,9 +189,9 @@
 
   function isBacinoVuoto(planet, universe) {
     const b = planet && planet.bacinoSpaziale;
-    if (!b || b.status !== 'active' || b.everUsed) return false;
+    if (!b || b.status !== 'active') return false;
     const counts = getInvictusCount(planet, universe);
-    return counts.total === 0 && !b.crepuscolo;
+    return counts.total === 0 && !b.crepuscolo && !b.galatticaConstruction;
   }
 
 
@@ -243,7 +247,7 @@
     const planet = universe.planets[planetIndex];
     if (!planet) throw new Error('Pianeta non trovato.');
     if (getCrepuscoloState(universe).has) throw new Error('Hai già una Crepuscolo degli Dei nel tuo impero (max 1).');
-    if (!isBacinoVuoto(planet, universe)) throw new Error('La Crepuscolo richiede un Bacino Spaziale vuoto: mai usato da nessuna nave.');
+    if (!isBacinoVuoto(planet, universe)) throw new Error('La Crepuscolo richiede un Bacino Spaziale attualmente libero, senza navi legate.');
     const now = Date.now();
     planet.bacinoSpaziale.everUsed = true;
     if (universe.creativeMode) {

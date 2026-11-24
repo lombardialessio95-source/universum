@@ -58,3 +58,12 @@ DEPOSITI INTERATTIVI (23/11/2026)
   Le formule economiche e le regole Firestore non sono state modificate.
   Test: node tests/test_depositi.js
   Audit: documents/rapporto debug depositi.txt
+
+FASE 1 — RICERCHE MISTE E BACINO (24/11/2026)
+  Ricerche imperiali globali + singola ricerca planetaria indipendente per pianeta.
+  Sei tecnologie locali (cinque Galattica e Ingegneria Megastrutturale).
+  Rete Intergalattica conta solo laboratori liberi.
+  Bacino nuovo con requisiti tecnologici, 20 giorni reali a rate invariati.
+  Migrazione idempotente dai livelli Galattica globali; backup GitHub disponibile.
+  Test: node tests/test_ricerche_miste.js
+  Rapporto: documents/rapporto fase1 ricerche miste.txt

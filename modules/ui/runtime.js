@@ -96,7 +96,8 @@
       const prevQueueCount = (activeP?.buildQueue?.length || 0) +
         (activeP?.shipyardQueue?.length || 0) +
         (activeP?.defenseQueue?.length || 0) +
-        (uni.researchQueue ? 1 : 0);
+        (uni.researchQueue ? 1 : 0) +
+        ((uni.planets || []).filter(p => p.localResearchQueue).length);
 
       const queueCompleted = window.UniversumEngine.tick(uni, 1);
 
@@ -123,7 +124,8 @@
       const newQueueCount = (activeP?.buildQueue?.length || 0) +
         (activeP?.shipyardQueue?.length || 0) +
         (activeP?.defenseQueue?.length || 0) +
-        (uni.researchQueue ? 1 : 0);
+        (uni.researchQueue ? 1 : 0) +
+        ((uni.planets || []).filter(p => p.localResearchQueue).length);
 
       if (newQueueCount < prevQueueCount) {
         UI.playSound('complete');

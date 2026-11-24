@@ -947,3 +947,34 @@ tests/test_security_static.js (MODIFICATO)
 
 documents/rapporto debug depositi.txt (NUOVO)
   Audit completo, problemi corretti, problemi preesistenti non modificati.
+
+
+AGGIORNAMENTO UFFICIALE 24/11/2026 - FASE 1/5 RICERCHE MISTE
+
+MODULO NUOVO: modules/engine/research-model.js
+Avanza contemporaneamente una ricerca imperiale e una ricerca locale per pianeta.
+Conserva il lavoro globale per intervalli cronologici; seleziona i migliori
+laboratori liberi della Rete Intergalattica e ricalcola la ETA globale a ogni
+mutamento di laboratorio. Gestisce migrazione idempotente dei vecchi livelli.
+
+DIPENDENZE: index.html lo carica dopo modules/engine/foundation.js e prima di
+modules/engine/timings.js; sw.js lo aggiunge alla cache PWA.
+
+modules/data/researches.js: scope=planetary per 5 ricerche Galattica e
+megastructureEngineering (max5). data.js decide i prerequisiti locali/globali
+tramite getResearchLevel e getBacinoStartRequirements.
+modules/engine/timings.js: conteggio laboratori liberi o laboratorio locale.
+modules/engine/progress.js: avanzamento e completamento research queues.
+engine-actions.js: avvio e costi locali/globale, Creativa separata.
+modules/galaxy/megastructures.js: controllo Bacino al nuovo avvio; regola
+Crepuscolo 'attualmente libero', senza blocco storico everUsed.
+modules/offline/storage.js e modules/galaxy/fleet-arrivals.js: nuovi pianeti
+con localResearches={} e localResearchQueue=null.
+modules/online/universes.js e modules/online/sync.js: load/migrate e
+persistenza livello/coda locale nel documento pianeta.
+modules/ui/ui-research.js: card local/global e livello max.
+modules/ui/ui-moon.js: blocco Bacino con motivi; guide aggiornate in ui-guide.js.
+modules/ui/runtime.js: include completamenti locali nei checkpoint immediati.
+tests/test_ricerche_miste.js: 17 casi nuovo modello.
+documents/rapporto fase1 ricerche miste.txt: limiti e risultati dei controlli.
+Backup GitHub: backup/pre-fase1-ricerche-miste-2026-11-24.

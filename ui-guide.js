@@ -34,7 +34,8 @@
   }
 
   function _dataCard(item, kind, opts = {}) {
-    const art = opts.artId ? UI.artTag(opts.artId, 'unit-art-sm', item.name) : '';
+    const art = item.id === 'megastructureEngineering' ? `<span class="unit-art-sm" style="display:inline-flex;align-items:center;justify-content:center;min-width:30px">${UI.svgIcon('cpu')}</span>`
+      : (opts.artId ? UI.artTag(opts.artId, 'unit-art-sm', item.name) : '');
     const cost = item.cost || item.baseCost || {};
     const hasCost = (cost.metal > 0 || cost.crystal > 0 || cost.deuterium > 0);
     const req = item.requirements || {};
@@ -140,12 +141,13 @@
       'Spionaggio & Comando': ['espionageTech', 'computerTech', 'astrophysics'],
       'Lune & Portali': ['lunarTech', 'jumpGateTech'],
       'Armi Speciali': ['laserTech', 'ionTech', 'deathStarTech'],
-      'Galattica (Requisiti)': ['quantumPhysics', 'jumpPropulsion', 'mobilePlanetaryStructure', 'stellarReactor', 'spatialTerraforming']
+      'Galattica (Ricerche Planetarie)': ['quantumPhysics', 'jumpPropulsion', 'mobilePlanetaryStructure', 'stellarReactor', 'spatialTerraforming'],
+      'Cantieri Orbitali (Ricerca Planetaria)': ['megastructureEngineering']
     };
-    return `${_sectionHeader('Ricerche', 'Ogni ricerca si applica a tutto l\'Impero, non solo al pianeta dove la avvii.')}
+    return `${_sectionHeader('Ricerche', 'Ricerche imperiali condivise; tecnologie Galattica e Ingegneria Megastrutturale locali al pianeta.')}
     <div class="glass-panel" style="padding:12px; margin-bottom:10px;">
-      <p style="font-size:0.9rem;">Le ricerche si avviano dal Laboratorio di Ricerca. Puoi fare <strong>una sola ricerca alla volta</strong> per tutto l'Impero. Ogni livello costa sempre di più (fattore 2x o 1.75x) e richiede tempo crescente.</p>
-      <p class="text-muted" style="font-size:0.86rem; margin-top:6px;">Le ricerche galattica sono requisiti obbligatori per costruire la Galattica: quantumPhysics 10, jumpPropulsion 8, mobilePlanetaryStructure 5, stellarReactor 7, spatialTerraforming 5.</p>
+      <p style="font-size:0.9rem;">Le ricerche <strong>imperiali</strong> condividono una sola coda nell'Impero. Ogni pianeta può condurre contemporaneamente una <strong>ricerca locale</strong>, usando esclusivamente il proprio laboratorio. I laboratori impegnati nelle locali non contribuiscono alla Rete Intergalattica finché sono occupati. Ogni livello costa e richiede tempo secondo il proprio catalogo.</p>
+      <p class="text-muted" style="font-size:0.86rem; margin-top:6px;">Le ricerche Galattica devono essere sviluppate SUL PIANETA del Bacino che la costruirà: quantumPhysics 10, jumpPropulsion 8, mobilePlanetaryStructure 5, stellarReactor 7, spatialTerraforming 5.</p>
     </div>
     ${Object.entries(groups).map(([group, ids]) => `
       <h4 style="font-size:0.9rem; color:var(--res-crystal); margin:10px 0 8px;">${_esc(group)}</h4>
@@ -163,7 +165,7 @@
       if (!s) return '';
       const hints = {
         invictus: 'Costruibile solo nel Bacino Spaziale (max 4 per Bacino).',
-        crepuscolo: 'Costruibile solo in un Bacino mai usato, max 1 per Impero.',
+        crepuscolo: 'Costruibile solo in un Bacino attualmente libero, max 1 per Impero.',
         deathStar: 'Richiede Tecnologia Gravitonica Suprema. Può distruggere Lune/Bacini.',
         colonyShip: 'Necessaria per fondare nuove colonie (missione Colonizzazione).',
         recycler: 'Necessaria per raccogliere detriti dopo una battaglia (missione Riciclaggio).',
@@ -207,6 +209,7 @@
     const Data = window.UniversumData;
     const B = Data.BACINO_SPAZIALE;
     return `${_imageHeader('bacinoSpaziale', 'Bacino Spaziale', 'Alternativa alla Luna: cantiere orbitale in 20 giorni reali, pagato a rate giornaliere.')}
+      <p class="text-muted">Nuovo Bacino: su QUESTO pianeta Ingegneria Megastrutturale Lv.5, Laboratorio Lv.10, Fabbrica Robot Lv.10 e Cantiere Navale Lv.12; nell'Impero Tecnologia Iperspaziale Lv.6. Una ricerca planetaria usa solo il proprio laboratorio; le ricerche imperiali usano i laboratori liberi della Rete Intergalattica. Le due tipologie procedono in parallelo.</p>
     <div class="glass-panel" style="padding:12px; margin-bottom:10px;">
       <p style="font-size:0.9rem; margin-bottom:6px;"><strong>Costo totale:</strong> ${_num(B.totalCost.metal)} M · ${_num(B.totalCost.crystal)} C · ${_num(B.totalCost.deuterium)} D</p>
       <p style="font-size:0.9rem; margin-bottom:6px;"><strong>Rata giornaliera:</strong> ${_num(B.dailyCost.metal)} M · ${_num(B.dailyCost.crystal)} C · ${_num(B.dailyCost.deuterium)} D</p>
@@ -217,7 +220,7 @@
       <p style="font-size:0.9rem; margin-bottom:6px;"><strong>Cosa sblocca:</strong></p>
       <ul style="padding-left:18px; font-size:0.9rem; line-height:1.6;">
         <li><strong>Invictus</strong> — ammiraglia da battaglia (max 4 per Bacino).</li>
-        <li><strong>Crepuscolo degli Dei</strong> — nave unica d'Impero, solo in un Bacino mai usato.</li>
+        <li><strong>Crepuscolo degli Dei</strong> — nave unica d'Impero, solo in un Bacino attualmente libero.</li>
         <li><strong>Galattica</strong> — nave-pianeta che prende il posto del Bacino stesso.</li>
       </ul>
       <p class="text-muted" style="font-size:0.86rem; margin-top:6px;">Distruggibile con Morte Nera (missione Distruzione Luna/Bacino). Se distrutto, si forma una Luna dai detriti.</p>
@@ -250,7 +253,7 @@
     <div class="glass-panel" style="padding:12px; margin-bottom:10px;">
       <p style="font-size:0.9rem; margin-bottom:6px;"><strong>Come si ottiene:</strong></p>
       <ol style="padding-left:18px; font-size:0.9rem; line-height:1.6;">
-        <li><strong>Costruzione diretta</strong> — in un Bacino <em>mai usato da nessuna nave</em> (Bacino Vuoto). Costo: ${_num(ship.cost.metal)} M · ${_num(ship.cost.crystal)} C · ${_num(ship.cost.deuterium)} D. Rate: ${_num(C.dailyCost.metal)} M · ${_num(C.dailyCost.crystal)} C · ${_num(C.dailyCost.deuterium)} D al giorno per ${C.buildDays} giorni reali.</li>
+        <li><strong>Costruzione diretta</strong> — in un Bacino <em>attualmente libero da navi</em> (Bacino Vuoto). Costo: ${_num(ship.cost.metal)} M · ${_num(ship.cost.crystal)} C · ${_num(ship.cost.deuterium)} D. Rate: ${_num(C.dailyCost.metal)} M · ${_num(C.dailyCost.crystal)} C · ${_num(C.dailyCost.deuterium)} D al giorno per ${C.buildDays} giorni reali.</li>
         <li><strong>Relitto da esplorazione</strong> — missione Esplorazione di almeno ${C.wreckExploreHours}h con almeno ${C.wreckMinDeathStars} Morti Nere nella flotta. Probabilità: ${(C.wreckChance * 100).toFixed(1)}%. Riparazione: ${C.wreckRepairDays} giorni reali.</li>
       </ol>
       <p style="font-size:0.9rem; margin-top:6px;"><strong>Limite:</strong> max ${C.maxPerEmpire} per Impero.</p>
@@ -371,7 +374,7 @@
     <div class="glass-panel" style="padding:14px; margin-bottom:8px;">
       <p style="font-size:0.9rem; margin-bottom:6px;"><strong>«Perché non posso costruire il Bacino?»</strong><br>Serve uno slot orbitale libero: niente Luna, niente Bacino già esistente, niente Galattica sopra il pianeta.</p>
       <p style="font-size:0.9rem; margin-bottom:6px;"><strong>«Perché le miniere producono poco?»</strong><br>Probabilmente hai energia in negativo. Controlla il saldo energia nella Panoramica: se è sotto zero, le miniere si fermano o producono meno.</p>
-      <p style="font-size:0.9rem; margin-bottom:6px;"><strong>«Perché non posso costruire la Crepuscolo?»</strong><br>Serve un Bacino <em>mai usato da nessuna nave</em> (deve essere "vuoto"). Se hai già Invictus o un'altra Crepuscolo nel Bacino, non puoi.</p>
+      <p style="font-size:0.9rem; margin-bottom:6px;"><strong>«Perché non posso costruire la Crepuscolo?»</strong><br>Serve un Bacino <em>attualmente libero da navi</em> (deve essere "vuoto"). Se hai già Invictus o un'altra Crepuscolo nel Bacino, non puoi.</p>
       <p style="font-size:0.9rem; margin-bottom:6px;"><strong>«Perché non posso costruire la Galattica?»</strong><br>Servono 5 ricerche specifiche ai livelli indicati (quantumPhysics 10, jumpPropulsion 8, mobilePlanetaryStructure 5, stellarReactor 7, spatialTerraforming 5) e un Bacino attivo senza navi legate.</p>
       <p style="font-size:0.9rem; margin-bottom:6px;"><strong>«Ho perso la flotta in Esplorazione, perché?»</strong><br>L'Esplorazione ha eventi casuali: pirati, buchi neri, relitti. Puoi perdere navi. Non è un bug, è il rischio dell'esplorazione.</p>
       <p style="font-size:0.9rem; margin-bottom:6px;"><strong>«Come faccio a conquistare un pianeta BOT?»</strong><br>Distruggi tutte le difese e le flotte con una missione Attacco, e includi almeno una Colonizzatrice o Nave Madre nella flotta. Se vinci e resti senza difese nemiche, il pianeta diventa tuo.</p>

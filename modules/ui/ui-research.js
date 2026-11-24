@@ -18,40 +18,49 @@
     const planet = UI.getActivePlanet();
     const isCreative = uni.creativeMode && !st.isMultiplayerMode;
 
+    Engine.normalizeResearchState(uni);
     const cards = Object.values(Data.RESEARCHES).map((r) => {
-      const curLv = Number(uni.researches[r.id] || 0);
+      const local = r.scope === 'planetary';
+      const activeQueue = local ? planet.localResearchQueue : uni.researchQueue;
+      const curLv = Data.getResearchLevel(uni, planet, r.id);
+      const maxed = Boolean(r.maxLevel && curLv >= r.maxLevel);
       const nextLv = curLv + 1;
-      const cost = Data.getResearchCost(r.id, nextLv);
+      const cost = maxed ? {metal:0,crystal:0,deuterium:0} : Data.getResearchCost(r.id, nextLv);
       const req = Data.checkRequirements(r.requirements, planet, uni, false);
-      const resSec = Engine.getResearchTime(uni, r.id, nextLv);
+      const resSec = maxed ? 0 : Engine.getResearchTime(uni, r.id, nextLv, planet);
 
       const hasM = isCreative || planet.resources.metal >= cost.metal;
       const hasC = isCreative || planet.resources.crystal >= cost.crystal;
       const hasD = isCreative || planet.resources.deuterium >= cost.deuterium;
-      const canResearch = isCreative || (req.met && hasM && hasC && hasD && !uni.researchQueue);
+      const hasFreeLab = local || Engine.getTotalLabLevel(uni) > 0;
+      const canResearch = !maxed && (isCreative || (req.met && hasM && hasC && hasD && hasFreeLab && !activeQueue));
+      const isActiveHere = activeQueue?.id === r.id;
 
       return `
         <div class="glass-panel" style="padding:14px; display:flex; flex-direction:column; gap:10px;">
           <div style="display:flex; gap:12px; align-items:flex-start;">
-            ${artTag(r.id, 'unit-art', r.name)}
+            ${r.id === 'megastructureEngineering' ? `<span class="unit-art" style="display:flex;align-items:center;justify-content:center;min-width:64px">${svgIcon('cpu')}</span>` : artTag(r.id, 'unit-art', r.name)}
             <div style="flex:1; min-width:0;">
               <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:6px; margin-bottom:4px;">
                 <strong style="font-size:1.05rem;">${escapeHTML(r.name)}</strong>
-                <span class="badge badge-blue">Lv.${curLv}</span>
+                <span class="badge badge-blue">Lv.${curLv}${r.maxLevel ? '/' + r.maxLevel : ''}</span>
               </div>
               <p class="text-muted" style="font-size:0.88rem;">${escapeHTML(r.description)}</p>
+              <span class="badge">${local ? 'PLANETARIA · ' + escapeHTML(planet.name) : 'IMPERIALE · condivisa'}</span>
             </div>
           </div>
-          ${!req.met && !isCreative ? `<div style="color:#ff5252; font-size:0.85rem;">${svgIcon('lock')} Richiede: ${escapeHTML(req.missing.join(', '))}</div>` : ''}
+          ${!req.met && !isCreative && !maxed ? `<div style="color:#ff5252; font-size:0.85rem;">${svgIcon('lock')} Richiede: ${escapeHTML(req.missing.join(', '))}</div>` : ''}
+          ${!local && !hasFreeLab && !isCreative ? '<div class="text-muted">Nessun laboratorio libero: ricerca imperiale in pausa.</div>' : ''}
+          ${isActiveHere ? `<div class="text-muted">${local ? 'Ricerca locale su ' + escapeHTML(planet.name) : 'Ricerca imperiale'} attiva: Lv.${activeQueue.targetLevel}${activeQueue.endTime ? ' · ' + formatDuration(Math.max(0, (activeQueue.endTime - Date.now()) / 1000)) + ' rimanenti' : ' · in pausa'}</div>` : ''}
           <div style="display:flex; flex-wrap:wrap; gap:10px; font-size:0.9rem; font-weight:700;">
             ${cost.metal > 0 ? `<span class="cost-item" style="color:${hasM ? 'var(--res-metal)' : 'var(--btn-red)'};">${resIconTag('metal')} ${formatNum(cost.metal)}</span>` : ''}
             ${cost.crystal > 0 ? `<span class="cost-item" style="color:${hasC ? 'var(--res-crystal)' : 'var(--btn-red)'};">${resIconTag('crystal')} ${formatNum(cost.crystal)}</span>` : ''}
             ${cost.deuterium > 0 ? `<span class="cost-item" style="color:${hasD ? 'var(--res-deuterium)' : 'var(--btn-red)'};">${resIconTag('deuterium')} ${formatNum(cost.deuterium)}</span>` : ''}
           </div>
           <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-top:auto;">
-            <span style="font-size:0.88rem; display:inline-flex; align-items:center;">${svgIcon('clock')} ${isCreative ? '<strong class="text-metal">ISTANTANEO (0s)</strong>' : formatDuration(resSec)}</span>
+            <span style="font-size:0.88rem; display:inline-flex; align-items:center;">${svgIcon('clock')} ${maxed ? 'COMPLETATA' : isCreative ? '<strong class="text-metal">ISTANTANEO (0s)</strong>' : formatDuration(resSec)}</span>
             <button type="button" class="btn btn-blue btn-sm btn-start-research" data-rid="${r.id}" ${canResearch ? '' : 'disabled'}>
-              RICERCA LV.${nextLv}
+              ${maxed ? 'LIVELLO MASSIMO' : isActiveHere ? 'IN CORSO' : activeQueue ? 'LABORATORIO OCCUPATO' : 'RICERCA LV.' + nextLv}
             </button>
           </div>
         </div>

@@ -1,0 +1,84 @@
+UNIVERSUM - FASE 1/5: RICERCHE MISTE E REQUISITI BACINO
+Rapporto tecnico - 24 novembre 2026
+
+FONTE E BACKUP
+Repository: lombardialessio95-source/universum, ramo main.
+Commit ufficiale di partenza: d0e256d0497638243dffbabd8137046042ecc587.
+La versione locale di partenza e' stata ricostruita e confrontata con i 92 hash blob di GitHub main (92 su 92 corrispondenti, zero discrepanze).
+Backup remoto: backup/pre-fase1-ricerche-miste-2026-11-24, puntato al commit sopra.
+Le feature delle fasi future non sono state implementate.
+
+MODELLO DATI E REQUISITI
+- universe.researches: livelli delle ricerche imperiali, condivisi.
+- universe.researchQueue: una sola ricerca imperiale attiva per impero.
+  Nuove code: workTotal, workDone, lastProgressAt, endTime ricalcolato. Il lavoro viene maturato cronologicamente.
+- planet.localResearches: livelli per ciascun pianeta.
+- planet.localResearchQueue: una sola ricerca locale attiva per pianeta.
+- universe.researchModelVersion=1: migrazione una tantum, idempotente.
+- Locali: quantumPhysics, jumpPropulsion, mobilePlanetaryStructure, stellarReactor,
+  spatialTerraforming, megastructureEngineering. Tutte le altre ricerche restano imperiali.
+- Per migrazione da vecchi globali, i livelli storici Galattica vengono posti SOLO sul
+  primo pianeta stabile; una coda attiva viene spostata sull'origine se esistente.
+  Il vecchio catalogo non memorizzava l'origine delle ricerche concluse, quindi NON e'
+  possibile un'attribuzione retrospettiva piu' precisa. Nessun livello duplicato su colonie.
+- Se una colonia viene perduta, la sua ricerca locale non migra altrove. La coda
+  appartenente al precedente proprietario e' ignorata per il nuovo proprietario.
+- Creazione di nuove colonie: livello locale iniziale 0, coda null.
+- I Bacini gia' attivi o avviati non vengono controllati retroattivamente.
+
+FORMULE
+Costi Ingegneria Megastrutturale al livello n: base * 2^(n-1).
+Base = 120000 M, 80000 C, 40000 D; max5.
+Livelli 1..5 = (120/80/40)k; (240/160/80)k; (480/320/160)k;
+(960/640/320)k; (1920/1280/640)k.
+Totale: 3720000 M, 2480000 C, 1240000 D per pianeta.
+Tempo ricerca ordinario = floor(3600 * (metallo+cristallo) /
+(1000 * (1 + livelli_laboratorio_utili) * velocita_effettiva)), minimo 1 s.
+Ricerche locali: laboratorio utile = solo laboratorio del pianeta.
+Imperiali: livelli utili = somma dei migliori 1 + livello Rete Intergalattica
+laboratori che NON sono occupati in una ricerca locale; nessun laboratorio
+libero = ricerca globale in pausa. Le transizioni sono segmentate per istanti
+locali, completamenti di upgrade laboratorio e fine Turbo.
+Il lavoro storico NON viene ricalcolato con velocita' futura.
+
+BACINO
+Nuovo avvio Normale (UI + motore): Ingegneria Megastrutturale locale Lv.5,
+Laboratorio locale Lv.10, Robotica locale Lv.10, Cantiere locale Lv.12,
+Tecnologia Iperspaziale imperiale Lv.6 e nessun blocco orbitale preesistente.
+Creativa: comportamento istantaneo gia' previsto, nessun nuovo blocco.
+20 giorni REALI e rate 250000/150000/50000 per giorno,
+totale 5000000/3000000/1000000; costi, timer e sospensione per insoluto invariati.
+
+CREPUSCOLO
+Richiede Bacino ATTUALMENTE libero da Invictus, Crepuscolo e cantiere Galattica,
+non un Bacino mai utilizzato in passato. La condizione 'everUsed' non e' piu'
+un blocco per la Crepuscolo. Le costruzioni in corso restano inalterate.
+
+COMPATIBILITA'
+- Offline: inizializzazione, salvataggio, caricamento, progressione a timestamp,
+  esportazione/importazione con formato retrocompatibile.
+- Online: planets/{id} salva livelli e coda locali; players/{uid} conserva livello e
+  coda imperiali e il marcatore di migrazione. Le transazioni continuano a
+  comprendere gli accreditamenti inbox preesistenti, senza nuove letture.
+- Programmazione automatica, Oracolo, Forgia: NON introdotti.
+- CPU/GPU: nessun nuovo timer, listener, canvas o asset remoto; un SVG statico
+  riutilizzato; lavori di ricerca avanzati dal tick preesistente.
+- Limitazione nota: la risoluzione autorevole PvP e i calcoli economici del
+  multiplayer restano client-side come nella versione precedente; questa fase
+  non riscrive la sicurezza o impone un controllo server anti-cheat.
+- Limitazione nota: la provenienza delle cinque ricerche Galattica legacy gia'
+  concluse NON era memorizzata; assegnazione conservativa alla capitale.
+- Limitazione nota: la gestione multiplayer richiede ancora prove con Firebase
+  reale/emulatore e due client simultanei prima della distribuzione pubblica.
+- I test di browser usano script iniettati in una pagina Chromium locale:
+  la navigazione HTTP/file e' bloccata dall'ambiente; NON sono prove sul sito
+  GitHub Pages pubblicato. Anche Safari mobile reale non e' stato collaudato.
+
+TEST E CONTROLLI
+Verifiche nuove: tests/test_ricerche_miste.js (17 casi) + test persistence in tests/test_inbox.js.
+Controlli vecchi: test_moduli, test_cache, test_debug_fixes, test_depositi,
+test_moon_merchant, test_security_static, test_firestore_spark, test_inbox.
+UI smoke Chromium: larghezze 1440, 375, 320; avvio Bacino su A e blocco su B;
+livelli locali diversi alla selezione del pianeta; zero JS errori nel percorso.
+Sintassi Node --check, script loading, manifest PWA, verifica ZIP e confronto GitHub
+sono parte della procedura di rilascio e vanno confermati nel resoconto finale.

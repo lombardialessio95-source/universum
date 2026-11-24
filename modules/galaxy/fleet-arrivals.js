@@ -147,6 +147,8 @@
         buildQueue: [],
         shipyardQueue: [],
         defenseQueue: [],
+        localResearches: {},
+        localResearchQueue: null,
         moon: null,
         bacinoSpaziale: null
       };
@@ -234,7 +236,7 @@
           const emptyPlanet = (universe.planets || []).find((pl) => isBacinoVuoto(pl, universe));
           if (!emptyPlanet) {
             addMessage(universe, 'expedition', `Relitto Crepuscolo Sparito [${key}]`,
-              'Avete trovato il relitto di una Crepuscolo degli Dei, ma non esiste un Bacino Spaziale vuoto (Bacini inesistenti oppure già usati/occupati): il relitto è sparito nello spazio profondo.');
+              'Avete trovato il relitto di una Crepuscolo degli Dei, ma non esiste un Bacino Spaziale vuoto (Bacini inesistenti oppure attualmente occupati): il relitto è sparito nello spazio profondo.');
           } else if (assignCrepuscoloWreck(universe, emptyPlanet)) {
             addMessage(universe, 'expedition', `🌌 RELITTO CREPUSCOLO RECUPERATO [${key}]!`,
               `Il relitto di una Crepuscolo degli Dei è stato agganciato al Bacino Spaziale vuoto su ${emptyPlanet.name}: riparazione di ${crepDef.wreckRepairDays} giorni reali avviata.`);
@@ -499,6 +501,8 @@
             buildQueue: [],
             shipyardQueue: [],
             defenseQueue: [],
+            localResearches: {},
+            localResearchQueue: null,
             moon: ((slot.moon && !combat.moonDestroyed) || moonFormedFromInvictus) ? {
               name: (slot.moon && slot.moon.name) || 'Luna',
               diameter: slot.moon.diameter || 7500,

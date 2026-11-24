@@ -119,6 +119,20 @@
   }
 
 
+  function getResearchLevel(universe, planet, researchId) {
+    const def = RESEARCHES[researchId];
+    const levels = def?.scope === 'planetary' ? planet?.localResearches : universe?.researches;
+    const value = Number(levels?.[researchId]);
+    return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+  }
+
+  function getBacinoStartRequirements(universe, planet) {
+    return checkRequirements({
+      buildings: { researchLab: 10, roboticsFactory: 10, shipyard: 12 },
+      researches: { megastructureEngineering: 5, hyperspaceTech: 6 }
+    }, planet, universe);
+  }
+
   function checkRequirements(requirements, planet, universe, isMoon = false) {
     if (!requirements) return { met: true, missing: [] };
     const missing = [];
@@ -147,7 +161,7 @@
 
     if (requirements.researches) {
       for (const [rId, reqLv] of Object.entries(requirements.researches)) {
-        const cur = Number(universe.researches?.[rId] || 0);
+        const cur = getResearchLevel(universe, planet, rId);
         if (cur < reqLv) {
           const name = RESEARCHES[rId]?.name || rId;
           missing.push(`${name} Lv.${reqLv}`);
@@ -179,6 +193,8 @@
     getUsedFields,
     getMoonMaxFields,
     getMoonUsedFields,
-    checkRequirements
+    checkRequirements,
+    getResearchLevel,
+    getBacinoStartRequirements
   };
 })();
