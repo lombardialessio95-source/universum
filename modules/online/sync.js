@@ -24,16 +24,17 @@
     });
 
     if (elapsedHours > 0 && window.UniversumEngine?.getPlanetProduction) {
-      const prod = window.UniversumEngine.getPlanetProduction(cloned, { speed, creativeMode: false });
+      const active = window.UniversumUI?.state?.currentUniverse;
+      const ownUid = window.fbAuth?.currentUser?.uid;
+      // La tecnologia energetica è già nello stato della propria partita:
+      // nessuna lettura aggiuntiva di documenti Firestore.
+      const prodResearches = cloned.researches || (ownUid && cloned.ownerUid === ownUid && active?.researches) || {};
+      // Calcolo puro: divide l'intervallo anche se il combustibile termina durante l'assenza.
       // Stessa regola usata dal tick offline: la produzione positiva si ferma
       // alla capienza, i trasporti preesistenti oltre soglia non vengono tagliati
       // e il consumo negativo di deuterio continua anche a deposito pieno.
-      window.__UniversumEngineModules.addResourcesWithCap(
-        cloned,
-        prod.metalPerHour * elapsedHours,
-        prod.crystalPerHour * elapsedHours,
-        prod.deuteriumPerHour * elapsedHours,
-        prod.caps
+      window.__UniversumEngineModules.advancePlanetResources(
+        cloned, { speed, creativeMode: false, researches: prodResearches }, elapsedHours * 3600
       );
       cloned.resources.metal = Math.floor(cloned.resources.metal);
       cloned.resources.crystal = Math.floor(cloned.resources.crystal);

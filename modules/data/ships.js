@@ -273,7 +273,7 @@
       speed: 150,
       driveType: 'hyperspaceDrive',
       cargo: 1000000,
-      fuelConsumption: 0,
+      fuelConsumption: 5000,
       complexity: 100,
       specialConstruction: 'bacino',
       requirements: {},

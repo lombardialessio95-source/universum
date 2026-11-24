@@ -1,0 +1,163 @@
+UNIVERSUM — RAPPORTO TECNICO F01
+================================
+Data: 24 novembre 2026
+Obiettivo: fusione alimentata, minimo delle miniere 3%, formula OGame della
+         fusione e consumo Invictus 5.000, senza modifiche ai sistemi estranei.
+
+1. VERSIONE, BACKUP E PROCEDURA
+--------------------------------
+Repository: https://github.com/lombardialessio95-source/universum
+Branch base effettivo: main
+Commit di partenza: 0d63426b27d0133e06d209fcb3187267446f034e
+Commit della segnalazione FORMULA: 400c1d7d9a4ff36a5fe9f23d847adf1c74db1d2f
+Il riferimento FORMULA è precedente al rilascio dei depositi OGame; è stato
+utilizzato il commit più recente, preservando capacità/depositi e ricerca mista.
+Backup remoto: backup/pre-f01-matematica-economia-2026-11-24 (punta al commit base).
+Backup ZIP: UNIVERSUM_Backup_Pre_F01_2026-11-24.zip, copia non modificata
+            della versione precedente, 97 file.
+
+2. CORREZIONI EFFETTIVE
+-----------------------
+A. Fusione nominale:
+   E(L,T) = floor(30 * L * (1.05 + 0.01 * T)^L)
+   T = Energia imperiale effettiva; non esiste più il moltiplicatore lineare
+   esterno (1 + 0.05*T). Metodo centrale in data.js, con parametro opzionale
+   energyTechLevel come quarto argomento di getBuildingEnergyDelta().
+   Costi, requisiti, velocità delle miniere e consumo nominale non cambiano.
+
+B. Combustibile ed energia:
+   Upkeep_nominale = ceil(10 * L * 1.1^L * velocitaEconomia).
+   Se D > 0: frazione centrale f = 1, fino all'esaurimento di D.
+   Se D = 0: viene calcolata la maggiore frazione f in [0,1] sostenibile
+   dalla produzione reale del sintetizzatore, calcolando la curva a tratti
+   dell'efficienza; l'energia e il consumo applicano entrambi f.
+   Evita dipendenze circolari e oscillazioni: non ci sono timer né cicli
+   di attivazione con cambiamenti dello stato a ogni calcolo.
+   Sia il tick realtime, sia il recupero offline, sia la ricostruzione online
+   dividono l'intervallo nel preciso istante in cui le scorte terminano.
+   Gli arrotondamenti discreti vengono controllati: in assenza di scorte non
+   viene attribuita energia se il sintetizzatore non produce abbastanza D.
+   Il deuterio non è mai ridotto sotto zero dalla progressione di produzione.
+   Impianti riattivati automaticamente al ricevimento di nuovo carburante.
+
+C. Efficienza miniere:
+   richiesta=0 => 100%; energia>=richiesta => 100%; altrimenti
+   max(3%, energiaProdotta/energiaRichiesta). In assenza di energia 3%.
+   Produzione GRATUITA 30 M/h e 15 C/h (moltiplicata per speed) invariata.
+   Temperatura della centrale solare: formula invariata.
+
+D. Invictus:
+   Coefficiente di consumo ordinario fuelConsumption=5000 (prima era 0).
+   Nuovo helper Data.getShipFuelConsumption(): mantiene zero valido; default
+   10 soltanto per dati assenti o non validi.
+   Usato in lancio flotte, embargo, missioni e modulo di controllo online.
+   Formula del consumo del viaggio, del tempo e della velocità: INVARIATE.
+   Salto speciale: getInvictusJumpCost() invariato, addebitato una sola volta
+   IN AGGIUNTA al viaggio ordinario nel lancio offline.
+   Anteprima della stiva/flotta con Invictus adesso mostra e riserva viaggio
+   + salto realmente addebitati dal modulo di lancio.
+   Stiva, armi, velocità, limiti Bacino, rientri e capacità speciali invariati.
+
+E. Galattica e rate Bacino:
+   La Galattica usa lo stesso Reattore di Fusione ed è stata aggiornata con
+   la formula nominale OGame, la frazione combustibile ed il minimo del 3%.
+   I sottosistemi di rate Bacino/Invictus/Crepuscolo/Galattica riutilizzano
+   l'avanzamento con esaurimento esatto per ogni tratto temporale; costi
+   giornalieri e date di scadenza non sono stati toccati.
+
+F. UI, cache e multiplayer:
+   Schermata edifici: energia nominale prossima con Energy Tech corretta,
+   più la reale energia ottenibile con il D corrente (eccetto Creativa).
+   Altre anteprime e controlli energetici ricevono il livello tecnologico.
+   Multiplayer: calculateLiveResources usa il medesimo avanzamento con
+   spegnimento del motore offline, senza nuovi lettori Firestore o cron.
+   Cache PWA aggiornata a universum-f01-energy-fuel-v1.
+
+3. PROVE E RISULTATI
+-------------------
+- Nuova suite tests/test_f01_fusion_invictus.js: 4198 verifiche superate,
+  comprese 217 combinazioni L=0..30 * T=0,1,3,5,8,12,20 della formula nominale
+  e un ulteriore sweep della fusione senza carburante, efficienza, online,
+  consumo orario, ripresa offline, lotti di tick, riattivazione e Galattica.
+- Test Invictus: distanza e velocità selezionata variabili, addebito separato
+  del salto, insufficienza D, stiva invariata, divieto intergalattico,
+  rientro al Bacino originale e nessun doppio addebito sul lancio.
+- Test di regressione preesistenti: 11 suite test_*.js superate (inclusa F01).
+  Depositi OGame 455 controlli, UI depositi 28, Fase 1 ricerche miste 17,
+  inbox multiplayer 14, sicurezza statica 10, cache PWA 68 script verificati.
+- Sintassi di tutti i JavaScript (escluso codice legacy non caricato) verificata
+  con node --check; nessun errore sintattico.
+- Chromium caricando gli script effettivi: desktop 1440x900,
+  mobile 375x812, piccolo 320x690, tutti superati, senza errori JS nei
+  percorsi testati né overflow orizzontale; energia nominale/effettiva coerenti.
+- Non sono state introdotte librerie, timer, listener o chiamate Firestore nuove.
+
+4. ESEMPIO INVICTUS E LIMITE DI STIVA
+--------------------------------------
+Un Invictus dal sistema 1 al sistema 498 della stessa galassia, al 100%:
+  distanza ordinaria: 497*95 + 2700 = 49.915
+  viaggio ordinario: floor((1 + 5000*49915/35000)*1) = 7.131 D
+  salto: ceil(497/3)*5.000 = 830.000 D
+  totale: 837.131 D, inferiore alla stiva di 1.000.000.
+Il carburante è un costo variabile, NON 5.000 D fissi per missione.
+
+5. INVARIANTI VERIFICATI
+------------------------
+- Codice Rapid Fire e limite 40 colpi/unità: invariato.
+- Formula della distanza e durata (sqrt della velocità universo): invariata.
+- Coefficienti di consumo di tutte le altre navi: invariati.
+- Formula dei tempi navi/difese ed economia miniere di base: invariata.
+- Capacità e costi dei depositi OGame, navi e altri edifici: invariati.
+- Firestore security rules, layout style.css, salvataggi, ricerc. Fase 1: invariati.
+- Nessun ricalcolo grafico permanente o nuova dipendenza.
+
+6. LIMITI RESIDUI / PERIMETRO
+----------------------------
+- Nessun test reale su Firebase con due account, security rules pubblicate o
+  emulator; sincronizzazione verificata con mock e stati locali. Richiede
+  un collaudo multiplayer con account effettivi prima della messa in produzione
+  su larga scala.
+- Nel percorso online preesistente, launchOnlineFleet legge planet.fleet e
+  non bacinoSpaziale.invictusActive per le Invictus. La limitazione già esistente
+  dell'Invictus online non è stata cambiata: il prompt F01 richiedeva il nuovo
+  coefficiente, non la riprogettazione dei viaggi speciali multiplayer.
+- Per calcolare il progresso di pianeti di altri utenti il loro livello
+  Energy Tech non è sempre presente nello snapshot del pianeta. Il livello
+  di ricerca del PROPRIO impero viene riusato dalla sessione quando disponibile;
+  per gli altri rimane il fallback a zero, senza ulteriori letture Firestore.
+- Il test visuale usa gli script caricati in Chromium in locale; non equivale
+  a un test reale del sito GitHub Pages/PWA installata.
+- Non eseguiti benchmark di CPU/GPU su dispositivo fisico.
+
+7. ELENCO FILE MODIFICATI (22), NUOVI (1+REPORT)
+-----------------------------------------------------
+  MOD: README.txt
+  MOD: data.js
+  MOD: documents/mappa.txt
+  MOD: documents/struttura ricerche e missioni.txt
+  MOD: engine-actions.js
+  MOD: missions-core.js
+  MOD: modules/data/ships.js
+  MOD: modules/engine/megastructure-costs.js
+  MOD: modules/engine/megastructure-progress.js
+  MOD: modules/engine/production.js
+  MOD: modules/engine/progress.js
+  MOD: modules/galaxy/fleet-dispatch.js
+  MOD: modules/online/fleet-control.js
+  MOD: modules/online/sync.js
+  MOD: modules/ui/fleet.js
+  MOD: modules/ui/ui-buildings.js
+  MOD: modules/ui/ui-shipyard.js
+  MOD: siege-missions.js
+  MOD: sw.js
+  MOD: tests/LEGGIMI.txt
+  MOD: tests/test_depositi_ogame.js
+  MOD: tests/test_firestore_spark.js
+  NEW: tests/test_f01_fusion_invictus.js
+  NEW: documents/rapporto f01 fusione e invictus.txt
+
+8. PUBBLICAZIONE
+----------------
+Il commit finale viene indicato nel report di pubblicazione esterno, generato
+solo DOPO il controllo di corrispondenza GitHub/ZIP. Nessun deploy Firebase
+Rules richiesto; caricare la nuova cache PWA.

@@ -31,6 +31,26 @@
   }
 
 
+  function advancePlanetResources(planet, universe, elapsedSec) {
+    if (!(elapsedSec > 0)) return;
+    const before = getPlanetProduction(planet, universe);
+    const fuel = Math.max(0, Number(planet.resources.deuterium) || 0);
+    const depletionSec = before.fusionFuelPerHour > 0 && before.deuteriumPerHour < 0 && fuel > 0
+      ? fuel * 3600 / -before.deuteriumPerHour : Infinity;
+    const firstSec = Math.min(elapsedSec, depletionSec);
+    addResourcesWithCap(planet, before.metalPerSec * firstSec, before.crystalPerSec * firstSec,
+      before.deuteriumPerSec * firstSec, before.caps);
+    if (depletionSec <= elapsedSec) {
+      // Il primo intervallo usa la fusione al 100%; il resto usa la massima
+      // frazione alimentabile dal sintetizzatore, senza passare sotto zero.
+      planet.resources.deuterium = 0;
+      const after = getPlanetProduction(planet, universe);
+      const remaining = elapsedSec - firstSec;
+      if (remaining > 0) addResourcesWithCap(planet, after.metalPerSec * remaining,
+        after.crystalPerSec * remaining, after.deuteriumPerSec * remaining, after.caps);
+    }
+  }
+
   // =========================================================
   // AVANZAMENTO CODE (EDIFICI, RICERCHE, CANTIERE, DIFESE, LUNA)
   // =========================================================
@@ -165,14 +185,7 @@
       } else if (planet.bacinoSpaziale && ((Array.isArray(planet.bacinoSpaziale.invictusConstructions) && planet.bacinoSpaziale.invictusConstructions.length > 0) || (planet.bacinoSpaziale.crepuscolo && planet.bacinoSpaziale.crepuscolo.status !== 'active') || planet.bacinoSpaziale.galatticaConstruction)) {
         settleInvictusOffline(planet, universe, lastSeen, now, report);
       } else {
-        const prod = getPlanetProduction(planet, universe);
-        addResourcesWithCap(
-          planet,
-          prod.metalPerSec * deltaSec,
-          prod.crystalPerSec * deltaSec,
-          prod.deuteriumPerSec * deltaSec,
-          prod.caps
-        );
+        advancePlanetResources(planet, universe, deltaSec);
       }
 
       report.gained.metal += Math.max(0, Math.floor(planet.resources.metal - beforeM));
@@ -204,14 +217,7 @@
     }
 
     for (const planet of universe.planets || []) {
-      const prod = getPlanetProduction(planet, universe);
-      addResourcesWithCap(
-        planet,
-        prod.metalPerSec * deltaSec,
-        prod.crystalPerSec * deltaSec,
-        prod.deuteriumPerSec * deltaSec,
-        prod.caps
-      );
+      advancePlanetResources(planet, universe, deltaSec);
       settleBacinoDue(planet, now, null);
     }
     addGalatticaProduction(universe, deltaSec);
@@ -221,6 +227,6 @@
     checkCrepuscoloLimbo(universe, now);
     return queueCompleted;
   }
-  Object.assign(G, { addResourcesWithCap, advanceQueuesAtTimestamp, processOfflineProgress, tick });
+  Object.assign(G, { addResourcesWithCap, advancePlanetResources, advanceQueuesAtTimestamp, processOfflineProgress, tick });
 
 })();

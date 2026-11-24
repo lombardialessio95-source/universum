@@ -34,7 +34,7 @@
   }
 
 
-  function getBuildingEnergyDelta(buildingId, level, maxTemp = 30) {
+  function getBuildingEnergyDelta(buildingId, level, maxTemp = 30, energyTechLevel = 0) {
     const lv = Math.max(0, Number(level) || 0);
     if (lv === 0) return 0;
     switch (buildingId) {
@@ -47,8 +47,10 @@
       case 'solarPlant':
         // Bonus lieve su pianeti caldi
         return Math.floor(20 * lv * Math.pow(1.1, lv) * (1 + maxTemp / 400));
-      case 'fusionReactor':
-        return Math.floor(30 * lv * Math.pow(1.05, lv));
+      case 'fusionReactor': {
+        const tech = Math.max(0, Math.floor(Number(energyTechLevel) || 0));
+        return Math.floor(30 * lv * Math.pow(1.05 + 0.01 * tech, lv));
+      }
       default:
         return 0;
     }
@@ -73,6 +75,12 @@
     }
   }
 
+
+  function getShipFuelConsumption(shipId) {
+    const value = SHIPS[shipId]?.fuelConsumption;
+    const n = Number(value);
+    return value !== undefined && value !== null && Number.isFinite(n) && n >= 0 ? n : 10;
+  }
 
   function getStorageCapacity(level) {
     // Capacita' OGame: valore identico per metallo, cristallo e deuterio.
@@ -188,6 +196,7 @@
     getBuildingCost,
     getResearchCost,
     getBuildingEnergyDelta,
+    getShipFuelConsumption,
     getBaseHourlyProduction,
     getStorageCapacity,
     getMaxFields,

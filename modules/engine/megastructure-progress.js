@@ -6,7 +6,7 @@
   const canPayDaily = (...args) => G.canPayDaily(...args);
   const getData = (...args) => G.getData(...args);
   const getEffectiveSpeed = (...args) => G.getEffectiveSpeed(...args);
-  const getPlanetProduction = (...args) => G.getPlanetProduction(...args);
+  const advancePlanetResources = (...args) => G.advancePlanetResources(...args);
   const normalizePlanet = (...args) => G.normalizePlanet(...args);
 
 
@@ -123,32 +123,50 @@
     const speed = getEffectiveSpeed(universe);
     const plasmaLv = Number(universe.researches?.plasmaTech || 0);
     const energyLv = Number(universe.researches?.energyTech || 0);
-    const fusionBase = Data.getBuildingEnergyDelta('fusionReactor', s.reattoreFusione || 0, 30);
-    const energyProduced = Math.floor(fusionBase * (1 + energyLv * 0.05));
+    const fusionLv = Math.max(0, Number(s.reattoreFusione) || 0);
+    const fusionFull = Data.getBuildingEnergyDelta('fusionReactor', fusionLv, 30, energyLv);
     const energyConsumed =
       Math.abs(Data.getBuildingEnergyDelta('metalMine', s.generatoreMetallo || 0, 30)) +
       Math.abs(Data.getBuildingEnergyDelta('crystalMine', s.generatoreCristallo || 0, 30)) +
       Math.abs(Data.getBuildingEnergyDelta('deuteriumSynth', s.sintetizzatoreDeuterio || 0, 30));
+    const deutGross = Data.getBaseHourlyProduction('deuteriumSynth', s.sintetizzatoreDeuterio || 0, 30) *
+      (1 + plasmaLv * 0.0033) * speed;
+    const fusionUpkeep = fusionLv > 0 ? Math.ceil(10 * fusionLv * Math.pow(1.1, fusionLv) * speed) : 0;
+    const fusion = G.getFusionStats(0, fusionFull, energyConsumed, deutGross, fusionUpkeep,
+      Math.max(0, Number(galattica.resources.deuterium) || 0));
+    const { energyProduced, efficiency } = fusion;
     const energyBalance = energyProduced - energyConsumed;
-    const efficiency = energyConsumed === 0 ? 1 : Math.min(1, Math.max(0.1, energyProduced / energyConsumed));
-    const fusionUpkeep = (s.reattoreFusione || 0) > 0 ? Math.ceil(10 * s.reattoreFusione * Math.pow(1.1, s.reattoreFusione) * speed) : 0;
     const metalPerHour = Math.floor(Data.getBaseHourlyProduction('metalMine', s.generatoreMetallo || 0, 30) * (1 + plasmaLv * 0.01) * efficiency * speed);
     const crystalPerHour = Math.floor(Data.getBaseHourlyProduction('crystalMine', s.generatoreCristallo || 0, 30) * (1 + plasmaLv * 0.0066) * efficiency * speed);
-    const deuteriumPerHour = Math.floor(Data.getBaseHourlyProduction('deuteriumSynth', s.sintetizzatoreDeuterio || 0, 30) * (1 + plasmaLv * 0.0033) * efficiency * speed) - fusionUpkeep;
+    const deutNet = Math.floor(deutGross * efficiency) - fusion.fuelPerHour;
+    const deuteriumPerHour = Math.floor((galattica.resources.deuterium > 0 ? deutNet : Math.max(0, deutNet)) + 1e-7);
     return {
       metalPerHour, crystalPerHour, deuteriumPerHour,
       metalPerSec: metalPerHour / 3600, crystalPerSec: crystalPerHour / 3600, deuteriumPerSec: deuteriumPerHour / 3600,
-      energyProduced, energyConsumed, energyBalance, efficiency
+      energyProduced, energyConsumed, energyBalance, efficiency,
+      fusionFraction: fusion.fraction, fusionEnergy: fusion.fusionEnergy, fusionFuelPerHour: fusion.fuelPerHour
     };
   }
 
 
   function addGalatticaProduction(universe, deltaSec) {
+    if (!(deltaSec > 0)) return;
     for (const galattica of universe.galattiche || []) {
-      const prod = getGalatticaProduction(galattica, universe);
-      galattica.resources.metal = Math.max(0, galattica.resources.metal + prod.metalPerSec * deltaSec);
-      galattica.resources.crystal = Math.max(0, galattica.resources.crystal + prod.crystalPerSec * deltaSec);
-      galattica.resources.deuterium = Math.max(0, galattica.resources.deuterium + prod.deuteriumPerSec * deltaSec);
+      const before = getGalatticaProduction(galattica, universe);
+      const fuel = Math.max(0, Number(galattica.resources.deuterium) || 0);
+      const depletionSec = before.fusionFuelPerHour > 0 && before.deuteriumPerHour < 0 && fuel > 0
+        ? fuel * 3600 / -before.deuteriumPerHour : Infinity;
+      const firstSec = Math.min(deltaSec, depletionSec);
+      const add = (prod, sec) => {
+        galattica.resources.metal = Math.max(0, galattica.resources.metal + prod.metalPerSec * sec);
+        galattica.resources.crystal = Math.max(0, galattica.resources.crystal + prod.crystalPerSec * sec);
+        galattica.resources.deuterium = Math.max(0, galattica.resources.deuterium + prod.deuteriumPerSec * sec);
+      };
+      add(before, firstSec);
+      if (depletionSec <= deltaSec) {
+        galattica.resources.deuterium = 0;
+        add(getGalatticaProduction(galattica, universe), deltaSec - firstSec);
+      }
     }
   }
 
@@ -219,11 +237,7 @@
   function settleInvictusOffline(planet, universe, fromTs, toTs, summary) {
     const bacino = planet.bacinoSpaziale;
     const def = getData().INVICTUS;
-    const prod = getPlanetProduction(planet, universe);
-    const addFor = (from, to) => {
-      const sec = Math.max(0, (to - from) / 1000);
-      if (sec > 0) addResourcesWithCap(planet, prod.metalPerSec * sec, prod.crystalPerSec * sec, prod.deuteriumPerSec * sec, prod.caps);
-    };
+    const addFor = (from, to) => advancePlanetResources(planet, universe, Math.max(0, (to - from) / 1000));
     const crepDef = getData().CREPUSCOLO;
     let cursor = fromTs;
     for (const c of bacino.invictusConstructions) if (!c.nextPaymentAt) c.nextPaymentAt = fromTs + def.dayMs;

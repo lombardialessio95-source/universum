@@ -100,7 +100,7 @@
       for (const [sid, count] of Object.entries(fleetSelection || {})) {
         const qty = Number(count) || 0;
         if (qty > 0 && Data.SHIPS[sid]) {
-          hourlyBurn += (Data.SHIPS[sid].fuelConsumption || 10) * qty;
+          hourlyBurn += Data.getShipFuelConsumption(sid) * qty;
         }
       }
       hourlyBurn = Math.max(50, hourlyBurn);

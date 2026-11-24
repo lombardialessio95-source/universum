@@ -102,7 +102,8 @@
       }
       // Blocco energia: il livello successivo non deve portare il saldo in negativo
       const prodNow = Engine.getPlanetProduction(planet, universe);
-      const energyDelta = Data.getBuildingEnergyDelta(buildingId, curLv + 1, planet.maxTemp) - Data.getBuildingEnergyDelta(buildingId, curLv, planet.maxTemp);
+      const techLv = Number(universe.researches?.energyTech || 0);
+      const energyDelta = Data.getBuildingEnergyDelta(buildingId, curLv + 1, planet.maxTemp, techLv) - Data.getBuildingEnergyDelta(buildingId, curLv, planet.maxTemp, techLv);
       if (energyDelta < 0 && (prodNow.energyBalance + energyDelta) < 0) {
         throw new Error('Energia insufficiente');
       }

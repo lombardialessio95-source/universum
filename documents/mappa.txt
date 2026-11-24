@@ -993,3 +993,34 @@ APPENDICE — 24/11/2026 — CAPACITÀ DEPOSITI OGAME
 - tests/test_depositi_ogame.js copre livelli/costi 0-35, UI, offline/online
   e checksum di tutti i costi preesistenti.
 - Dettagli, limite al Lv.31 e prove: documents/rapporto depositi ogame.txt.
+
+F01 — CORREZIONI MATEMATICHE ED ECONOMICHE (24/11/2026)
+  data.js: formula nominale OGame della fusione, livello di tecnologia energetica
+    come quarto parametro di getBuildingEnergyDelta(); getShipFuelConsumption()
+    conserva il valore zero esplicito, usa il default 10 solo se il dato manca.
+  modules/engine/production.js: frazione di fusione alimentabile (calcolo per tratti,
+    nessun timer), efficienza miniere minima 3%, energia e consumo coerenti;
+    esposti fusionFraction/fusionEnergy/fusionFuelPerHour nei valori di produzione.
+  modules/engine/progress.js: advancePlanetResources() divide il periodo al
+    momento esatto dell'esaurimento del deuterio; tick e progressione offline.
+  modules/engine/megastructure-costs.js e megastructure-progress.js:
+    riuso di advancePlanetResources per le rate giornaliere; Galattica con
+    consumo e formula della fusione unificati, senza modifiche ai suoi costi.
+  modules/online/sync.js: calculateLiveResources() riusa advancePlanetResources
+    senza nuove letture Firestore, e l'Energy Tech dell'impero proprio se noto.
+  modules/data/ships.js: Invictus coefficient fuelConsumption 5000; stiva e costi invariati.
+  modules/galaxy/fleet-dispatch.js, missions-core.js, siege-missions.js,
+    modules/online/fleet-control.js: gestione zero valido, senza toccare le
+    formule di volo, embargo, salto e velocita'.
+  modules/ui/ui-buildings.js, modules/ui/ui-shipyard.js, engine-actions.js:
+    anteprima nominale parametrizzata con Energy Tech; indicazione dell'energia
+    effettiva di fusione in base al carburante.
+  modules/ui/fleet.js: con Invictus la stima del deuterio include il viaggio
+    ordinario reale e una sola volta il costo speciale del salto.
+  tests/test_f01_fusion_invictus.js: nuovi scenari matematici e di regressione.
+  documents/rapporto f01 fusione e invictus.txt: audit, limiti, test e file.
+  sw.js: cache universum-f01-energy-fuel-v1.
+
+NESSUNA MODIFICA A: regole Firestore, formule viaggio/velocita', Rapid Fire,
+  temperatura della centrale solare, costi e tempi di costruzione delle navi,
+  stive o prezzi Invictus e degli altri mezzi, stile.css e sistema depositi OGame.

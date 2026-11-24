@@ -1,7 +1,7 @@
 /**
  * UNIVERSUM — Service Worker PWA (Offline-First + Network-First per Firebase)
  */
-const CACHE_NAME = 'universum-ogame-storage-v1';
+const CACHE_NAME = 'universum-f01-energy-fuel-v1';
 
 const ASSETS = [
   './', './index.html', './manifest.json', './style.css',

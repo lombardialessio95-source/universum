@@ -364,7 +364,7 @@
         if (elapsedSec < 1) continue;
         let hourlyBurn = 0;
         for (const [sid, qty] of Object.entries(fleet.ships || {})) {
-          hourlyBurn += (Data?.SHIPS?.[sid]?.fuelConsumption || 10) * Number(qty || 0);
+          hourlyBurn += Data.getShipFuelConsumption(sid) * Number(qty || 0);
         }
         hourlyBurn = Math.max(40, hourlyBurn);
         let remaining = Math.max(0, Number(fleet.siegeDeuterium || 0) - (hourlyBurn / 3600) * elapsedSec);

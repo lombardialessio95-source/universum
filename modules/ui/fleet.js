@@ -45,7 +45,15 @@
 
     // Il carburante occupa spazio in Galaxy.launchFleet: riservarlo anche
     // nel caricamento assistito evita di suggerire spedizioni non valide.
-    const fuelReserved = Math.max(0, Math.ceil(Number(flightStats.fuelCost) || 0));
+    const invictusSelected = Math.min(getShipAvail('invictus'), Math.max(0, Math.floor(Number(st.fleetSelection.invictus) || 0)));
+    // L'Invictus paga il viaggio ordinario E il salto di sistema: la UI deve
+    // riservare entrambe le voci, esattamente come Galaxy.launchFleet.
+    const invictusJumpFuel = invictusSelected > 0 && Number(planet.coords.g) === Number(st.fleetTarget.g)
+      ? Galaxy.getInvictusJumpCost(planet.coords, st.fleetTarget, invictusSelected) : 0;
+    const ordinaryFuel = invictusSelected > 0
+      ? Galaxy.getFleetSpeedAndFuel(uni, st.fleetSelection, dist, st.fleetFuelPercent).fuelCost
+      : flightStats.fuelCost;
+    const fuelReserved = Math.max(0, Math.ceil(Number(ordinaryFuel) || 0) + invictusJumpFuel);
     const cargoUsable = Math.max(0, Math.floor(cargoCapacity - fuelReserved));
     const cargoLoaded = ['metal', 'crystal', 'deuterium'].reduce((n, key) =>
       n + Math.max(0, Math.floor(Number(st.fleetCargo[key]) || 0)), 0);
@@ -201,7 +209,7 @@
           <div style="background:rgba(0,0,0,0.4); padding:12px; border-radius:8px; margin-bottom:14px; display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px;">
             <span>Distanza: <strong>${formatNum(dist)}</strong></span>
             <span>Viaggio: <strong class="text-crystal">${formatDuration(flightStats.durationSec)}</strong></span>
-            <span>Carburante: <strong class="text-deuterium">${formatNum(flightStats.fuelCost)} D</strong></span>
+            <span>Carburante: <strong class="text-deuterium">${formatNum(fuelReserved)} D</strong>${invictusJumpFuel ? ` <small>(viaggio ${formatNum(ordinaryFuel)} + salto ${formatNum(invictusJumpFuel)})</small>` : ''}</span>
           </div>
 
           <button type="button" id="btn-launch-fleet" class="btn btn-green" style="width:100%;" ${usedSlots >= maxSlots ? 'disabled' : ''}>

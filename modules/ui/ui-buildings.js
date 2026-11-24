@@ -27,8 +27,12 @@
       const req = Data.checkRequirements(b.requirements, planet, uni, false);
       const buildSec = Engine.getBuildingBuildTime(uni, planet, b.id, nextLv, false);
 
-      const energyCur = Data.getBuildingEnergyDelta(b.id, curLv, planet.maxTemp);
-      const energyNext = Data.getBuildingEnergyDelta(b.id, nextLv, planet.maxTemp);
+      const techLv = Number(uni.researches?.energyTech || 0);
+      const energyCur = Data.getBuildingEnergyDelta(b.id, curLv, planet.maxTemp, techLv);
+      const energyNext = Data.getBuildingEnergyDelta(b.id, nextLv, planet.maxTemp, techLv);
+      const nextFusion = b.id === 'fusionReactor' && !isCreative
+        ? Engine.getPlanetProduction({ ...planet, buildings: { ...planet.buildings, fusionReactor: nextLv } }, uni)
+        : null;
       const energyDelta = energyNext - energyCur;
       const energyAfter = prod.energyBalance + energyDelta;
       const energyInsufficient = !isCreative && energyDelta < 0 && energyAfter < 0;
@@ -64,7 +68,7 @@
           </div>
           <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-top:auto;">
             <span style="font-size:0.88rem; display:inline-flex; align-items:center;">${svgIcon('clock')} ${isCreative ? '<strong class="text-metal">ISTANTANEO (0s)</strong>' : formatDuration(buildSec)}</span>
-            <span style="font-size:0.82rem; color:${energyNext >= 0 ? 'var(--res-energy)' : '#ffab40'};">${svgIcon('bolt')} Energia: ${energyNext >= 0 ? '+' : ''}${formatNum(energyNext)}${prodGain('metal') > 0 ? ` • +${formatNum(prodGain('metal'))}/h Metallo` : ''}${prodGain('crystal') > 0 ? ` • +${formatNum(prodGain('crystal'))}/h Cristallo` : ''}${prodGain('deuterium') > 0 ? ` • +${formatNum(prodGain('deuterium'))}/h Deuterio` : ''}${energyInsufficient ? ' • <strong style="color:#ff5252;">Energia insufficiente</strong>' : ''}</span>
+            <span style="font-size:0.82rem; color:${energyNext >= 0 ? 'var(--res-energy)' : '#ffab40'};">${svgIcon('bolt')} Energia: ${energyNext >= 0 ? '+' : ''}${formatNum(energyNext)}${nextFusion ? ` (effettiva +${formatNum(nextFusion.fusionEnergy)}, al ${Math.round(nextFusion.fusionFraction * 100)}% del combustibile)` : ''}${prodGain('metal') > 0 ? ` • +${formatNum(prodGain('metal'))}/h Metallo` : ''}${prodGain('crystal') > 0 ? ` • +${formatNum(prodGain('crystal'))}/h Cristallo` : ''}${prodGain('deuterium') > 0 ? ` • +${formatNum(prodGain('deuterium'))}/h Deuterio` : ''}${energyInsufficient ? ' • <strong style="color:#ff5252;">Energia insufficiente</strong>' : ''}</span>
             <button type="button" class="btn btn-green btn-sm btn-build-structure" data-bid="${b.id}" ${canBuild ? '' : 'disabled'}>
               ${b.maxLevel && curLv >= b.maxLevel ? 'MAX' : `COSTRUISCI LV.${nextLv}`}
             </button>

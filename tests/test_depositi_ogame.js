@@ -171,5 +171,6 @@ check(later.resources.metal,13500,'produzione successiva non taglia accrediti so
 
 // Nessun timer dedicato e riutilizzo dell'helper offline.
 const code=fs.readFileSync(path.join(root,'modules/online/sync.js'),'utf8');
-assert(code.includes('window.__UniversumEngineModules.addResourcesWithCap('),'online e offline devono condividere helper');checks++;
+assert(code.includes('window.__UniversumEngineModules.advancePlanetResources('),'online e offline devono condividere avanzamento con controllo carburante');checks++;
+assert(fs.readFileSync(path.join(root,'modules/engine/progress.js'),'utf8').includes('addResourcesWithCap(planet, before.'),"l'avanzamento riusa addResourcesWithCap");checks++;
 console.log(`DEPOSITI OGAME: ${checks} verifiche superate; livelli 0–35, costi, offline, online, consumo, overflow, UI.`);

@@ -37,7 +37,7 @@
 
       const effectiveShipSpeed = spec.speed * (1 + driveLv * bonusPerLv);
       if (effectiveShipSpeed < minSpeed) minSpeed = effectiveShipSpeed;
-      totalFuelPerDist += (spec.fuelConsumption || 10) * cnt;
+      totalFuelPerDist += Data.getShipFuelConsumption(shipId) * cnt;
     }
 
     if (!isFinite(minSpeed) || minSpeed <= 0) minSpeed = 5000;

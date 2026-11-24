@@ -17,5 +17,11 @@ Firefox/Chrome sul tuo dispositivo o test multiaccount con regole pubblicate.
 L'hosting online, l'autenticazione reale e gli scambi tra client richiedono prove dedicate.
 
 Depositi OGame: node tests/test_depositi_ogame.js
-454 verifiche sul sistema capacità 0-35, costi, retrocompatibilità,
+455 verifiche sul sistema capacità 0-35, costi, retrocompatibilità,
 parità produzione offline/online e barra superiore.
+
+F01 (24/11/2026): node tests/test_f01_fusion_invictus.js
+  Formula fusione livelli 0-30 e Energy Tech, combustibile scarso/assente,
+  parzializzazione e riattivazione, minimo 3%, offline/online/Galattica,
+  consumi Invictus 5000, salto speciale e rientro al Bacino.
+I test multiplayer con mock non sostituiscono un collaudo con due client Firebase reali.

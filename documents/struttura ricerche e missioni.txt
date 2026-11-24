@@ -356,3 +356,17 @@ La produzione positiva si arresta alla capacità, non cancella materiali
 importati oltre capacità; consumo negativo di deuterio continua fino a zero.
 Offline e online condividono addResourcesWithCap() e getPlanetProduction().
 Vedi documents/rapporto depositi ogame.txt per tabella completa Lv.0-35.
+
+F01 — FUSIONE E CONSUMI (24/11/2026)
+  Energia nominale Reattore Fusione: floor(30 × L × (1,05 + 0,01 × Energy Tech)^L).
+  Deuterio nominale: ceil(10 × L × 1,1^L × velocitaEconomia).
+  Energia e consumo effettivo: nominali moltiplicati per la medesima frazione
+  alimentabile; con combustibile già presente la centrale opera al massimo
+  fino all'istante di esaurimento. Con riserva a 0 si sceglie il massimo regime
+  sostenibile dalla produzione effettiva di deuterio (energia e consumo coerenti).
+  Efficienza miniere = 1 se richiesta 0; altrimenti min(1, max(0,03,
+  energiaProdotta / energiaRichiesta)). Produzione base 30 M/h e 15 C/h
+  per velocitaEconomia NON ridotta dalla mancanza di energia.
+  Consumo ordinario Invictus: coefficiente 5000 D nella formula esistente
+  del viaggio; costo speciale 5000 D ogni 3 sistemi (per nave) IN AGGIUNTA,
+  una volta sola al lancio. Stiva Invictus = 1.000.000 invariata.

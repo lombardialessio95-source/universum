@@ -148,7 +148,8 @@
       const curLv = Number(planet.buildings?.[b.id] || 0);
       const cost = Data.getBuildingCost(b.id, curLv + 1, false);
       const req = Data.checkRequirements(b.requirements, planet, uni, false);
-      const energyDelta = Data.getBuildingEnergyDelta(b.id, curLv + 1, planet.maxTemp) - Data.getBuildingEnergyDelta(b.id, curLv, planet.maxTemp);
+      const techLv = Number(uni.researches?.energyTech || 0);
+      const energyDelta = Data.getBuildingEnergyDelta(b.id, curLv + 1, planet.maxTemp, techLv) - Data.getBuildingEnergyDelta(b.id, curLv, planet.maxTemp, techLv);
       const energyOk = isCreative || energyDelta >= 0 || (prodNow.energyBalance + energyDelta) >= 0;
       const canBuild = isCreative || (req.met && energyOk && res.metal >= cost.metal && res.crystal >= cost.crystal && res.deuterium >= cost.deuterium && (planet.buildQueue || []).length === 0 && (!b.maxLevel || curLv < b.maxLevel));
       btn.disabled = !canBuild;

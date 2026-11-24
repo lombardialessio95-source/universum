@@ -96,7 +96,7 @@ function loadModule(file, win, extra = {}) {
   const activeTime=Date.now();
   const shipDoc=(elapsed)=>({id:'emb', data:()=>({attackerUid:uid,status:'embargo', resolved:false, siegeDeuterium:100000, ships:{lightFighter:10}, lastSiegeTickAt:activeTime-elapsed*1000, targetKey:'1_1_2'}),ref:{update: async(data)=>updates.push(['fleet',data])}});
   const ref={collection:()=>({doc:()=>({update:async(data)=>updates.push(['planet',data])})})};
-  win.UniversumData={SHIPS:{lightFighter:{fuelConsumption:10}}};
+  win.UniversumData={SHIPS:{lightFighter:{fuelConsumption:10}},getShipFuelConsumption:()=>10};
   await G.processEmbargoFleets(ref,[shipDoc(10)],activeTime,10);
   assert.strictEqual(updates.length,0,'embargo non scritto ogni 3s');
   await G.processEmbargoFleets(ref,[shipDoc(31)],activeTime,10);

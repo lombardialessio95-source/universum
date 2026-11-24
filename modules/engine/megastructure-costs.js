@@ -4,7 +4,7 @@
   const G = window.__UniversumEngineModules;
   const addResourcesWithCap = (...args) => G.addResourcesWithCap(...args);
   const getData = (...args) => G.getData(...args);
-  const getPlanetProduction = (...args) => G.getPlanetProduction(...args);
+  const advancePlanetResources = (...args) => G.advancePlanetResources(...args);
   const normalizePlanet = (...args) => G.normalizePlanet(...args);
   const settleInvictusDue = (...args) => G.settleInvictusDue(...args);
   const tick = (...args) => G.tick(...args);
@@ -108,11 +108,7 @@
   function settleBacinoOffline(planet, universe, fromTs, toTs, summary) {
     const bacino = planet.bacinoSpaziale;
     const def = getData().BACINO_SPAZIALE;
-    const prod = getPlanetProduction(planet, universe);
-    const addFor = (from, to) => {
-      const sec = Math.max(0, (to - from) / 1000);
-      if (sec > 0) addResourcesWithCap(planet, prod.metalPerSec * sec, prod.crystalPerSec * sec, prod.deuteriumPerSec * sec, prod.caps);
-    };
+    const addFor = (from, to) => advancePlanetResources(planet, universe, Math.max(0, (to - from) / 1000));
     if (!bacino.nextPaymentAt) bacino.nextPaymentAt = fromTs + def.dayMs;
     let cursor = fromTs;
     while (bacino.status !== 'active' && bacino.nextPaymentAt > cursor && bacino.nextPaymentAt <= toTs) {

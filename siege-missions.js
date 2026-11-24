@@ -396,7 +396,7 @@
         // Calcola consumo orario dei motori in orbita
         let hourlyBurn = 0;
         for (const [sid, qty] of Object.entries(s.ships || {})) {
-          hourlyBurn += (Data.SHIPS[sid]?.fuelConsumption || 10) * Number(qty || 0);
+          hourlyBurn += Data.getShipFuelConsumption(sid) * Number(qty || 0);
         }
         hourlyBurn = Math.max(40, hourlyBurn);
         const burnThisTick = (hourlyBurn / 3600) * elapsedSec;

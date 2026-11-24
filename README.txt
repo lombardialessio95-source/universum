@@ -1,5 +1,5 @@
 UNIVERSUM — VERSIONE MODULARE
-Revisione: 24/11/2026 — Depositi e ottimizzazioni multiplayer Firestore
+Revisione: 24/11/2026 — F01 fusione alimentata, 3% e Invictus (post depositi OGame)
 
 Questo archivio contiene il gioco completo, non soltanto una patch.
 
@@ -74,3 +74,13 @@ DEPOSITI OGAME (24/11/2026)
   non vengono cancellate le risorse preesistenti sopra soglia. Costi invariati.
   Test: node tests/test_depositi_ogame.js
   Rapporto: documents/rapporto depositi ogame.txt
+
+F01 — FUSIONE, EFFICIENZA E INVICTUS (24/11/2026)
+  Fusione nominale: floor(30 * L * (1.05 + 0.01 * energyTech)^L).
+  L'energia della fusione dipende dal deuterio consumato realmente;
+  se le riserve terminano, il tempo viene segmentato senza ricalcoli periodici extra.
+  Minimo efficienza miniere: 3%, produzione base gratuita immutata.
+  Invictus: fuelConsumption base 5000; viaggi e salti speciali con costi separati.
+  Cache PWA aggiornata; nessuna modifica delle regole Firestore.
+  Test: node tests/test_f01_fusion_invictus.js
+  Audit: documents/rapporto f01 fusione e invictus.txt
