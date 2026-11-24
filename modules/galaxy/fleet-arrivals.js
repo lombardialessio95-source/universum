@@ -231,7 +231,7 @@
           addMessage(universe, 'expedition', `Relitto Crepuscolo Perso [${key}]`,
             'Avete trovato il relitto di una Crepuscolo degli Dei, ma ne possedete già una nel vostro impero (max 1): il relitto è andato perso.');
         } else {
-          const emptyPlanet = (universe.planets || []).find((pl) => isBacinoVuoto(pl));
+          const emptyPlanet = (universe.planets || []).find((pl) => isBacinoVuoto(pl, universe));
           if (!emptyPlanet) {
             addMessage(universe, 'expedition', `Relitto Crepuscolo Sparito [${key}]`,
               'Avete trovato il relitto di una Crepuscolo degli Dei, ma non esiste un Bacino Spaziale vuoto (Bacini inesistenti oppure già usati/occupati): il relitto è sparito nello spazio profondo.');

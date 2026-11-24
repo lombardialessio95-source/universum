@@ -147,24 +147,48 @@
       </div>
 
       <div class="resources-bar">
-        <div class="res-pill">
-          <span id="res-metal-label" class="res-label text-metal">Metallo</span>
+        <button type="button" class="res-pill res-deposit-trigger" data-deposit="metal" aria-controls="resource-deposit-panel" aria-expanded="false" aria-label="Deposito di Metallo: apri i dettagli">
+          <span class="res-deposit-label-row"><span id="res-metal-label" class="res-label text-metal">Metallo</span><svg class="res-cap-warning" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5L22 20.5H2L12 3.5Z"/><path d="M12 9v5.5m0 3v.25"/></svg></span>
           <span id="res-metal-val" class="res-val text-metal">0</span>
-        </div>
-        <div class="res-pill">
-          <span id="res-crystal-label" class="res-label text-crystal">Cristallo</span>
+        </button>
+        <button type="button" class="res-pill res-deposit-trigger" data-deposit="crystal" aria-controls="resource-deposit-panel" aria-expanded="false" aria-label="Deposito di Cristallo: apri i dettagli">
+          <span class="res-deposit-label-row"><span id="res-crystal-label" class="res-label text-crystal">Cristallo</span><svg class="res-cap-warning" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5L22 20.5H2L12 3.5Z"/><path d="M12 9v5.5m0 3v.25"/></svg></span>
           <span id="res-crystal-val" class="res-val text-crystal">0</span>
-        </div>
-        <div class="res-pill">
-          <span id="res-deuterium-label" class="res-label text-deuterium">Deuterio</span>
+        </button>
+        <button type="button" class="res-pill res-deposit-trigger" data-deposit="deuterium" aria-controls="resource-deposit-panel" aria-expanded="false" aria-label="Deposito di Deuterio: apri i dettagli">
+          <span class="res-deposit-label-row"><span id="res-deuterium-label" class="res-label text-deuterium">Deuterio</span><svg class="res-cap-warning" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5L22 20.5H2L12 3.5Z"/><path d="M12 9v5.5m0 3v.25"/></svg></span>
           <span id="res-deuterium-val" class="res-val text-deuterium">0</span>
-        </div>
+        </button>
         <div class="res-pill">
           <span id="res-energy-label" class="res-label text-energy">Energia</span>
           <span id="res-energy-val" class="res-val text-energy">0 / 0</span>
         </div>
       </div>
     </header>
+
+    <!-- Dettaglio depositi: fuori dalla topbar per evitare clipping/backdrop filter. -->
+    <div id="resource-deposit-panel" class="deposit-popover hidden" role="dialog" aria-modal="false" aria-labelledby="deposit-panel-title" tabindex="-1">
+      <div class="deposit-popover-heading">
+        <div>
+          <strong id="deposit-panel-title">Deposito</strong>
+          <div id="deposit-panel-planet" class="deposit-panel-planet"></div>
+        </div>
+        <button type="button" class="deposit-popover-close" id="deposit-panel-close" aria-label="Chiudi dettagli deposito">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5l14 14M19 5L5 19"/></svg>
+        </button>
+      </div>
+      <div class="deposit-popover-data">
+        <div><span>Quantità / capacità</span><strong id="deposit-panel-quantity">—</strong></div>
+        <div><span>Riempimento</span><strong id="deposit-panel-percent">—</strong></div>
+      </div>
+      <div id="deposit-panel-meter" class="deposit-panel-meter" role="progressbar" aria-label="Riempimento deposito" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="deposit-panel-meter-fill"></div></div>
+      <div class="deposit-popover-data">
+        <div><span>Spazio disponibile</span><strong id="deposit-panel-space">—</strong></div>
+        <div><span>Produzione oraria effettiva</span><strong id="deposit-panel-production">—</strong></div>
+        <div><span>Deposito pieno tra</span><strong id="deposit-panel-time">—</strong></div>
+      </div>
+      <p id="deposit-panel-note" class="deposit-panel-note hidden"></p>
+    </div>
 
     <!-- BARRA RAPIDA MODALITÀ CREATIVA -->
     <div id="creative-quick-bar" class="creative-bar hidden">
@@ -386,6 +410,7 @@
   <script src="./ui-core.js" defer></script>
   <script src="./modules/ui/lobby-online.js" defer></script>
   <script src="./modules/ui/planet-canvas.js" defer></script>
+  <script src="./modules/ui/resource-deposits.js" defer></script>
   <script src="./modules/ui/navigation.js" defer></script>
   <script src="./modules/ui/runtime.js" defer></script>
   <script src="./modules/ui/selects.js" defer></script>

@@ -1,0 +1,230 @@
+UNIVERSUM - SCHEDA COMPLETA NAVI
+Fonti: modules/data/ships.js (statistiche, costi, cargo, velocita', consumo, rapid-fire, requirements),
+modules/data/researches.js (nomi ricerche), modules/data/buildings.js (nomi edifici),
+modules/data/defenses.js (nomi dei bersagli rapid-fire che sono difese),
+modules/engine/timings.js e modules/galaxy/fleet-dispatch.js (solo per le note su costo/velocita' effettivi).
+
+NOTA IMPORTANTE: Le navi non hanno livelli, le statistiche sono fisse. Quello che cambia e' il livello delle ricerche richieste per sbloccarle.
+- Attacco, Scafo, Scudo, Carico, Velocita' base, Consumo e Costo sotto sono i valori fissi di catalogo (modules/data/ships.js).
+- In combattimento, Attacco/Scudo/Scafo effettivi sono modificati dalle tecnologie Armi/Scudi/Corazze (+10% per livello, modules/galaxy/combat.js): non sono livelli della nave.
+- Velocita' effettiva in volo: la velocita' base e' moltiplicata in base al livello della ricerca propulsore indicata nel campo driveType della nave (Combustione +10%/livello, Impulso +20%/livello, Iperspaziale +30%/livello, modules/galaxy/fleet-dispatch.js getFleetSpeedAndFuel). La nave piu' lenta della flotta determina la velocita' della flotta.
+- Costo effettivo in cantiere: se sul pianeta e' presente una Luna con Cantiere Segreto Lunare, le navi (non le difese) costano +20% e i tempi sono ridotti del 20% per livello del Cantiere Segreto, max -60% (modules/engine/timings.js getUnitCostAdjusted / getSingleUnitTime). Senza Cantiere Segreto il costo e' quello di catalogo.
+- Rapid-fire: valori di catalogo "bersaglio xN". Nel motore vale la probabilita' (N-1)/N di sparare un colpo aggiuntivo contro quel bersaglio.
+
+================================================================
+
+NAVE: Cargo Leggero
+Attacco: 5
+Scafo / Difesa: 4000
+Scudo: 10
+Carico: 5000
+Velocita': 5000
+Consumo: 10
+Costo: Metallo 2000 / Cristallo 2000 / Deuterio 0
+Sblocco: Propulsore a Combustione Lv. 2 + Cantiere Navale Lv. 2
+Rapid-fire: Sonda Spia x5, Satellite Solare x5
+Note: driveType combustionDrive in modules/data/ships.js. Nessun hangar/specialConstruction nel codice.
+
+NAVE: Cargo Pesante
+Attacco: 5
+Scafo / Difesa: 12000
+Scudo: 25
+Carico: 25000
+Velocita': 7500
+Consumo: 50
+Costo: Metallo 6000 / Cristallo 6000 / Deuterio 0
+Sblocco: Propulsore a Combustione Lv. 6 + Cantiere Navale Lv. 4
+Rapid-fire: Sonda Spia x5, Satellite Solare x5
+Note: driveType combustionDrive in modules/data/ships.js.
+
+NAVE: Caccia Leggero
+Attacco: 50
+Scafo / Difesa: 4000
+Scudo: 10
+Carico: 50
+Velocita': 12500
+Consumo: 20
+Costo: Metallo 3000 / Cristallo 1000 / Deuterio 0
+Sblocco: Propulsore a Combustione Lv. 1 + Cantiere Navale Lv. 1
+Rapid-fire: Sonda Spia x5, Satellite Solare x5
+Note: driveType combustionDrive in modules/data/ships.js.
+
+NAVE: Caccia Pesante
+Attacco: 150
+Scafo / Difesa: 10000
+Scudo: 25
+Carico: 100
+Velocita': 10000
+Consumo: 75
+Costo: Metallo 6000 / Cristallo 4000 / Deuterio 0
+Sblocco: Tecnologia delle Corazze Lv. 2 + Propulsore a Impulso Lv. 2 + Cantiere Navale Lv. 3
+Rapid-fire: Cargo Leggero x3, Sonda Spia x5, Satellite Solare x5
+Note: driveType impulseDrive in modules/data/ships.js.
+
+NAVE: Incrociatore
+Attacco: 400
+Scafo / Difesa: 27000
+Scudo: 50
+Carico: 800
+Velocita': 15000
+Consumo: 300
+Costo: Metallo 20000 / Cristallo 7000 / Deuterio 2000
+Sblocco: Propulsore a Impulso Lv. 4 + Tecnologia Ionica Lv. 2 + Cantiere Navale Lv. 5
+Rapid-fire: Caccia Leggero x6, Lanciamissili (rocketLauncher, difesa) x10, Sonda Spia x5, Satellite Solare x5
+Note: driveType impulseDrive in modules/data/ships.js.
+
+NAVE: Nave da Battaglia
+Attacco: 1000
+Scafo / Difesa: 60000
+Scudo: 200
+Carico: 1500
+Velocita': 10000
+Consumo: 500
+Costo: Metallo 45000 / Cristallo 15000 / Deuterio 0
+Sblocco: Propulsore Iperspaziale Lv. 4 + Cantiere Navale Lv. 7
+Rapid-fire: Sonda Spia x5, Satellite Solare x5
+Note: driveType hyperspaceDrive in modules/data/ships.js.
+
+NAVE: Bombardiere
+Attacco: 1000
+Scafo / Difesa: 75000
+Scudo: 500
+Carico: 500
+Velocita': 5000
+Consumo: 1000
+Costo: Metallo 50000 / Cristallo 25000 / Deuterio 15000
+Sblocco: Propulsore a Impulso Lv. 6 + Tecnologia del Plasma Lv. 5 + Cantiere Navale Lv. 8
+Rapid-fire: Lanciamissili (rocketLauncher, difesa) x20, Laser Leggero (lightLaser, difesa) x20, Laser Pesante (heavyLaser, difesa) x10, Cannone Ionico (ionCannon, difesa) x10, Sonda Spia x5
+Note: driveType hyperspaceDrive in modules/data/ships.js. Nota del catalogo: il prerequisito diretto in ships.js e' Propulsore a Impulso, mentre il driveType della nave e' hyperspaceDrive.
+
+NAVE: Incrociatore da Battaglia
+Attacco: 700
+Scafo / Difesa: 70000
+Scudo: 400
+Carico: 750
+Velocita': 10000
+Consumo: 250
+Costo: Metallo 30000 / Cristallo 40000 / Deuterio 15000
+Sblocco: Tecnologia Iperspaziale Lv. 5 + Propulsore Iperspaziale Lv. 5 + Tecnologia dei Laser Lv. 12 + Cantiere Navale Lv. 8
+Rapid-fire: Cargo Leggero x3, Cargo Pesante x3, Caccia Pesante x4, Incrociatore x4, Nave da Battaglia x7, Sonda Spia x5
+Note: driveType hyperspaceDrive in modules/data/ships.js.
+
+NAVE: Colonizzatrice
+Attacco: 50
+Scafo / Difesa: 30000
+Scudo: 100
+Carico: 7500
+Velocita': 2500
+Consumo: 1000
+Costo: Metallo 10000 / Cristallo 20000 / Deuterio 10000
+Sblocco: Propulsore a Impulso Lv. 3 + Astrofisica Lv. 1 + Cantiere Navale Lv. 4
+Rapid-fire: Sonda Spia x5, Satellite Solare x5
+Note: driveType impulseDrive in modules/data/ships.js.
+
+NAVE: Riciclatrice
+Attacco: 1
+Scafo / Difesa: 16000
+Scudo: 10
+Carico: 20000
+Velocita': 2000
+Consumo: 300
+Costo: Metallo 10000 / Cristallo 6000 / Deuterio 2000
+Sblocco: Propulsore a Combustione Lv. 6 + Tecnologia degli Scudi Lv. 2 + Cantiere Navale Lv. 4
+Rapid-fire: Sonda Spia x5, Satellite Solare x5
+Note: driveType combustionDrive in modules/data/ships.js.
+
+NAVE: Sonda Spia
+Attacco: 0
+Scafo / Difesa: 1000
+Scudo: 0
+Carico: 5
+Velocita': 100000000
+Consumo: 1
+Costo: Metallo 0 / Cristallo 1000 / Deuterio 0
+Sblocco: Propulsore a Combustione Lv. 3 + Tecnologia dello Spionaggio Lv. 2 + Cantiere Navale Lv. 3
+Rapid-fire: non presente nel codice (rapidFire vuoto in modules/data/ships.js)
+Note: driveType combustionDrive in modules/data/ships.js.
+
+NAVE: Satellite Solare
+Attacco: 1
+Scafo / Difesa: 2000
+Scudo: 1
+Carico: 0
+Velocita': 0
+Consumo: 0
+Costo: Metallo 0 / Cristallo 2000 / Deuterio 500
+Sblocco: Cantiere Navale Lv. 1
+Rapid-fire: non presente nel codice (rapidFire vuoto in modules/data/ships.js)
+Note: driveType "none" in modules/data/ships.js. Nessun prerequisito di ricerca nel codice: requirements contiene solo Cantiere Navale Lv. 1. E' escluso dai lanci flotta in modules/galaxy/fleet-dispatch.js (solarSatellite saltato nel conteggio navi/carburante).
+
+NAVE: Nave Madre
+Attacco: 5000
+Scafo / Difesa: 400000
+Scudo: 2500
+Carico: 50000
+Velocita': 6000
+Consumo: 2500
+Costo: Metallo 250000 / Cristallo 150000 / Deuterio 50000
+Sblocco: Astrofisica Lv. 8 + Propulsore Iperspaziale Lv. 6 + Cantiere Navale Lv. 10
+Rapid-fire: Caccia Leggero x15, Caccia Pesante x10, Incrociatore x5, Sonda Spia x10
+Note: driveType hyperspaceDrive in modules/data/ships.js. Campo aggiuntivo nel codice: hangarCapacity 50.
+
+NAVE: Morte Nera
+Attacco: 200000
+Scafo / Difesa: 9000000
+Scudo: 50000
+Carico: 1000000
+Velocita': 100
+Consumo: 1
+Costo: Metallo 1000000 / Cristallo 500000 / Deuterio 100000
+Sblocco: Tecnologia Gravitonica Suprema Lv. 1 + Propulsore Iperspaziale Lv. 7 + Cantiere Navale Lv. 12
+Rapid-fire: Cargo Leggero x250, Cargo Pesante x250, Caccia Leggero x200, Caccia Pesante x100, Incrociatore x33, Nave da Battaglia x30, Bombardiere x25, Incrociatore da Battaglia x15, Colonizzatrice x250, Riciclatrice x250, Sonda Spia x1250, Satellite Solare x1250, Lanciamissili (rocketLauncher, difesa) x200, Laser Leggero (lightLaser, difesa) x200, Laser Pesante (heavyLaser, difesa) x100, Cannone Gauss (gaussCannon, difesa) x50, Cannone Ionico (ionCannon, difesa) x100
+Note: driveType hyperspaceDrive in modules/data/ships.js.
+
+NAVE: Invictus
+Attacco: 800000
+Scafo / Difesa: 9000000
+Scudo: 50000
+Carico: 1000000
+Velocita': 150
+Consumo: 0
+Costo: Metallo 4000000 / Cristallo 2400000 / Deuterio 1600000
+Sblocco: non presente nel codice in modules/data/ships.js (requirements vuoto)
+Rapid-fire: Cargo Leggero x250, Cargo Pesante x250, Caccia Leggero x200, Caccia Pesante x100, Incrociatore x33, Nave da Battaglia x30, Bombardiere x25, Incrociatore da Battaglia x15, Colonizzatrice x250, Riciclatrice x250, Sonda Spia x1250, Satellite Solare x1250, Lanciamissili (rocketLauncher, difesa) x200, Laser Leggero (lightLaser, difesa) x200, Laser Pesante (heavyLaser, difesa) x100, Cannone Gauss (gaussCannon, difesa) x50, Cannone Ionico (ionCannon, difesa) x100
+Note: driveType hyperspaceDrive, specialConstruction "bacino" in modules/data/ships.js: non si costruisce nel Cantiere Navale (engine-actions.js buildUnits blocca specialConstruction "bacino"). Costo/statistiche qui sono quelli di catalogo ships.js; la costruzione a rate e' definita in modules/data/megastructures.js (INVICTUS), fonte non elencata per questa scheda.
+
+NAVE: Crepuscolo degli Dei
+Attacco: 2000000
+Scafo / Difesa: 9000000
+Scudo: 50000
+Carico: 10000000
+Velocita': 300
+Consumo: 1
+Costo: Metallo 50000000 / Cristallo 30000000 / Deuterio 20000000
+Sblocco: non presente nel codice in modules/data/ships.js (requirements vuoto)
+Rapid-fire: Cargo Leggero x250, Cargo Pesante x250, Caccia Leggero x200, Caccia Pesante x100, Incrociatore x33, Nave da Battaglia x30, Bombardiere x25, Incrociatore da Battaglia x15, Colonizzatrice x250, Riciclatrice x250, Sonda Spia x1250, Satellite Solare x1250, Lanciamissili (rocketLauncher, difesa) x200, Laser Leggero (lightLaser, difesa) x200, Laser Pesante (heavyLaser, difesa) x100, Cannone Gauss (gaussCannon, difesa) x50, Cannone Ionico (ionCannon, difesa) x100
+Note: driveType hyperspaceDrive, specialConstruction "bacino" in modules/data/ships.js: non si costruisce nel Cantiere Navale. La costruzione a rate e' definita in modules/data/megastructures.js (CREPUSCOLO), fonte non elencata per questa scheda.
+
+================================================================
+TABELLA RIASSUNTIVA
+================================================================
+Nome nave | Attacco | Scudo | Carico | Velocita' | Costo totale
+Cargo Leggero | 5 | 10 | 5000 | 5000 | 4000
+Cargo Pesante | 5 | 25 | 25000 | 7500 | 12000
+Caccia Leggero | 50 | 10 | 50 | 12500 | 4000
+Caccia Pesante | 150 | 25 | 100 | 10000 | 10000
+Incrociatore | 400 | 50 | 800 | 15000 | 29000
+Nave da Battaglia | 1000 | 200 | 1500 | 10000 | 60000
+Bombardiere | 1000 | 500 | 500 | 5000 | 90000
+Incrociatore da Battaglia | 700 | 400 | 750 | 10000 | 85000
+Colonizzatrice | 50 | 100 | 7500 | 2500 | 40000
+Riciclatrice | 1 | 10 | 20000 | 2000 | 18000
+Sonda Spia | 0 | 0 | 5 | 100000000 | 1000
+Satellite Solare | 1 | 1 | 0 | 0 | 2500
+Nave Madre | 5000 | 2500 | 50000 | 6000 | 450000
+Morte Nera | 200000 | 50000 | 1000000 | 100 | 1600000
+Invictus | 800000 | 50000 | 1000000 | 150 | 8000000
+Crepuscolo degli Dei | 2000000 | 50000 | 10000000 | 300 | 100000000
+
+Costo totale = Metallo + Cristallo + Deuterio del costo di catalogo (modules/data/ships.js).
+Totale navi nel catalogo SHIPS: 16.

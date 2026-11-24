@@ -45,7 +45,7 @@
       const statusLabel = b.status === 'active' ? 'Attivo' : (b.status === 'stopped' ? 'Fermato' : 'In costruzione');
       const pct = Math.min(100, Math.floor(((Number(b.daysPaid) || 0) / def.totalDays) * 100));
       const invDef = Data.INVICTUS;
-      const invCounts = Galaxy.getInvictusCount(planet);
+      const invCounts = Galaxy.getInvictusCount(planet, uni);
       const invMissing = Engine.getInvictusMissingForDay(planet);
       const invictusHtml = b.status === 'active' ? `
           <div style="margin-top:14px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.12);">
@@ -58,7 +58,7 @@
       const crepDef = Data.CREPUSCOLO;
       const crep = b.crepuscolo;
       const crepMissing = Engine.getCrepuscoloMissingForDay(planet);
-      const isVuoto = b.status === 'active' && Galaxy.isBacinoVuoto(planet);
+      const isVuoto = b.status === 'active' && Galaxy.isBacinoVuoto(planet, uni);
       const limboHere = uni.crepuscoloLimbo && uni.planets[0] && uni.planets[0].id === planet.id;
 
       // === M2: immagine Crepuscolo dinamica in base allo stato ===

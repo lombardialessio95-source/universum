@@ -2,6 +2,13 @@ UNIVERSUM — OTTIMIZZAZIONE MULTIPLAYER PER FIREBASE SPARK
 Versione: 22 novembre 2026
 Base: UNIVERSUM_Riorganizzato_Modulare_Completo.zip
 
+NOTA DI INTEGRAZIONE — 24 novembre 2026
+Questa è la documentazione storica dell'ottimizzazione di main. La build
+integrata conserva il controllo tributi ogni 30 s e legge la velocità solo
+quando necessaria. Il fallback flotte è paginato per partecipante e include
+i rientri; si attiva solo se gli snapshot non sono utilizzabili. I checkpoint
+delle code completate su pianeti e lune restano immediati.
+
 OBIETTIVO
 Aumentare il numero di giocatori giornalieri con Firestore Standard su piano Spark,
 senza rimuovere funzioni, velocità dei voli, risoluzione dei combattimenti, radar,

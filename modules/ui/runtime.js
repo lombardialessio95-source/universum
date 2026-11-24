@@ -6,6 +6,7 @@
 
 
   UI.exitActiveGameToLobby = async function () {
+    UI.closeResourceDeposit?.();
     const st = UI.state;
     if (st.currentUniverse) {
       await UI.persistUniverseState();
@@ -23,6 +24,7 @@
 
 
   UI.exitToLobbyAfterServerRemoval = async function () {
+    UI.closeResourceDeposit?.();
     const st = UI.state;
     UI.stopGameLoop();
     UI.cleanupMultiplayerListeners();
@@ -96,10 +98,11 @@
         (activeP?.defenseQueue?.length || 0) +
         (uni.researchQueue ? 1 : 0);
 
-      window.UniversumEngine.tick(uni, 1);
+      const queueCompleted = window.UniversumEngine.tick(uni, 1);
 
       if (st.isMultiplayerMode) {
         mpTickCounter++;
+        if (queueCompleted) UI.persistUniverseState().catch(() => {});
         if (mpTickCounter % 3 === 0 && window.UniversumMP?.resolveArrivedOnlineFleets) {
           window.UniversumMP.resolveArrivedOnlineFleets(uni.id, uni.speed).catch(() => {});
         }
@@ -108,7 +111,7 @@
         }
         if (mpTickCounter % 60 === 0) {
           // Solo checkpoint periodico: le azioni volontarie usano force:true.
-          UI.persistUniverseState({ force: false }).catch(() => {});
+          if (!queueCompleted) UI.persistUniverseState({ force: false }).catch(() => {});
           if (uni.botConfig?.raids && uni.botConfig.personality?.hostile > 0 && window.UniversumMP?.maybeLaunchBotRaid) {
             window.UniversumMP.maybeLaunchBotRaid(uni.id, uni.botConfig).catch((e) => console.warn('[MP Bot] Raid:', e));
           }
@@ -124,7 +127,6 @@
 
       if (newQueueCount < prevQueueCount) {
         UI.playSound('complete');
-        if (st.isMultiplayerMode) UI.persistUniverseState().catch(() => {});
         if (['overview', 'buildings', 'research', 'shipyard'].includes(st.currentView)) {
           UI.renderCurrentView();
         }

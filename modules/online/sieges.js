@@ -24,10 +24,12 @@
     await resolveArrivedOnlineFleets(uniId);
     const db = getDB();
     const uniRef = db.collection('online_universes').doc(uniId);
-    const snap = await uniRef.collection('fleets').limit(100).get().catch(() => ({ docs: [] }));
+    const uid = getAuth().currentUser?.uid;
+    if (!uid) return 0;
+    const docs = await G.fetchFleetPartyDocs(uniRef.collection('fleets'), uid);
     let repaired = 0;
     const now = Date.now();
-    for (const d of snap.docs) {
+    for (const d of docs) {
       const fleet = normalizeOnlineFleet(d.data(), d.id);
       const uid = getAuth().currentUser?.uid;
       if (!uid || (fleet.attackerUid !== uid && fleet.defenderUid !== uid)) continue;
@@ -54,14 +56,19 @@
     if (!snap || !snap.docs || snap.docs.length === 0) return;
 
     const DAY_MS = 24 * 3600 * 1000;
-    const uniSnapOcc = await uniRef.get().catch(() => null);
-    const occSpeed = uniSnapOcc && uniSnapOcc.exists ? (uniSnapOcc.data().speed || 10) : 10;
+    const activeUniverse = window.UniversumUI?.state?.currentUniverse;
+    const knownSpeed = activeUniverse?.id === uniId ? Number(activeUniverse.speed) : 0;
+    const due = snap.docs.filter((doc) => {
+      const occ = doc.data().occupation;
+      const last = Number(occ?.lastTributeAt || occ?.startedAt || 0);
+      return occ?.originCoords && last && Date.now() - last >= DAY_MS;
+    });
+    if (!due.length) return;
+    const occSpeed = knownSpeed > 0 ? knownSpeed
+      : ((await uniRef.get().catch(() => null))?.data()?.speed || 10);
 
-    for (const pDoc of snap.docs) {
+    for (const pDoc of due) {
       const occ = pDoc.data().occupation;
-      if (!occ || !occ.originCoords) continue;
-      const lastSeen = Number(occ.lastTributeAt || occ.startedAt || 0);
-      if (!lastSeen || Date.now() - lastSeen < DAY_MS) continue;
 
       const creditRef = await _resolveCreditRef(uniRef, occ.occupierUid, occ.originCoords);
       if (!creditRef) continue;
@@ -121,10 +128,9 @@
 
 
   async function processOnlineOccupations(uniId) {
-    if (!uniId || !getAuth().currentUser) return;
-    // Il tributo scatta una volta al giorno: e' inutile interrogare Firestore
-    // ogni 30 secondi. La prima scansione resta immediata, le altre ogni 10m.
-    await sweepOccupationsThrottled(uniId);
+    const user = getAuth().currentUser;
+    if (!user || !uniId) return;
+    await processAllOccupations(uniId, { onlyUid: user.uid });
   }
 
 

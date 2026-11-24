@@ -486,6 +486,7 @@ Ruolo: Lune, Bacino Spaziale, Invictus, Crepuscolo e Galattica
 Dimensione attuale: 26,938 byte | Caricato direttamente dalla pagina: SI
 COSA CONTIENE E COME FUNZIONA:
   Implementa creazione Luna in condizioni previste, avvio e avanzamento strutture speciali, calcolo costi dei salti, spostamento Galattiche, cancellazione/trasformazione Bacino, Gate lunare e Falange.
+  Galattica (regola ufficiale): quando una Galattica salta via, il pianeta d'origine torna libero (galatticaOrigin = false dopo il salto) e su quel pianeta si puo' di nuovo costruire Luna / Bacino.
 DIPENDENZE / PUNTO DI MANUTENZIONE:
   Collabora con modules/data/megastructures.js e modules/engine; gestisce cambiamenti su pianeta, luna, flotte e deltas della galassia offline.
 Metodi condivisi nel registro galassia: getMoonCreationCost, makeMoon, createMoon, startBacinoSpaziale, getInvictusCount, getInvictusJumpCost, addInvictusDebris, startInvictusConstruction, isBacinoVuoto, getCrepuscoloState, makeCrepuscoloProject, beginCrepuscoloBattleRepair, startCrepuscoloConstruction, assignCrepuscoloWreck, findGalatticaAt, getGalatticaCount, findGalattica, startGalatticaConstruction, getGalatticaJumpCost, jumpGalattica, upgradeGalatticaStructure, buildGalatticaDefense, buildGalatticaShip, cancelBacinoConstruction, destroyBacinoAndFormMoon, useJumpGate, scanWithPhalanx.
@@ -908,69 +909,41 @@ Per numeri, esempi e progressione completa leggere documents/struttura ricerche 
 FINE MAPPA — 84 file documentati, 66 script client caricati da index.html.
 La documentazione descrive i sorgenti inclusi, non presume l’esito di un collaudo Firebase live.
 
-===============================================================================
-APPENDICE 22/11/2026 — OTTIMIZZAZIONE FIRESTORE SPARK
-===============================================================================
-Questa appendice aggiorna la mappa della versione modulare originale.
-Per analisi completa e stime: documents/ottimizzazione online firestore spark.txt.
 
-modules/online/combat-resolver.js
-- resolveArrivedOnlineFleets(uniId, knownSpeed) usa gli snapshot realtime
-  delle flotte che appartengono all'attaccante o al difensore invece di
-  interrogare tutta la collection fleets ogni 3 secondi.
-- Gli eventi scaduti vengono risolti mediante le transazioni originali.
-- Un lock per sessione/universo evita resolver sovrapposti. Se i listener
-  falliscono, fallback di massimo due query/account ogni minuto.
+==============================================================
+AGGIORNAMENTO DEPOSITI INTERATTIVI — 23/11/2026
+==============================================================
+Origine: archivio universum-main.zip fornito dall'utente il 23/11/2026.
 
-modules/online/fleet-control.js
-- listenOwnFleets e listenIncomingFleets alimentano la cache della
-  risoluzione tramite getLiveFleetDocs e clearLiveFleetDocs.
-- processEmbargoFleets conserva il calcolo temporale del deuterio, con
-  scritture ogni ~30 secondi quando l'embargo resta attivo.
-- Gli errori per indici Firestore mancanti vengono notificati all'utente.
+modules/ui/resource-deposits.js (NUOVO)
+  Modulo puramente grafico per stato di riempimento (verde/giallo/rosso),
+  avvertimento di pieno e pannello contestuale delle risorse.
+  Non salva dati e non usa Firebase. API su window.UniversumUI:
+    getDepositMetrics(planet, produzione, universo, tipo, creativa)
+    formatDepositFillTime(ore)
+    updateResourceDeposits(planet, produzione, universo)
+    closeResourceDeposit()
+  Gli eventi sono legati una sola volta al caricamento e la selezione del
+  pianeta viene riletta attraverso updateTopBarNumbers.
 
-modules/online/sieges.js
-- processOnlineOccupations passa da sweepOccupationsThrottled: max 1
-  interrogazione per universo ogni dieci minuti nella stessa sessione.
+modules/ui/planet-canvas.js (MODIFICATO)
+  updateTopBarNumbers chiama UI.updateResourceDeposits con il risultato
+  getPlanetProduction gia' disponibile. Evita scritture DOM non necessarie.
 
-modules/online/sync.js
-- SYNC_MIN_INTERVAL_MS passato a 10 minuti in modules/online/context.js.
-- getOnlineSystem serve il risultato memorizzato senza GET ricorrenti.
-- Richieste simultanee per lo stesso sistema sono deduplicate.
-- fetchOnlineSystem riusa la velocita' dell'universo presente in memoria.
+modules/ui/runtime.js (MODIFICATO)
+  La chiusura del gioco elimina il popup aperto.
 
-modules/online/bots.js
-- maybeLaunchBotRaid accetta il parametro configurazione locale e non legge
-  ogni minuto il documento dell'universo. Nel loop e' invocato solo quando
-  l'universo prevede raid BOT effettivi.
+index.html / style.css / sw.js (MODIFICATI)
+  Pulsanti metallo, cristallo e deuterio, popup, stile responsive; energia
+  invariata. Script incluso dopo planet-canvas, prima di navigation.
+  Precache PWA aggiornato.
 
-modules/online/foundation.js e modules/online/universes.js
-- migrateOnlineFleets interroga solo le flotte dell'account (attaccante o
-  difensore) e salva un flag per account/schema/universo nel localStorage.
-- Per nuovi membri non avvia la migrazione legacy.
-- La lista pubblica degli universi online e' cache 30 secondi, invalidata
-  sulle operazioni che cambiano l'elenco.
+tests/test_depositi.js (NUOVO)
+  28 controlli automatici su soglie, formula, casi limite e integrazione.
 
-modules/ui/runtime.js e ui-core.js
-- Il controllo dei voli resta rapido (3 secondi) ma quasi senza query idle.
-- Il salvataggio automatico passivo non forza piu' un write ogni 60 secondi:
-  richiama syncPlayerState(..., {force:false}) e questo sincronizza quando
-  decorrono 10 minuti dall'ultimo save.
-- Gli eventi manuali continuano a chiamare force:true per impostazione.
+tests/test_security_static.js (MODIFICATO)
+  Controllo nome cache reso generico: accetta versioni successive alla v4,
+  richiedendo che lo script depositi sia precaricato.
 
-modules/ui/lobby-online.js
-- Il pulsante Aggiorna bypassa la cache dei server; la visita normale
-  al lobby usa la cache di 30 secondi.
-
-sw.js
-- CACHE_NAME: universum-firestore-spark-optimized-v5.
-
-TEST AGGIUNTI
-- tests/test_firestore_spark.js: test su cache flotta, embargo, galassia,
-  lista universi e heartbeat.
-- tests/estimate_firestore_spark.js: modello numerico verificabile per la
-  capacita' giornaliera stimata.
-
-REGOLAMENTO DI SICUREZZA
-- firestore.rules NON modificato rispetto all'ultima versione consegnata.
-===============================================================================
+documents/rapporto debug depositi.txt (NUOVO)
+  Audit completo, problemi corretti, problemi preesistenti non modificati.

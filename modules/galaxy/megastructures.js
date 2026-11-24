@@ -119,12 +119,20 @@
   }
 
 
-  function getInvictusCount(planet) {
+  function getInvictusCount(planet, universe) {
     const b = planet && planet.bacinoSpaziale;
-    if (!b) return { active: 0, building: 0, total: 0 };
+    if (!b) return { active: 0, building: 0, inFlight: 0, total: 0 };
     const building = Array.isArray(b.invictusConstructions) ? b.invictusConstructions.length : 0;
     const active = Number(b.invictusActive) || 0;
-    return { active, building, total: active + building };
+    let inFlight = 0;
+    if (universe && Array.isArray(universe.fleetsInFlight) && planet.id) {
+      for (const f of universe.fleetsInFlight) {
+        if (f.originPlanetId === planet.id) {
+          inFlight += Math.max(0, Math.floor(Number((f.fleet || f.ships || {}).invictus || 0)));
+        }
+      }
+    }
+    return { active, building, inFlight, total: active + building + inFlight };
   }
 
 
@@ -158,8 +166,8 @@
     const bacino = planet.bacinoSpaziale;
     if (!bacino || bacino.status !== 'active') throw new Error('Serve un Bacino Spaziale attivo per costruire un Invictus.');
     if (!Array.isArray(bacino.invictusConstructions)) bacino.invictusConstructions = [];
-    const counts = getInvictusCount(planet);
-    if (counts.total >= def.maxPerBacino) throw new Error(`Massimo ${def.maxPerBacino} Invictus per Bacino (attive + in costruzione).`);
+    const counts = getInvictusCount(planet, universe);
+    if (counts.total >= def.maxPerBacino) throw new Error(`Massimo ${def.maxPerBacino} Invictus per Bacino (attive + in costruzione + in missione).`);
     bacino.everUsed = true;
     const now = Date.now();
     if (universe.creativeMode) {
@@ -175,10 +183,10 @@
   }
 
 
-  function isBacinoVuoto(planet) {
+  function isBacinoVuoto(planet, universe) {
     const b = planet && planet.bacinoSpaziale;
     if (!b || b.status !== 'active' || b.everUsed) return false;
-    const counts = getInvictusCount(planet);
+    const counts = getInvictusCount(planet, universe);
     return counts.total === 0 && !b.crepuscolo;
   }
 
@@ -186,11 +194,19 @@
   function getCrepuscoloState(universe) {
     let count = 0;
     const locations = [];
+    const inMissionFrom = new Set();
     for (const pl of universe.planets || []) {
-      if (pl.bacinoSpaziale && pl.bacinoSpaziale.crepuscolo) { count += 1; locations.push(pl.id); }
+      if (pl.bacinoSpaziale && pl.bacinoSpaziale.crepuscolo) {
+        count += 1; locations.push(pl.id);
+        if (pl.bacinoSpaziale.crepuscolo.status === 'inMission') inMissionFrom.add(pl.id);
+      }
     }
     for (const f of universe.fleetsInFlight || []) {
-      count += Math.max(0, Math.floor(Number((f.fleet || f.ships || {}).crepuscolo || 0)));
+      const n = Math.max(0, Math.floor(Number((f.fleet || f.ships || {}).crepuscolo || 0)));
+      if (n <= 0) continue;
+      // Gia' contata come oggetto nel Bacino con stato inMission: non contarla due volte.
+      if (inMissionFrom.has(f.originPlanetId)) continue;
+      count += n;
     }
     if (universe.crepuscoloLimbo) count += 1;
     return { count, locations, has: count > 0 };
@@ -227,7 +243,7 @@
     const planet = universe.planets[planetIndex];
     if (!planet) throw new Error('Pianeta non trovato.');
     if (getCrepuscoloState(universe).has) throw new Error('Hai già una Crepuscolo degli Dei nel tuo impero (max 1).');
-    if (!isBacinoVuoto(planet)) throw new Error('La Crepuscolo richiede un Bacino Spaziale vuoto: mai usato da nessuna nave.');
+    if (!isBacinoVuoto(planet, universe)) throw new Error('La Crepuscolo richiede un Bacino Spaziale vuoto: mai usato da nessuna nave.');
     const now = Date.now();
     planet.bacinoSpaziale.everUsed = true;
     if (universe.creativeMode) {
@@ -245,7 +261,7 @@
 
   function assignCrepuscoloWreck(universe, planet) {
     const def = window.UniversumData.CREPUSCOLO;
-    if (!planet || !isBacinoVuoto(planet) || getCrepuscoloState(universe).has) return false;
+    if (!planet || !isBacinoVuoto(planet, universe) || getCrepuscoloState(universe).has) return false;
     planet.bacinoSpaziale.everUsed = true;
     planet.bacinoSpaziale.crepuscolo = makeCrepuscoloProject('wreck', def.wreckRepairDays, Date.now());
     return true;
@@ -284,7 +300,7 @@
     const bacino = planet.bacinoSpaziale;
     if (!bacino || bacino.status !== 'active') throw new Error('Serve un Bacino Spaziale attivo per costruire una Galattica.');
     if (bacino.galatticaConstruction) throw new Error('Costruzione Galattica già in corso in questo Bacino.');
-    const invictus = getInvictusCount(planet);
+    const invictus = getInvictusCount(planet, universe);
     if (invictus.total > 0 || bacino.crepuscolo) throw new Error('Il Bacino ha navi legate: la Galattica richiede un Bacino senza navi.');
     if (getGalatticaCount(universe) >= def.maxPerEmpire) throw new Error(`Massimo ${def.maxPerEmpire} Galattiche per impero.`);
     const now = Date.now();

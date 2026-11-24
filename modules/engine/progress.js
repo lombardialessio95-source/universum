@@ -36,12 +36,14 @@
   // =========================================================
   function advanceQueuesAtTimestamp(universe, nowTs, summary = null) {
     const Data = getData();
+    let queueCompleted = false;
 
     // 1. Ricerca Globale
     if (universe.researchQueue && nowTs >= universe.researchQueue.endTime) {
       const rq = universe.researchQueue;
       universe.researches[rq.id] = rq.targetLevel;
       universe.researchQueue = null;
+      queueCompleted = true;
       if (summary) {
         const rName = Data.RESEARCHES[rq.id]?.name || rq.id;
         summary.completedResearches.push(`${rName} Lv.${rq.targetLevel}`);
@@ -55,6 +57,7 @@
       // Edifici planetari
       if (planet.buildQueue.length > 0 && nowTs >= planet.buildQueue[0].endTime) {
         const item = planet.buildQueue.shift();
+        queueCompleted = true;
         planet.buildings[item.id] = item.targetLevel;
         if (item.id === 'deuteriumSynth') {
           planet.buildings.deuteriumSynthesizer = item.targetLevel;
@@ -69,6 +72,7 @@
       if (planet.moon && Array.isArray(planet.moon.buildQueue) && planet.moon.buildQueue.length > 0) {
         if (nowTs >= planet.moon.buildQueue[0].endTime) {
           const mItem = planet.moon.buildQueue.shift();
+          queueCompleted = true;
           planet.moon.buildings[mItem.id] = mItem.targetLevel;
           if (summary) {
             const mbName = Data.MOON_BUILDINGS[mItem.id]?.name || mItem.id;
@@ -89,6 +93,7 @@
           }
           if (sq.remaining <= 0) {
             planet.shipyardQueue.shift();
+            queueCompleted = true;
           } else {
             sq.nextUnitEndTime += sq.unitDurationSec * 1000;
           }
@@ -109,6 +114,7 @@
           }
           if (dq.remaining <= 0) {
             planet.defenseQueue.shift();
+            queueCompleted = true;
           } else {
             dq.nextUnitEndTime += dq.unitDurationSec * 1000;
           }
@@ -117,6 +123,7 @@
         }
       }
     }
+    return queueCompleted;
   }
 
 
@@ -218,8 +225,9 @@
     addGalatticaProduction(universe, deltaSec);
     transformCompletedGalattiche(universe, null);
 
-    advanceQueuesAtTimestamp(universe, now, null);
+    const queueCompleted = advanceQueuesAtTimestamp(universe, now, null);
     checkCrepuscoloLimbo(universe, now);
+    return queueCompleted;
   }
   Object.assign(G, { addResourcesWithCap, advanceQueuesAtTimestamp, processOfflineProgress, tick });
 

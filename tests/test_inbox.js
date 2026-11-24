@@ -323,5 +323,25 @@ function ok(name, fn) { return Promise.resolve().then(fn).then(() => { passed++;
     assert.strictEqual(store.get(P(3, 3, 3)).inbox.resources.metal, -1500, 'nessun secondo pagamento');
   });
 
+  await ok('un checkpoint fallito resta ripetibile, uno riuscito limita il passivo ma lascia passare il forzato', async () => {
+    const universe = { id: 'retry-test', planets: [] };
+    const runTransaction = db.runTransaction;
+    let attempts = 0;
+    db.runTransaction = async function (action) {
+      attempts++;
+      if (attempts === 1) throw new Error('rete indisponibile');
+      return runTransaction(action);
+    };
+    try {
+      await assert.rejects(MP.syncPlayerState(universe), /rete indisponibile/);
+      assert.strictEqual(await MP.syncPlayerState(universe), true);
+      assert.strictEqual(await MP.syncPlayerState(universe), false);
+      assert.strictEqual(await MP.syncPlayerState(universe, { force: true }), true);
+      assert.strictEqual(attempts, 3);
+    } finally {
+      db.runTransaction = runTransaction;
+    }
+  });
+
   console.log(`\nTutti i test superati: ${passed}`);
 })().catch((e) => { console.error('\nTEST FALLITO:', e); process.exit(1); });

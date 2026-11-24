@@ -22,16 +22,16 @@
     const key = _fleetCacheKey(uniId, uid);
     const entry = _liveFleetDocs.get(key) || { own: null, incoming: null };
     entry[kind] = docs;
+    entry.combined = entry.own && entry.incoming
+      ? [...new Map([...entry.own, ...entry.incoming].map((doc) => [doc.id, doc])).values()]
+      : null;
     _liveFleetDocs.set(key, entry);
   }
   function getLiveFleetDocs(uniId) {
     const uid = getAuth().currentUser?.uid;
     const entry = uid ? _liveFleetDocs.get(_fleetCacheKey(uniId, uid)) : null;
     // null = i listener non sono ancora inizializzati (o hanno dato errore).
-    if (!entry || !entry.own || !entry.incoming) return null;
-    const unique = new Map();
-    for (const d of [...entry.own, ...entry.incoming]) unique.set(d.id, d);
-    return [...unique.values()];
+    return entry?.combined ?? null;
   }
   function clearLiveFleetDocs(uniId, uid) {
     _liveFleetDocs.delete(_fleetCacheKey(uniId, uid));
@@ -285,7 +285,7 @@
     const uniId = universeObj.id;
     const unsubscribe = db.collection('online_universes').doc(uniId).collection('fleets')
       .where('defenderUid', '==', user.uid)
-      .where('status', 'in', ['outbound', 'embargo', 'occupy'])
+      .where('status', 'in', ['outbound', 'returning', 'embargo', 'occupy'])
       .onSnapshot((snap) => {
         _updateLiveFleetDocs(uniId, user.uid, 'incoming', snap.docs);
         const list = snap.docs

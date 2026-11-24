@@ -209,12 +209,14 @@
   }
 
 
-  async function save(universe) {
+  async function save(universe, options) {
     if (!universe || !universe.id) {
       throw new Error('Oggetto universo non valido per il salvataggio.');
     }
     const db = await init();
-    universe.lastSeen = Date.now();
+    // Operazioni che non avanzano la simulazione (es. rename) non devono spostare lastSeen:
+    // altrimenti la produzione offline tra il vecchio lastSeen e l'operazione andrebbe persa.
+    if (!options || options.touchLastSeen !== false) universe.lastSeen = Date.now();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, 'readwrite');
       const store = tx.objectStore(STORE_NAME);
@@ -255,7 +257,7 @@
     const cleaned = (newName || '').trim().substring(0, 32);
     if (!cleaned) throw new Error('Il nome non può essere vuoto.');
     uni.name = cleaned;
-    return save(uni);
+    return save(uni, { touchLastSeen: false });
   }
 
 

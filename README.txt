@@ -1,5 +1,5 @@
 UNIVERSUM — VERSIONE MODULARE
-Revisione: 22/11/2026
+Revisione: 24/11/2026 — Depositi e ottimizzazioni multiplayer Firestore
 
 Questo archivio contiene il gioco completo, non soltanto una patch.
 
@@ -51,11 +51,10 @@ IMPORTANTE
   completo. Per indicazioni tecniche consulta documents/mappa.txt e
   documents/audit sicurezza online.txt.
 
-AGGIORNAMENTO FIRESTORE SPARK (22/11/2026)
-- Ridotte interrogazioni e scritture automatiche online, mantenendo eventi
-  realtime, missioni e salvataggi immediati delle azioni volontarie.
-- Vedi documents/ottimizzazione online firestore spark.txt per modifiche,
-  limiti Firebase, formule e stima dei giocatori attivi al giorno.
-- Test: node tests/test_firestore_spark.js
-        node tests/estimate_firestore_spark.js
-- Le regole Firestore NON sono cambiate. Non serve un deploy di nuove Rules.
+DEPOSITI INTERATTIVI (23/11/2026)
+  Metallo, cristallo e deuterio nella barra superiore sono cliccabili:
+  bordo stato, barra, percentuale, produzione e tempo fino al pieno.
+  Il modulo e' in modules/ui/resource-deposits.js. Energia invariata.
+  Le formule economiche e le regole Firestore non sono state modificate.
+  Test: node tests/test_depositi.js
+  Audit: documents/rapporto debug depositi.txt

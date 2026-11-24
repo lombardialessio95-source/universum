@@ -103,7 +103,11 @@
     }
 
     const maxSlots = universe.creativeMode ? 999 : (5 + Number(universe.researches?.computerTech || 0));
-    if ((universe.fleetsInFlight || []).length >= maxSlots) {
+    // Stesso conteggio della UI (missions-core getUsedFleetSlots): voli + assedi attivi + Galattiche.
+    const usedSlots = (Array.isArray(universe.fleetsInFlight) ? universe.fleetsInFlight.length : 0) +
+      (Array.isArray(universe.activeSieges) ? universe.activeSieges.length : 0) +
+      (Array.isArray(universe.galattiche) ? universe.galattiche.length : 0);
+    if (usedSlots >= maxSlots) {
       throw new Error(`Slot flotta esauriti (${maxSlots} max). Potenzia Tecnologia Informatica.`);
     }
 

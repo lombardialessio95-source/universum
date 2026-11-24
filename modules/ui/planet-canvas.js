@@ -186,21 +186,29 @@
     const cEl = document.getElementById('res-crystal-val');
     const dEl = document.getElementById('res-deuterium-val');
     const eEl = document.getElementById('res-energy-val');
+    // Evita scritture DOM ogni secondo quando il deposito e' fermo o pieno.
+    const setValue = (el, value) => {
+      if (el && el.textContent !== value) el.textContent = value;
+    };
 
     if (uni.creativeMode && !st.isMultiplayerMode) {
-      if (mEl) mEl.textContent = '∞';
-      if (cEl) cEl.textContent = '∞';
-      if (dEl) dEl.textContent = '∞';
-      if (eEl) eEl.textContent = '∞';
+      setValue(mEl, '∞');
+      setValue(cEl, '∞');
+      setValue(dEl, '∞');
+      setValue(eEl, '∞');
     } else {
-      if (mEl) mEl.textContent = UI.formatNum(planet.resources.metal);
-      if (cEl) cEl.textContent = UI.formatNum(planet.resources.crystal);
-      if (dEl) dEl.textContent = UI.formatNum(planet.resources.deuterium);
+      setValue(mEl, UI.formatNum(planet.resources.metal));
+      setValue(cEl, UI.formatNum(planet.resources.crystal));
+      setValue(dEl, UI.formatNum(planet.resources.deuterium));
       if (eEl) {
-        eEl.textContent = `${UI.formatNum(prod.energyBalance)} / ${UI.formatNum(prod.energyProduced)}`;
-        eEl.style.color = prod.energyBalance < 0 ? 'var(--btn-red)' : 'var(--res-energy)';
+        setValue(eEl, `${UI.formatNum(prod.energyBalance)} / ${UI.formatNum(prod.energyProduced)}`);
+        const color = prod.energyBalance < 0 ? 'var(--btn-red)' : 'var(--res-energy)';
+        if (eEl.style.color !== color) eEl.style.color = color;
       }
     }
+
+    // Utilizza la produzione gia' calcolata: nessuna nuova chiamata al motore o a Firestore.
+    UI.updateResourceDeposits?.(planet, prod, uni);
 
     const turboBtn = document.getElementById('btn-turbo-toggle');
     if (turboBtn) {
@@ -208,10 +216,12 @@
       const remTurbo = Math.max(0, Math.ceil(((uni.turboUntil || 0) - Date.now()) / 1000));
       if (remTurbo > 0) {
         turboBtn.classList.add('active');
-        turboBtn.innerHTML = `${UI.svgIcon('bolt')} ${UI.formatDuration(remTurbo)}`;
+        const label = `${UI.svgIcon('bolt')} ${UI.formatDuration(remTurbo)}`;
+        if (turboBtn.innerHTML !== label) turboBtn.innerHTML = label;
       } else {
         turboBtn.classList.remove('active');
-        turboBtn.innerHTML = `${UI.svgIcon('bolt')} TURBO`;
+        const label = `${UI.svgIcon('bolt')} TURBO`;
+        if (turboBtn.innerHTML !== label) turboBtn.innerHTML = label;
       }
     }
   };

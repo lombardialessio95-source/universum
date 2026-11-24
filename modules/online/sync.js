@@ -208,8 +208,9 @@
     const user = auth.currentUser;
     if (!user || !universeObj?.id) return;
 
-    const lastSync = _syncLastByUni.get(universeObj.id) || 0;
-    if (!force && Date.now() - lastSync < SYNC_MIN_INTERVAL_MS) return;
+    const syncKey = JSON.stringify([user.uid, universeObj.id]);
+    const lastSync = _syncLastByUni.get(syncKey);
+    if (!force && lastSync !== undefined && Date.now() - lastSync < SYNC_MIN_INTERVAL_MS) return false;
     // Aggiorna il timestamp solo DOPO la transazione riuscita: un errore di
     // rete non deve simulare un checkpoint completato o annullare i retry.
 
@@ -280,7 +281,7 @@
         lastSeen: nowTs
       }, { merge: true });
     });
-    _syncLastByUni.set(universeObj.id, Date.now());
+    _syncLastByUni.set(syncKey, Date.now());
 
     for (const { planet, inbox } of reconciled) {
       planet.resources = Object.assign({ metal: 0, crystal: 0, deuterium: 0 }, planet.resources);
@@ -309,6 +310,7 @@
         console.warn('[MP] Aggiornamento UI dopo riallineamento non riuscito:', e);
       }
     }
+    return true;
   }
 
 

@@ -1,7 +1,7 @@
 /**
  * UNIVERSUM — Service Worker PWA (Offline-First + Network-First per Firebase)
  */
-const CACHE_NAME = 'universum-firestore-spark-optimized-v5';
+const CACHE_NAME = 'universum-deposits-firestore-v6';
 
 const ASSETS = [
   './', './index.html', './manifest.json', './style.css',
@@ -51,6 +51,7 @@ const ASSETS = [
   './ui-core.js',
   './modules/ui/lobby-online.js',
   './modules/ui/planet-canvas.js',
+  './modules/ui/resource-deposits.js',
   './modules/ui/navigation.js',
   './modules/ui/runtime.js',
   './modules/ui/selects.js',

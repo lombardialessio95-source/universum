@@ -22,15 +22,3 @@ CHECK PRINCIPALI ESEGUITI: sintassi JS; 64 verifiche di parità API/calcoli con 
 LIMITI: nessun test con account Firebase reali. Browser Chromium nell’ambiente di esecuzione ha bloccato le navigazioni di test con errore ERR_BLOCKED_BY_ADMINISTRATOR, quindi il collaudo visivo finale deve essere eseguito da chi distribuisce la release.
 
 ATTENZIONE: caricare tutta la cartella modules/ insieme a index.html. Il codice della versione precedente NON funziona se si caricano soltanto i nuovi file API senza i nuovi moduli.
-
-22/11/2026 - OTTIMIZZAZIONE FIRESTORE SPARK
-- Resolver flotte da snapshot live per UID, nessun polling globale delle flotte
-  completate, lock per elaborazioni concorrenti, fallback raro in assenza
-  dei listener.
-- Occupazioni: sweep a 10 minuti, embargo: scritture ogni 30s.
-- Checkpoint economici passivi: max 10 minuti, comandi e costruzioni immediati.
-- Raid BOT pacifici senza letture ricorrenti, galassia cache senza re-fetch
-  continuo e senza query extra per la velocita'.
-- Migrazione flotte per UID, soltanto una volta per account e versione.
-- Lobby cache 30s con bottone Aggiorna sempre forzato.
-- Nuovi test e stima riproducibile; rules inalterate.

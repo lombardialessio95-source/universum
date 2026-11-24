@@ -20,8 +20,11 @@ function loadModule(file, win, extra = {}) {
   const db = {
     collection: () => ({
       doc: () => ({
+        get: async () => { getCount++; return { data: () => ({ speed: 10 }) }; },
         collection: () => ({
+          get: async () => { getCount++; return { docs: [] }; },
           where: (field, op, value) => ({
+            get: async () => { getCount++; return { docs: [] }; },
             where: (field2, op2, value2) => ({
               onSnapshot: (callback) => {
                 const item = {field, value, field2, value2, callback, closed:false};
@@ -51,13 +54,43 @@ function loadModule(file, win, extra = {}) {
   const f1 = {id:'f1',ref:{},data:()=>({attackerUid:uid,defenderUid:'B',status:'outbound',mission:'attack',arrivalTime:future,resolved:false})};
   const f2 = {id:'f2',ref:{},data:()=>({attackerUid:'B',defenderUid:uid,status:'outbound',mission:'attack',arrivalTime:future,resolved:false})};
   listeners[0].callback({docs:[f1]});
-  listeners[1].callback({docs:[f2]});
+  assert(listeners[1].value2.includes('returning'), 'il difensore può risolvere anche il rientro');
+  listeners[1].callback({docs:[f1,f2]});
   assert.strictEqual(G.getLiveFleetDocs('u').length,2,'flotte proprie e in arrivo ricostruite');
   for (let i=0; i<100; i++) await G.resolveArrivedOnlineFleets('u',10);
   assert.strictEqual(getCount,0,'100 controlli idle: nessuna lettura Firestore');
   own(); incoming();
   assert.strictEqual(G.getLiveFleetDocs('u'),null,'cache eliminata a chiusura partita');
   console.log('✓ flotte: 100 controlli idle, 0 query, 0 letture Firestore');
+
+  const history = Array.from({ length: 100 }, (_, id) => ({ id: String(id) }));
+  const recent = { id: 'recent' };
+  const requested = [];
+  const queryWin = { __UniversumMPModules: {}, __UniversumMPVariables: {} };
+  loadModule('modules/online/foundation.js', queryWin);
+  const found = await queryWin.__UniversumMPModules.fetchFleetPartyDocs({
+    where(field, operator, value) {
+      assert.strictEqual(operator, '==');
+      assert.strictEqual(value, uid);
+      requested.push(field);
+      return {
+        limit(size) {
+          assert.strictEqual(size, 100);
+          return {
+            get: async () => ({ docs: field === 'attackerUid' ? history : [recent] }),
+            startAfter(doc) {
+              assert.strictEqual(doc, history[99]);
+              return { get: async () => ({ docs: [recent] }) };
+            }
+          };
+        }
+      };
+    }
+  }, uid);
+  assert.deepStrictEqual(requested, ['attackerUid', 'defenderUid']);
+  assert.strictEqual(found.length, 101, 'la flotta oltre la prima pagina è inclusa una sola volta');
+  assert.strictEqual(found[100], recent);
+  console.log('✓ fallback: query per partecipante, paginazione e deduplicazione');
 
   const updates=[];
   const activeTime=Date.now();

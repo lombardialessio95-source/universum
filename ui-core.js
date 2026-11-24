@@ -367,7 +367,8 @@
     const r = UI._syncRetry;
     if (opts.notify) UI.toast('Sincronizzazione...', 'info');
     try {
-      await window.UniversumMP.syncPlayerState(uni, { force: opts.force !== false });
+      const saved = await window.UniversumMP.syncPlayerState(uni, { force: opts.force !== false });
+      if (saved === false || UI.state.currentUniverse !== uni) return;
       if (r.timer) { clearTimeout(r.timer); r.timer = null; }
       r.attempt = 0;
       if (r.hadFailure) {

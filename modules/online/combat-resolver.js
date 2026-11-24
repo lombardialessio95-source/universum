@@ -16,10 +16,8 @@
   const forceCleanupOnlineFleet = (...args) => G.forceCleanupOnlineFleet(...args);
   const getAuth = (...args) => G.getAuth(...args);
   const getDB = (...args) => G.getDB(...args);
-  const migrateOnlineFleets = (...args) => G.migrateOnlineFleets(...args);
   const normalizeOnlineFleet = (...args) => G.normalizeOnlineFleet(...args);
   const processEmbargoFleets = (...args) => G.processEmbargoFleets(...args);
-  const sweepOccupationsThrottled = (...args) => G.sweepOccupationsThrottled(...args);
 
 
 
@@ -49,7 +47,7 @@
       const uid = getAuth().currentUser?.uid;
       if (!uid) return;
       const key = `${uniId}|${uid}`;
-      const state = _fleetListenerFallback.get(key) || { start: now, queried: 0 };
+      const state = _fleetListenerFallback.get(key) || { start: now, queried: -Infinity };
       _fleetListenerFallback.set(key, state);
       // Lascia avviare i normali listener per 15s; dopo un errore riprova
       // una volta al minuto con query PER UTENTE, non su tutta la galassia.
@@ -57,14 +55,9 @@
       state.queried = now;
       try {
         const fleetsCol = uniRef.collection('fleets');
-        const [owned, defended] = await Promise.all([
-          fleetsCol.where('attackerUid', '==', uid).limit(100).get(),
-          fleetsCol.where('defenderUid', '==', uid).limit(100).get()
-        ]);
-        activeDocs = [...new Map([...owned.docs, ...defended.docs]
-          .map((d) => [d.id, d])).values()]
+        activeDocs = (await G.fetchFleetPartyDocs(fleetsCol, uid))
           .filter((d) => {
-            const f = d.data();
+            const f = normalizeOnlineFleet(d.data(), d.id);
             return !f.resolved && ['outbound','returning','embargo','occupy'].includes(f.status);
           });
       } catch (e) {
@@ -86,9 +79,9 @@
     if (!authorizedDocs.length) return;
 
     // Speed noto alla sessione: non rileggere online_universes a ogni arrivo.
-    const speed = Number(knownSpeed) > 0 ? Number(knownSpeed)
-      : Number(window.UniversumUI?.state?.currentUniverse?.id === uniId
-        ? window.UniversumUI.state.currentUniverse.speed : 0) || 10;
+    const activeUniverse = window.UniversumUI?.state?.currentUniverse;
+    const sessionSpeed = Number(knownSpeed) || (activeUniverse?.id === uniId ? Number(activeUniverse.speed) : 0);
+    const speed = sessionSpeed > 0 ? sessionSpeed : ((await uniRef.get()).data()?.speed || 10);
 
     // I tick dell'embargo vengono aggregati (non 2 scritture ogni 3 secondi).
     await processEmbargoFleets(uniRef, authorizedDocs, now, speed);

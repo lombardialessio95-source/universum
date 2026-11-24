@@ -105,10 +105,26 @@
   }
 
 
+  async function fetchFleetPartyDocs(collection, uid) {
+    const pageSize = 100;
+    const snapshots = await Promise.all(['attackerUid', 'defenderUid'].map(async (field) => {
+      const query = collection.where(field, '==', uid).limit(pageSize);
+      const docs = [];
+      let page = await query.get();
+      while (page.docs.length === pageSize) {
+        docs.push(...page.docs);
+        page = await query.startAfter(page.docs[page.docs.length - 1]).get();
+      }
+      return docs.concat(page.docs);
+    }));
+    return [...new Map(snapshots.flat().map((doc) => [doc.id, doc])).values()];
+  }
+
+
   async function migrateOnlineFleets(uniId, { force = false } = {}) {
     const uid = getAuth().currentUser?.uid;
     if (!uid) return 0;
-    const key = `universum:fleet-migration:v${FLEET_SCHEMA_VERSION}:${uid}:${uniId}`;
+    const key = `universum:fleet-migration:v${FLEET_SCHEMA_VERSION}:${uid}:${uniId}:complete`;
     if (!force && _migratedFleetUnis.has(key)) return 0;
     if (!force) {
       try {
@@ -120,18 +136,13 @@
     }
     _migratedFleetUnis.add(key);
     const db = getDB();
-    // Migrazione legacy una sola volta; il pulsante RIPARA può forzarla.
-    // Limitare i documenti letti evita scansioni ripetute di 100 flotte completate.
+    // Migrazione per account, universo e schema. Il pulsante RIPARA può forzarla.
     let docs;
     try {
       // Solo flotte dell'account: mai scandire le flotte di tutto l'universo.
       // Nessun indice composito richiesto (filtri semplici su UID).
       const col = db.collection('online_universes').doc(uniId).collection('fleets');
-      const [owned, defended] = await Promise.all([
-        col.where('attackerUid', '==', uid).limit(100).get(),
-        col.where('defenderUid', '==', uid).limit(100).get()
-      ]);
-      docs = [...new Map([...owned.docs, ...defended.docs].map((d) => [d.id, d])).values()];
+      docs = await fetchFleetPartyDocs(col, uid);
     } catch (err) {
       _migratedFleetUnis.delete(key);
       throw err;
@@ -160,6 +171,6 @@
     return migrated;
   }
 
-  Object.assign(G, { getAuth, getDB, coordsToKey, _tsToMs, _parseKeyCoords, _cleanShips, normalizeOnlineFleet, _fleetDueTime, migrateOnlineFleets });
+  Object.assign(G, { getAuth, getDB, coordsToKey, _tsToMs, _parseKeyCoords, _cleanShips, normalizeOnlineFleet, _fleetDueTime, fetchFleetPartyDocs, migrateOnlineFleets });
 
 })();

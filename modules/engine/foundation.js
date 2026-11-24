@@ -39,7 +39,8 @@
       b.daysPaid = Math.max(0, Math.min(20, Math.floor(Number(b.daysPaid) || 0)));
       if (!b.status) b.status = b.daysPaid >= 20 ? 'active' : 'building';
       if (!Number(b.nextPaymentAt)) b.nextPaymentAt = 0;
-      b.invictusActive = Math.max(0, Math.min(4, Math.floor(Number(b.invictusActive) || 0)));
+      // Nessun tetto qui: troncare a 4 cancellerebbe in silenzio Invictus legittime (es. in rientro).
+      b.invictusActive = Math.max(0, Math.floor(Number(b.invictusActive) || 0));
       if (!Array.isArray(b.invictusConstructions)) b.invictusConstructions = [];
       for (const c of b.invictusConstructions) {
         if (!c.paid) c.paid = { metal: 0, crystal: 0, deuterium: 0 };

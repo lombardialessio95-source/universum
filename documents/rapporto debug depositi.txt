@@ -1,0 +1,93 @@
+UNIVERSUM — RAPPORTO DEBUG E DEPOSITI INTERATTIVI
+Fonte: universum-main.zip caricato dall'utente il 23/11/2026.
+Data verifica: 23/11/2026.
+
+1. METODO
+- Base estratta direttamente dall'archivio fornito dall'utente, senza riutilizzare vecchi ZIP.
+- Confronto binario con i file della base prima/dopo le modifiche.
+- Analisi di index.html, ui-core, componenti di selezione pianeta,
+  engine/production.js, engine/progress.js, PWA, runtime offline e online.
+- Test Node.js gia' presenti nel progetto eseguiti prima e dopo.
+- 28 assert dedicati al nuovo modulo.
+- Esecuzione Chromium headless su markup e 67 script reali, con rete esterna
+  disattivata, a viewport 1440x900, 375x812 e 320x690.
+
+2. FILE MODIFICATI
+- index.html: 3 riquadri risorsa ora pulsanti accessibili; pannello contestuale
+  fuori dalla topbar per evitare ritagli dovuti al backdrop-filter; script aggiunto.
+- style.css: bordi verde (<80%), giallo (80%–<100%), rosso (>=100%);
+  icona SVG di avviso; popup responsive 320+ pixel; nessuna animazione continua.
+- modules/ui/planet-canvas.js: passa al nuovo modulo i risultati di
+  getPlanetProduction gia' calcolati e riduce le scritture DOM immutate.
+- modules/ui/runtime.js: chiude il popup quando si lascia la partita.
+- sw.js: nuova cache e precaricamento del modulo.
+- tests/test_security_static.js: rimossa la dipendenza fragile dal nome v4
+  della cache: ora il test verifica formato versione e presenza del nuovo file.
+- tests/test_depositi.js (nuovo): test automatici specifici.
+- modules/ui/resource-deposits.js (nuovo): logica unicamente di presentazione.
+- README, tests/LEGGIMI e mappa tecnica: aggiornamento documentale.
+
+3. LOGICA UI
+- Utilizza la quantita' del pianeta attivo, caps da getPlanetProduction e
+  produzione oraria effettiva dal medesimo risultato. Nessuna formula economica
+  modificata; non ci sono interrogazioni Firebase o listener aggiuntivi.
+- Il tempo e' ceil((cap - quantita') / produzioneOraria * 60) minuti.
+- Pieno >=100%: avvertimento e tempo 'Deposito pieno'.
+- Produzione <=0: 'Riempimento non previsto'.
+- Dati mancanti, non numerici o capacita' non valida: stato neutro.
+- Modalita' Creativa: risorse illimitate, nessun falso rosso.
+- Energia: valore e funzionalita' originali; non e' un deposito.
+- Mouse/touch: clic su riquadro apre, altro riquadro cambia dettaglio;
+  click esterno e Escape chiudono. Il cambio pianeta aggiorna il dettaglio.
+- Scritture DOM condizionate al cambio del testo, layout popup solo su
+  apertura, cambio pianeta, scroll/resize; scroll/resize limitati a 1 rAF.
+
+4. VERIFICHE E RISULTATI
+- node --check su tutti i JavaScript attivi: OK.
+- test_cache.js: OK, 67 script nel giusto ordine e precache PWA completo.
+- test_debug_fixes.js: OK.
+- test_depositi.js: 28 controlli superati.
+- test_inbox.js: 12 casi superati.
+- test_moduli.js: OK, 7 API e formule del motore verificate.
+- test_moon_merchant.js: OK.
+- test_security_static.js: 10 controlli superati.
+- Chromium (script caricati in ordine, senza rete esterna):
+  1440x900, 375x812 e 320x690: 0 errori JS non gestiti nei flussi testati;
+  nessuno scroll orizzontale; popup contenuto nel viewport.
+- Test reali: 79% -> normale, 80% -> giallo, 100% -> rosso + SVG;
+  cambio risorsa, tasto Escape, click esterno, secondo pianeta,
+  modalita' Creativa e tempo di riempimento coerenti.
+- Caso formula esempio: 43.000/100.000 a +5.000/h -> 11h 24m.
+- Identita' binaria confermata per firestore.rules, modules/engine/production.js
+  e tutti i moduli modules/online/* rispetto allo ZIP dell'utente.
+
+5. PROBLEMI SCOPERTI E RISOLTI
+- Barra originale senza indicazione capacita': aggiunti stati e popup.
+- In 99,96% il normale arrotondamento poteva scrivere 100% prima
+  della soglia vera: corretto l'arrotondamento della percentuale mostrata.
+- Test di sicurezza statico con stringa cache v4 hardcoded: aggiornato.
+- Render periodico della topbar sostituiva testi HTML non variati:
+  ora evita le modifiche superflue nei valori e nel pulsante Turbo.
+- Popup potenzialmente stale dopo uscita dalla partita: ora si chiude.
+
+6. RISCHI PREESISTENTI NON MODIFICATI (FUORI AMBITO)
+- modules/online/combat-resolver.js nella base caricata interroga le flotte
+  arrivate ogni 3 secondi con una query globale arrivalTime<=now e limit 100,
+  senza un filtro Firestore sugli stati completati. In presenza di molti
+  movimenti storici potrebbe consumare molte letture. Non modificato per
+  rispettare il vincolo di intervento solo UI e non rischiare regressioni PvP.
+- L'architettura multiplayer mantiene logiche calcolate in client: non
+  rappresenta un sistema anticheat autorevole; un'analisi/security test
+  completa richiederebbe Firebase Emulator, prove multiaccount e/o backend.
+- Non sono stati testati Firebase live, sincronizzazione cross-device,
+  load test, Safari iOS e tutti i flussi di gioco end-to-end.
+- Chromium headless e' stato usato con HTML e script iniettati, in quanto
+  la navigazione a URL locali era bloccata nell'ambiente di prova.
+
+7. DISTRIBUZIONE
+- Caricare il contenuto di universum-main/ su GitHub Pages INCLUSO
+  modules/ui/resource-deposits.js, style.css, index.html e sw.js.
+- Non e' necessario aggiornare firestore.rules su Firebase: file invariato.
+- Dopo il deploy, chiudere e riaprire la PWA e verificare un pianeta offline
+  e un pianeta online con dati effettivi; la nuova cache ha un nome nuovo.
+- Prima della sostituzione esportare un backup dei salvataggi offline.
