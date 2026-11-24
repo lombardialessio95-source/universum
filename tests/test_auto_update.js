@@ -65,7 +65,8 @@ function constructSW(fixture, storage, environment = {}) {
       if (message.type === 'UNIVERSUM_CAN_UPDATE' && c.reply !== false) {
         ports[0].postMessage({safe: c.safe});
       }
-      return Promise.resolve();
+      // Il vero Client.postMessage restituisce undefined, non una Promise.
+      return undefined;
     }
   }));
   const self = {
@@ -138,6 +139,8 @@ function constructSW(fixture, storage, environment = {}) {
   check(updated.calls.length<=3,'11) Solo file modificati scaricati, gli altri copiati dalla cache valida');
   const resBlocked=await updated.askActivate();
   check(!resBlocked.activated&&updated.skipped===0,'12) Due schede, una in partita: attivazione bloccata');
+  check(resBlocked.reason==='partita-o-scheda-non-sicura', '12b) Risposta di blocco corretta anche con postMessage void');
+  check(updated.sent.some(e => e.type==='UNIVERSUM_UPDATE_BLOCKED'), '12c) Notifica effettiva alla lobby quando una scheda rifiuta');
   updated.environment.clients[1].safe=true;
   // Le schede test rispondono tramite oggetti condivisi, senza cambiare clientId.
   const resOk=await updated.askActivate();

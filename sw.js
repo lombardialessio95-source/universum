@@ -5,7 +5,7 @@
  * Non legge, scrive o cancella IndexedDB, localStorage o Firebase.
  */
 'use strict';
-const VERSIONE_RELEASE = 'rb8732a895bf01767abb3';
+const VERSIONE_RELEASE = 'rfd0e9f875ccd7cb8d33f';
 const CACHE_PREFIX = 'universum-static-release-';
 const CACHE_NAME = CACHE_PREFIX + VERSIONE_RELEASE;
 const META_PATH = './__universum_cache_metadata__';
@@ -149,7 +149,11 @@ async function activateIfSafe() {
   const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
   const permits = await Promise.all(windows.map(askClientSafety));
   if (!permits.every(Boolean)) {
-    await Promise.all(windows.map(c => c.postMessage({ type: 'UNIVERSUM_UPDATE_BLOCKED' }).catch(() => {})));
+    // Client.postMessage e' void nei browser: non e' una Promise.
+    for (const client of windows) {
+      try { client.postMessage({ type: 'UNIVERSUM_UPDATE_BLOCKED' }); }
+      catch (_) { /* una scheda puo' essersi chiusa nel frattempo */ }
+    }
     return { activated: false, reason: 'partita-o-scheda-non-sicura' };
   }
   await self.skipWaiting();
