@@ -84,3 +84,31 @@ F01 — FUSIONE, EFFICIENZA E INVICTUS (24/11/2026)
   Cache PWA aggiornata; nessuna modifica delle regole Firestore.
   Test: node tests/test_f01_fusion_invictus.js
   Audit: documents/rapporto f01 fusione e invictus.txt
+
+AGGIORNAMENTI ATOMICI PWA (24 novembre 2026)
+--------------------------------------------
+Da questa versione, index.html e' un bootstrap leggero che controlla le
+nuove release prima di aprire app.html. Il gioco originale e' in app.html.
+La release e' identificata da un hash dei contenuti statici + codice del SW,
+non dal commit Git: il badge mostra un ID univoco che inizia per 'r'.
+
+Dopo ogni modifica al gioco e PRIMA di pubblicare:
+  1) python3 tools/build_release.py
+  2) node tests/test_cache.js
+  3) node tests/test_auto_update.js
+  4) node tests/test_update_client.js
+  5) Esegui tutti gli altri tests/test_*.js.
+  6) Pubblica insieme TUTTI i file, inclusi index.html, app.html,
+     update-client.js, sw.js e release-manifest.json.
+
+NON modificare manualmente l'ID in piu' file. Il generatore imposta manifest
+e VERSIONE_RELEASE una sola volta, in modo riproducibile. La GitHub Action
+verifica manifest e test; una pubblicazione con hash obsoleti viene rifiutata
+in fase di installazione dal Service Worker (resta attiva la versione prima).
+
+Per tornare alla versione precedente, usa il backup GitHub
+backup/pre-auto-update-2026-11-24 o il relativo ZIP. Preferisci un nuovo
+commit di revert invece di sovrascrivere la storia. NON cancellare i dati del
+sito/IndexedDB e NON usare "Clear site data" per l'aggiornamento.
+
+Guida: documents/rapporto aggiornamenti automatici.txt

@@ -1,7 +1,7 @@
 // Regressioni debug profondo: B1 slot, B3/S2 Invictus, L2 Crepuscolo, S1 lastSeen su rename.
 const fs = require('fs'), vm = require('vm'), path = require('path'), assert = require('assert');
 const root = path.resolve(__dirname, '..');
-const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+const html = fs.readFileSync(path.join(root, 'app.html'), 'utf8');
 const scripts = [...html.matchAll(/<script\s+src="\.\/([^" ]+\.js)"(?:\s+defer)?\s*><\/script>/g)].map(x => x[1]);
 
 // Fake IndexedDB minimo per modules/offline/storage.js

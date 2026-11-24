@@ -1,0 +1,26 @@
+name: UNIVERSUM - verifica release e regressioni
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verifica manifest e identita release generate
+        run: |
+          python3 tools/build_release.py
+          git diff --exit-code -- sw.js release-manifest.json
+      - name: Sintassi dei JavaScript del gioco
+        run: find . -name '*.js' -not -path './.git/*' -print0 | xargs -0 -n1 node --check
+      - name: Suite complete di regressione
+        run: |
+          set -e
+          for test in tests/test_*.js; do node "$test"; done

@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#02040f">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="UNIVERSUM">
+  <title>UNIVERSUM — Strategico Spaziale</title>
+
+  <link rel="manifest" href="./manifest.json">
+  <link id="dynamic-apple-icon" rel="apple-touch-icon" href="">
+  <link id="dynamic-favicon" rel="icon" type="image/png" href="">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="./style.css">
+  <script>if (!new URLSearchParams(location.search).has("release")) location.replace("./");</script>
+</head>
+<body>
+  <canvas id="starfield"></canvas>
+
+  <!-- CONTENITORE TOAST -->
+  <div id="toast-container"></div>
+
+  <!-- MODALE UNIVERSALE -->
+  <div id="universal-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+    <div class="modal-box glass-panel">
+      <div class="modal-header">
+        <h3 id="modal-title" class="modal-title">TITOLO</h3>
+        <button type="button" id="modal-close-btn" class="btn btn-ghost btn-sm" aria-label="Chiudi">✕</button>
+      </div>
+      <div id="modal-body"></div>
+    </div>
+  </div>
+
+  <!-- =========================================================
+       SCHERMATA 1: LE MIE PARTITE & MULTIPLAYER LOBBY
+       ========================================================= -->
+  <section id="screen-lobby">
+    <header class="lobby-header glass-panel">
+      <h1 class="lobby-title">UNIVERSUM</h1>
+      <p class="lobby-subtitle">COMANDO STRATEGICO GALATTICO • OFFLINE &amp; MULTIPLAYER PvP</p>
+      <small id="universum-version-label" style="display:block;margin:5px 0;color:#8bafca;letter-spacing:0.06em;font-size:0.7rem" aria-label="Versione UNIVERSUM">UNIVERSUM — Versione in verifica</small>
+      <div style="margin-top:4px;">
+        <button type="button" id="btn-install-pwa" class="btn btn-ghost btn-sm">
+          <svg class="nav-svg" viewBox="0 0 24 24"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+          INSTALLA APP
+        </button>
+      </div>
+    </header>
+
+    <!-- SELETTORE MODALITÀ PRINCIPALE -->
+    <div class="mode-switcher" role="tablist">
+      <button type="button" id="tab-mode-offline" class="mode-tab-btn active" role="tab" aria-selected="true">
+        <svg class="nav-svg" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="3"/><path d="M6 12h4M8 10v4M15 11h.01M18 13h.01"/></svg>
+        PARTITE OFFLINE (Single-Player / Creativa)
+      </button>
+      <button type="button" id="tab-mode-online" class="mode-tab-btn" role="tab" aria-selected="false">
+        <svg class="nav-svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>
+        UNIVERSO ONLINE (Multiplayer PvP)
+      </button>
+    </div>
+
+    <!-- PANNELLO 1: OFFLINE (INDEXEDDB) -->
+    <div id="lobby-panel-offline">
+      <div class="lobby-actions-top" style="margin-bottom:18px;">
+        <button type="button" id="btn-open-create" class="btn btn-green">+ CREA NUOVO UNIVERSO</button>
+        <button type="button" id="btn-import-json" class="btn btn-blue">↑ IMPORTA UNIVERSO (JSON)</button>
+        <input type="file" id="input-import-file" accept=".json,application/json" class="hidden">
+      </div>
+
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; padding:0 4px;">
+        <h2 style="font-size:1rem; color:var(--res-crystal);">LE MIE PARTITE SALVATE</h2>
+        <span id="universe-count-badge" class="badge badge-blue">0 / 10</span>
+      </div>
+
+      <div id="universe-list" class="universe-list"></div>
+    </div>
+
+    <!-- PANNELLO 2: ONLINE PvP (FIREBASE) -->
+    <div id="lobby-panel-online" class="hidden">
+      <!-- FORM LOGIN / REGISTRAZIONE -->
+      <div id="mp-auth-box" class="glass-panel" style="padding:20px; max-width:520px; margin:0 auto;">
+        <h2 style="font-size:1.1rem; color:var(--res-crystal); margin-bottom:6px; text-align:center;">ACCESSO RETE GALATTICA PvP</h2>
+        <p class="text-muted" style="text-align:center; font-size:0.92rem; margin-bottom:16px;">Nessuna email richiesta: scegli un Nickname comandante e una password.</p>
+        <form id="form-mp-auth">
+          <div class="form-group">
+            <label for="mp-nickname">Nickname Imperatore</label>
+            <input type="text" id="mp-nickname" class="form-control" placeholder="Es. LordValkor" maxlength="24" required>
+          </div>
+          <div class="form-group">
+            <label for="mp-password">Password (min. 6 caratteri)</label>
+            <input type="password" id="mp-password" class="form-control" placeholder="••••••" minlength="6" required>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:16px;">
+            <button type="submit" data-auth-mode="login" class="btn btn-blue">
+              <svg class="nav-svg" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+              ACCEDI
+            </button>
+            <button type="submit" data-auth-mode="register" class="btn btn-green">
+              <svg class="nav-svg" viewBox="0 0 24 24"><path d="M12 3v18M3 12h18"/></svg>
+              REGISTRATI
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- LISTA SERVER ONLINE (VISIBILE DOPO LOGIN) -->
+      <div id="mp-servers-box" class="hidden">
+        <div class="glass-panel" style="padding:14px; margin-bottom:14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+          <div>
+            <span class="text-muted" style="font-size:0.88rem;">Connesso come:</span>
+            <strong id="mp-logged-user" class="font-display text-metal" style="margin-left:6px;">Comandante</strong>
+          </div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button type="button" id="btn-mp-create-uni" class="btn btn-green btn-sm">+ CREA UNIVERSO ONLINE</button>
+            <button type="button" id="btn-mp-refresh" class="btn btn-blue btn-sm">↻ AGGIORNA</button>
+            <button type="button" id="btn-mp-logout" class="btn btn-ghost btn-sm">ESCI</button>
+          </div>
+        </div>
+
+        <div id="mp-universe-list" class="universe-list"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- =========================================================
+       SCHERMATA 2: PLANCIA DI COMANDO (GIOCO ATTIVO)
+       ========================================================= -->
+  <section id="screen-game" class="hidden">
+    <header class="game-topbar">
+      <div class="topbar-row-1">
+        <select id="active-planet-select" class="planet-selector" aria-label="Seleziona Pianeta"></select>
+        <span id="mp-live-badge" class="badge badge-red hidden">
+          <svg class="nav-svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="9" stroke-dasharray="3 3"/></svg>
+          PvP LIVE
+        </span>
+        <button type="button" id="btn-turbo-toggle" class="btn btn-blue btn-turbo">
+          <svg class="nav-svg" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          TURBO
+        </button>
+        <button type="button" id="btn-back-lobby" class="btn btn-ghost btn-sm" title="Torna alle partite" aria-label="Torna alle partite">
+          <svg class="nav-svg" style="margin-right:0;" viewBox="0 0 24 24"><path d="M3 10.5L12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9.5z"/></svg>
+        </button>
+      </div>
+
+      <div class="resources-bar">
+        <button type="button" class="res-pill res-deposit-trigger" data-deposit="metal" aria-controls="resource-deposit-panel" aria-expanded="false" aria-label="Deposito di Metallo: apri i dettagli">
+          <span class="res-deposit-label-row"><span id="res-metal-label" class="res-label text-metal">Metallo</span><svg class="res-cap-warning" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5L22 20.5H2L12 3.5Z"/><path d="M12 9v5.5m0 3v.25"/></svg></span>
+          <span id="res-metal-val" class="res-val text-metal">0</span>
+        </button>
+        <button type="button" class="res-pill res-deposit-trigger" data-deposit="crystal" aria-controls="resource-deposit-panel" aria-expanded="false" aria-label="Deposito di Cristallo: apri i dettagli">
+          <span class="res-deposit-label-row"><span id="res-crystal-label" class="res-label text-crystal">Cristallo</span><svg class="res-cap-warning" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5L22 20.5H2L12 3.5Z"/><path d="M12 9v5.5m0 3v.25"/></svg></span>
+          <span id="res-crystal-val" class="res-val text-crystal">0</span>
+        </button>
+        <button type="button" class="res-pill res-deposit-trigger" data-deposit="deuterium" aria-controls="resource-deposit-panel" aria-expanded="false" aria-label="Deposito di Deuterio: apri i dettagli">
+          <span class="res-deposit-label-row"><span id="res-deuterium-label" class="res-label text-deuterium">Deuterio</span><svg class="res-cap-warning" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5L22 20.5H2L12 3.5Z"/><path d="M12 9v5.5m0 3v.25"/></svg></span>
+          <span id="res-deuterium-val" class="res-val text-deuterium">0</span>
+        </button>
+        <div class="res-pill">
+          <span id="res-energy-label" class="res-label text-energy">Energia</span>
+          <span id="res-energy-val" class="res-val text-energy">0 / 0</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Dettaglio depositi: fuori dalla topbar per evitare clipping/backdrop filter. -->
+    <div id="resource-deposit-panel" class="deposit-popover hidden" role="dialog" aria-modal="false" aria-labelledby="deposit-panel-title" tabindex="-1">
+      <div class="deposit-popover-heading">
+        <div>
+          <strong id="deposit-panel-title">Deposito</strong>
+          <div id="deposit-panel-planet" class="deposit-panel-planet"></div>
+        </div>
+        <button type="button" class="deposit-popover-close" id="deposit-panel-close" aria-label="Chiudi dettagli deposito">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5l14 14M19 5L5 19"/></svg>
+        </button>
+      </div>
+      <div class="deposit-popover-data">
+        <div><span>Quantità / capacità</span><strong id="deposit-panel-quantity">—</strong></div>
+        <div><span>Riempimento</span><strong id="deposit-panel-percent">—</strong></div>
+      </div>
+      <div id="deposit-panel-meter" class="deposit-panel-meter" role="progressbar" aria-label="Riempimento deposito" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="deposit-panel-meter-fill"></div></div>
+      <div class="deposit-popover-data">
+        <div><span>Spazio disponibile</span><strong id="deposit-panel-space">—</strong></div>
+        <div><span>Produzione oraria effettiva</span><strong id="deposit-panel-production">—</strong></div>
+        <div><span>Deposito pieno tra</span><strong id="deposit-panel-time">—</strong></div>
+      </div>
+      <p id="deposit-panel-note" class="deposit-panel-note hidden"></p>
+    </div>
+
+    <!-- BARRA RAPIDA MODALITÀ CREATIVA -->
+    <div id="creative-quick-bar" class="creative-bar hidden">
+      <button type="button" data-creative="add-res" class="btn btn-creative">+10M Risorse</button>
+      <button type="button" data-creative="finish-queues" class="btn btn-creative">Completa Code</button>
+      <button type="button" data-creative="unlock-tech" class="btn btn-creative">Sblocca Tecnologie Lv.15</button>
+      <button type="button" data-creative="add-rip" class="btn btn-creative">+10 Morti Nere</button>
+    </div>
+
+    <div class="game-shell">
+      <!-- SIDEBAR DESKTOP (>= 900px) -->
+      <aside class="desktop-sidebar" id="desktop-sidebar">
+        <button type="button" class="sidebar-btn active" data-view="overview">
+          <svg class="nav-svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><ellipse cx="12" cy="12" rx="11" ry="4" transform="rotate(-20 12 12)"/></svg>
+          Panoramica
+        </button>
+        <button type="button" class="sidebar-btn" data-view="buildings">
+          <svg class="nav-svg" viewBox="0 0 24 24"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6"/></svg>
+          Edifici &amp; Risorse
+        </button>
+        <button type="button" class="sidebar-btn" data-view="research">
+          <svg class="nav-svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2"/><ellipse cx="12" cy="12" rx="10" ry="4"/><ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(60 12 12)"/><ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(-60 12 12)"/></svg>
+          Ricerche
+        </button>
+        <button type="button" class="sidebar-btn" data-view="shipyard">
+          <svg class="nav-svg" viewBox="0 0 24 24"><path d="M12 2L4 20l8-4 8 4L12 2z"/></svg>
+          Cantiere Navale
+        </button>
+        <button type="button" class="sidebar-btn" data-view="defense">
+          <svg class="nav-svg" viewBox="0 0 24 24"><path d="M12 2l8 4v6c0 5.5-3.8 10.7-8 12-4.2-1.3-8-6.5-8-12V6l8-4z"/></svg>
+          Difesa Planetaria
+        </button>
+        <button type="button" class="sidebar-btn" data-view="fleet">
+          <svg class="nav-svg" viewBox="0 0 24 24"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+          Flotta &amp; Missioni
+        </button>
+        <button type="button" class="sidebar-btn" data-view="movements">
+          <svg class="nav-svg" viewBox="0 0 24 24"><path d="M3 12h18M15 6l6 6-6 6"/></svg>
+          Movimento Flotta
+        </button>
+        <button type="button" class="sidebar-btn" data-view="galaxy">
+          <svg class="nav-svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9" stroke-dasharray="3 3"/></svg>
+          Galassia
+        </button>
+        <button type="button" class="sidebar-btn" data-view="espionage">
+          <svg class="nav-svg" viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
+          Spionaggio &amp; Report
+        </button>
+        <button type="button" class="sidebar-btn" data-view="reports">
+          <svg class="nav-svg" viewBox="0 0 24 24"><path d="M6 2h9l5 5v15H6z"/><path d="M14 2v6h6M9 13h6M9 17h6"/></svg>
+          Rapporti
+        </button>
+        <button type="button" class="sidebar-btn" data-view="diplomacy">
+          <svg class="nav-svg" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          Commercio &amp; BOT
+        </button>
+        <button type="button" class="sidebar-btn" data-view="moon">
+          <svg class="nav-svg" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+          Luna &amp; Falange
+        </button>
+        <button type="button" class="sidebar-btn" data-view="empire">
+          <svg class="nav-svg" viewBox="0 0 24 24"><path d="M3 18h18M4 15l3-9 5 5 5-5 3 9H4z"/></svg>
+          Imperiale &amp; Quest
+        </button>
+        <button type="button" class="sidebar-btn" data-view="highscore">
+          <svg class="nav-svg" viewBox="0 0 24 24"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
+          Classifica
+        </button>
+        <button type="button" class="sidebar-btn mp-only-nav hidden sidebar-comm-btn" data-view="chat">
+          <span style="display:inline-flex; align-items:center;">
+            <svg class="nav-svg" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            Chat Galattica
+          </span>
+          <span id="sidebar-chat-badge" class="badge badge-red hidden">0</span>
+        </button>
+        <!-- NUOVO: GUIDA -->
+        <button type="button" class="sidebar-btn" data-view="guide">
+          <svg class="nav-svg" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+          Guida &amp; Aiuto
+        </button>
+      </aside>
+
+      <!-- VIEWPORT PRINCIPALE -->
+      <main id="game-viewport"></main>
+    </div>
+
+    <!-- BOTTOM NAVIGATION BAR MOBILE -->
+    <nav class="mobile-bottom-nav" aria-label="Navigazione principale">
+      <button type="button" class="nav-tab-btn active" data-view="overview">
+        <span class="nav-icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><ellipse cx="12" cy="12" rx="11" ry="4" transform="rotate(-20 12 12)"/></svg></span>
+        <span>Panoramica</span>
+      </button>
+      <button type="button" class="nav-tab-btn" data-view="buildings">
+        <span class="nav-icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6"/></svg></span>
+        <span>Edifici</span>
+      </button>
+      <button type="button" class="nav-tab-btn" data-view="fleet">
+        <span class="nav-icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg></span>
+        <span>Flotta</span>
+      </button>
+      <button type="button" class="nav-tab-btn" data-view="galaxy">
+        <span class="nav-icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9" stroke-dasharray="3 3"/></svg></span>
+        <span>Galassia</span>
+      </button>
+      <button type="button" class="nav-tab-btn" id="btn-mobile-menu" style="position:relative;">
+        <span class="nav-icon">☰</span>
+        <span>Menu</span>
+        <span id="mobile-menu-unread-dot" class="unread-dot hidden"></span>
+      </button>
+    </nav>
+
+    <!-- DRAWER MENU MOBILE -->
+    <div id="mobile-menu-drawer" class="mobile-drawer-overlay hidden">
+      <div class="mobile-drawer-sheet">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <h3 style="font-size:1rem; color:var(--res-crystal);">SISTEMI DI COMANDO</h3>
+          <button type="button" id="btn-close-drawer" class="btn btn-ghost btn-sm">✕</button>
+        </div>
+        <div class="drawer-grid">
+          <button type="button" class="drawer-item" data-view="overview"><span class="icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><ellipse cx="12" cy="12" rx="11" ry="4" transform="rotate(-20 12 12)"/></svg></span>Panoramica</button>
+          <button type="button" class="drawer-item" data-view="buildings"><span class="icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6"/></svg></span>Edifici</button>
+          <button type="button" class="drawer-item" data-view="research"><span class="icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2"/><ellipse cx="12" cy="12" rx="10" ry="4"/><ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(60 12 12)"/><ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(-60 12 12)"/></svg></span>Ricerche</button>
+          <button type="button" class="drawer-item" data-view="shipyard"><span class="icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><path d="M12 2L4 20l8-4 8 4L12 2z"/></svg></span>Cantiere</button>
+          <button type="button" class="drawer-item" data-view="defense"><span class="icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><path d="M12 2l8 4v6c0 5.5-3.8 10.7-8 12-4.2-1.3-8-6.5-8-12V6l8-4z"/></svg></span>Difesa</button>
+          <button type="button" class="drawer-item" data-view="fleet"><span class="icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg></span>Flotta</button>
+          <button type="button" class="drawer-item" data-view="movements"><span class="icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><path d="M3 12h18M15 6l6 6-6 6"/></svg></span>Movimenti</button>
+          <button type="button" class="drawer-item" data-view="galaxy"><span class="icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9" stroke-dasharray="3 3"/></svg></span>Galassia</button>
+          <button type="button" class="drawer-item" data-view="espionage"><span class="icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg></span>Spionaggio</button>
+          <button type="button" class="drawer-item" data-view="reports"><span class="icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><path d="M6 2h9l5 5v15H6z"/><path d="M14 2v6h6M9 13h6M9 17h6"/></svg></span>Rapporti</button>
+          <button type="button" class="drawer-item" data-view="diplomacy"><span class="icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>Commercio</button>
+          <button type="button" class="drawer-item" data-view="moon"><span class="icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></span>Luna</button>
+          <button type="button" class="drawer-item" data-view="empire"><span class="icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><path d="M3 18h18M4 15l3-9 5 5 5-5 3 9H4z"/></svg></span>Imperiale</button>
+          <button type="button" class="drawer-item" data-view="highscore"><span class="icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><path d="M18 20V10M12 20V4M6 20v-6"/></svg></span>Classifica</button>
+          <button type="button" class="drawer-item mp-only-nav hidden" data-view="chat" style="position:relative;">
+            <span class="icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>
+            <span>Chat Galattica</span>
+            <span id="drawer-chat-badge" class="badge badge-red hidden" style="position:absolute; top:6px; right:6px;">0</span>
+          </button>
+          <button type="button" class="drawer-item" id="drawer-btn-lobby"><span class="icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><path d="M3 10.5L12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9.5z"/></svg></span>Partite</button>
+          <!-- NUOVO: GUIDA -->
+          <button type="button" class="drawer-item" data-view="guide"><span class="icon"><svg class="nav-svg" style="margin:0;" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></span>Guida &amp; Aiuto</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- FIREBASE v10 COMPAT SDK -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+
+  <!-- MODULI CORE APPLICAZIONE -->
+
+  <!-- ARCHIVIO OFFLINE E LOBBY -->
+  <script src="./modules/offline/storage.js" defer></script>
+  <script src="./modules/offline/lobby-starfield.js" defer></script>
+  <script src="./db.js" defer></script>
+
+  <!-- CATALOGO DATI E FORMULE -->
+  <script src="./modules/data/buildings.js" defer></script>
+  <script src="./modules/data/megastructures.js" defer></script>
+  <script src="./modules/data/researches.js" defer></script>
+  <script src="./modules/data/ships.js" defer></script>
+  <script src="./modules/data/defenses.js" defer></script>
+  <script src="./data.js" defer></script>
+  <script src="./graphics-core.js" defer></script>       <!-- Nucleo grafico: cache immagini, SVG interfaccia e helper Canvas -->
+  <script src="./graphics-ships.js" defer></script>      <!-- Ritratti procedurali Canvas 128x128: 14 navi e difese -->
+  <script src="./graphics-structures.js" defer></script> <!-- Ritratti procedurali Canvas 128x128: edifici, luna e tecnologie -->
+
+  <!-- MOTORE ECONOMICO E PROGRESSIONE -->
+  <script src="./modules/engine/context.js" defer></script>
+  <script src="./modules/engine/foundation.js" defer></script>
+  <script src="./modules/engine/research-model.js" defer></script>
+  <script src="./modules/engine/timings.js" defer></script>
+  <script src="./modules/engine/production.js" defer></script>
+  <script src="./modules/engine/megastructure-costs.js" defer></script>
+  <script src="./modules/engine/megastructure-progress.js" defer></script>
+  <script src="./modules/engine/progress.js" defer></script>
+  <script src="./engine-core.js" defer></script>
+  <script src="./engine-actions.js" defer></script>      <!-- Azioni giocatore: avvio costruzioni/ricerche/navi, turbo, cheat e autosave -->
+
+  <!-- GALASSIA, COMBATTIMENTO, FLOTTE E BOT OFFLINE -->
+  <script src="./modules/galaxy/context.js" defer></script>
+  <script src="./modules/galaxy/generation.js" defer></script>
+  <script src="./modules/galaxy/megastructures.js" defer></script>
+  <script src="./modules/galaxy/combat.js" defer></script>
+  <script src="./modules/galaxy/fleet-dispatch.js" defer></script>
+  <script src="./modules/galaxy/fleet-arrivals.js" defer></script>
+  <script src="./modules/galaxy/bot-ai.js" defer></script>
+  <script src="./modules/galaxy/fleet-tick.js" defer></script>
+  <script src="./modules/galaxy/trade.js" defer></script>
+  <script src="./galaxy.js" defer></script>
+  <script src="./firebase-config.js" defer></script>     <!-- Chiavi e inizializzazione Firebase Auth + Firestore -->
+  <script src="./moon-merchant.js" defer></script>
+
+  <!-- MULTIPLAYER FIRESTORE -->
+  <script src="./modules/online/context.js" defer></script>
+  <script src="./modules/online/foundation.js" defer></script>
+  <script src="./modules/online/universes.js" defer></script>
+  <script src="./modules/online/sync.js" defer></script>
+  <script src="./modules/online/fleet-control.js" defer></script>
+  <script src="./modules/online/combat-resolver.js" defer></script>
+  <script src="./modules/online/sieges.js" defer></script>
+  <script src="./modules/online/communications.js" defer></script>
+  <script src="./modules/online/bots.js" defer></script>
+  <script src="./multiplayer.js" defer></script>
+
+  <!-- UI: CORE, LOBBY, NAVIGAZIONE E AVVIO -->
+  <script src="./ui-core.js" defer></script>
+  <script src="./modules/ui/lobby-online.js" defer></script>
+  <script src="./modules/ui/planet-canvas.js" defer></script>
+  <script src="./modules/ui/resource-deposits.js" defer></script>
+  <script src="./modules/ui/navigation.js" defer></script>
+  <script src="./modules/ui/runtime.js" defer></script>
+  <script src="./modules/ui/selects.js" defer></script>
+  <script src="./ui-guide.js" defer></script>            <!-- Pagina Guida/Aiuto: sezioni generate dinamicamente da data.js -->
+
+  <!-- UI: ECONOMIA E MEGASTRUTTURE -->
+  <script src="./modules/ui/ui-galattica.js" defer></script>
+  <script src="./modules/ui/ui-buildings.js" defer></script>
+  <script src="./modules/ui/ui-research.js" defer></script>
+  <script src="./modules/ui/ui-shipyard.js" defer></script>
+  <script src="./modules/ui/ui-moon.js" defer></script>
+  <script src="./modules/ui/ui-empire.js" defer></script>
+
+  <!-- UI: FLOTTE, MAPPA, SPIONAGGIO, COMMERCIO -->
+  <script src="./modules/ui/fleet.js" defer></script>
+  <script src="./modules/ui/galaxy.js" defer></script>
+  <script src="./modules/ui/espionage.js" defer></script>
+  <script src="./modules/ui/simulator.js" defer></script>
+  <script src="./modules/ui/diplomacy.js" defer></script>
+  <script src="./ui-social.js" defer></script>           <!-- Schermate UI: Commercio BOT, Classifica e Comunicazioni (Chat/MP) -->
+
+  <!-- MODULI PLUGIN ESPANSIONE -->
+  <script src="./missions-core.js" defer></script>       <!-- Plugin Missioni: ricerca Esplorazione Profonda, carburante/spinta 10-100%, slot e richiamo -->
+<script src="./siege-missions.js" defer></script>      <!-- Motore Assedi: Embargo Planetario (blocco rotte), Occupazione (5%/giorno + riscatto) e tick orbitale -->
+<script src="./ui-fleet-movements.js" defer></script>  <!-- Schermata UI: Movimento Flotta, conteggio slot (5+lv), countdown, richiamo e stato assedi -->
+  <script src="./tutorial.js" defer></script> <!-- Accademia Imperiale offline -->
+  <script src="./update-client.js" defer></script> <!-- Gestione sicura release, nessun dato di gioco modificato -->
+</body>
+</html>

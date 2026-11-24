@@ -20,6 +20,7 @@
     document.getElementById('screen-game')?.classList.add('hidden');
     document.getElementById('screen-lobby')?.classList.remove('hidden');
     await window.UniversumDB.renderLobbyList();
+    window.UniversumUpdater?.onSafeLobby();
   };
 
 
@@ -34,6 +35,7 @@
     document.getElementById('screen-lobby')?.classList.remove('hidden');
     await window.UniversumDB.renderLobbyList();
     await UI.refreshOnlineLobbyState();
+    window.UniversumUpdater?.onSafeLobby();
   };
 
 

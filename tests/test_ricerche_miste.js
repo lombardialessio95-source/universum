@@ -9,7 +9,7 @@ const win={document:doc,navigator:{},addEventListener(){},matchMedia(){return {m
 const sb={window:win,document:doc,console,Date:TestDate,Math,JSON,Set,Map,Number,Object,Array,String,Boolean,Promise,URL,
  navigator:win.navigator,localStorage:{getItem(){return null},setItem(){}},setTimeout(){return 0},clearTimeout(){},setInterval(){return 0},clearInterval(){}};
 vm.createContext(sb);
-const html=fs.readFileSync(path.join(root,'index.html'),'utf8');
+const html=fs.readFileSync(path.join(root,'app.html'),'utf8');
 const paths=[...html.matchAll(/<script\s+src="\.\/([^" ]+\.js)"(?:\s+defer)?\s*><\/script>/g)].map(x=>x[1]);
 for(const p of paths) if(!p.startsWith('graphics-') && p!=='firebase-config.js') vm.runInContext(fs.readFileSync(path.join(root,p),'utf8'),sb,{filename:p,timeout:1000});
 const E=win.UniversumEngine,D=win.UniversumData,G=win.UniversumGalaxy;

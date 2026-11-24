@@ -1360,3 +1360,6 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance:none; margi
   .res-cap-warning { width: 10px; height: 10px; }
   .deposit-popover { font-size: .79rem; padding: 12px; }
 }
+
+/* Blocca temporaneamente la lobby SOLO durante il cambio di release verificata. */
+#screen-lobby.universum-update-lock { pointer-events: none; }

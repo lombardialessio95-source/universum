@@ -14,7 +14,7 @@ const win = { document, navigator: {}, addEventListener() {}, matchMedia() { ret
 const context = { window: win, document, console, Date: FixedDate, Math, JSON, Set, Map, Number, Object, Array, String, Boolean, Promise, URL,
   navigator: win.navigator, localStorage: { getItem() { return null; }, setItem() {} }, setTimeout() { return 0; }, clearTimeout() {}, setInterval() { return 0; }, clearInterval() {} };
 vm.createContext(context);
-const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+const html = fs.readFileSync(path.join(root, 'app.html'), 'utf8');
 for (const m of html.matchAll(/<script\s+src="\.\/([^" ]+\.js)"(?:\s+defer)?\s*><\/script>/g)) {
   const file = m[1]; if (file.startsWith('graphics-') || file === 'firebase-config.js') continue;
   vm.runInContext(fs.readFileSync(path.join(root,file),'utf8'), context, {filename:file,timeout:2000});

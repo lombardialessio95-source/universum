@@ -25,3 +25,13 @@ F01 (24/11/2026): node tests/test_f01_fusion_invictus.js
   parzializzazione e riattivazione, minimo 3%, offline/online/Galattica,
   consumi Invictus 5000, salto speciale e rientro al Bacino.
 I test multiplayer con mock non sostituiscono un collaudo con due client Firebase reali.
+
+AGGIORNAMENTI PWA (da questa release):
+  node tests/test_auto_update.js   (23 scenari CacheStorage/Fetch/SW simulati)
+  node tests/test_update_client.js (12 verifiche client, salvataggi, multitab)
+  node tests/test_cache.js         (73 asset SHA-256 e release ID)
+
+La suite browser su un dominio HTTPS reale con Service Worker e' una verifica
+manuale aggiuntiva: i mock non sostituiscono Chrome/Firefox/Safari o Firebase.
+Per generare un manifest coerente DOPO ogni modifica ai file statici:
+  python3 tools/build_release.py

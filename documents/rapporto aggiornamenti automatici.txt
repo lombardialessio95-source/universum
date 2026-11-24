@@ -1,0 +1,106 @@
+UNIVERSUM — RAPPORTO TECNICO: AGGIORNAMENTO AUTOMATICO ATOMICO
+Data: 24 novembre 2026
+Base GitHub ufficiale: a4b016630f885467d2ff6ae9ba7430750b67d676
+Backup GitHub: backup/pre-auto-update-2026-11-24 (identico commit)
+
+1. VERSIONE E PRINCIPI
+Il sito principale index.html diventa un bootstrap leggero; il precedente
+index.html resta nella pagina app.html, con gli stessi 68 script precedenti,
+il modulo update-client.js e un badge di versione discreto nella lobby.
+Il bootstrap non esegue i moduli del gioco prima che il Service Worker abbia
+caricato e verificato una release COMPLETA. La build usa un identificativo
+'r' + hash SHA-256 dei 73 asset statici e del codice normalizzato sw.js.
+Non e' il commit Git ma un ID di contenuti riproducibile. Il file
+release-manifest.json contiene i digest SHA-256 degli asset.
+
+2. INSTALLAZIONE E COERENZA
+All'apertura online il bootstrap registra con updateViaCache:'none' ed esegue
+registration.update() senza attendere il normale intervallo browser. Durante
+un aggiornamento il nuovo sw.js scarica con cache:no-store solo gli asset
+modificati; gli altri sono copiati dalla precedente cache con digest valido.
+Il controllo comprende status HTTP, MIME e SHA-256 dei byte effettivi.
+Il marcatore di cache completa e' scritto SOLO dopo che tutti i file esistono.
+Se la distribuzione GitHub Pages e' incompleta o un modulo risulta errato,
+l'installazione fallisce, la cache nuova viene rimossa e quella vecchia resta.
+Una risorsa JS non puo' ottenere index.html come fallback in caso di errore.
+Dopo l'installazione, HTML/CSS/JS dell'app sono cache-first esclusivamente
+dalla cache statica immutabile associata all'ID di release.
+
+3. SICUREZZA DELL'ATTIVAZIONE
+Il nuovo SW non chiama skipWaiting durante la fase di installazione.
+Un SW in attesa chiede il consenso a tutte le finestre controllate e non
+controllate nella sua scope. Una partita aperta, un client legacy che non
+risponde o una scrittura in corso blocca l'attivazione. Le lobby pronte
+possono concedere il consenso e vengono temporaneamente bloccate affinche'
+nessuna nuova partita parta nella finestra di cambio controller.
+Dopo l'uscita dalla partita, l'aggiornamento e' rivalutato solo dopo il
+salvataggio gia' previsto dal gioco.
+In caso di cambio controller, si ricarica soltanto la lobby, con protezione
+da ricaricamenti duplicati mediante un marcatore di sessionStorage.
+
+4. PROTEZIONE DEI DATI
+modules/offline/storage.js, IndexedDB UniversumDB, Firestore e tutte le
+funzioni di economia, flotte, ricerche, combattimenti non sono stati modificati.
+Il modulo update-client.js si limita a tracciare le Promise dei salvataggi,
+ma non cambia la serializzazione o la semantica delle operazioni.
+Il SW non usa deleteDatabase(), localStorage.clear() o funzioni analoghe;
+le sole cancellazioni possibili riguardano cache statiche complete o cache
+di nuova installazione fallita. La release precedente rimane conservata.
+Firebase e servizi Google esterni NON entrano nella cache statica di gioco;
+nessun controllo versione richiede letture o scritture Firestore.
+
+5. OFFLINE, RISORSE E PRESTAZIONI
+Senza Internet e con una release gia' installata, il bootstrap recupera la
+registrazione esistente senza effettuare nuovi download e usa la cache
+completa. Se la rete ritorna viene effettuato un solo nuovo controllo.
+Non sono stati aggiunti intervalli periodici o aggiornamenti grafici pesanti.
+Il primo download e' completo, i successivi possono usare la cache verificata
+per gli asset byte-identici. Si conserva normalmente una release precedente.
+
+6. RETROCOMPATIBILITA CON SERVICE WORKER PRECEDENTI
+Il vecchio SW era network-first e poteva sovrascrivere file individuali;
+il nuovo bootstrap viene ricevuto quando la vecchia pagina viene riaperta
+online. Il nuovo SW poi verifica e installa la release completa senza svuotare
+le cache e senza rimuovere salvataggi. Client legacy gia' aperti che non
+sanno rispondere al protocollo restano operativi: devono essere chiusi per
+consentire l'attivazione della nuova versione.
+LIMITAZIONE INEVITABILE: se il primo deploy viene interrotto DOPO che un
+vecchio SW network-first ha gia' sostituito il suo index.html con il nuovo
+bootstrap, ma PRIMA della completa installazione della nuova release, la
+prima riapertura del sito senza Internet potrebbe non avviare il gioco.
+Ricollegarsi consente il completamento. Non sono persi dati IndexedDB.
+Non e' possibile garantire atomicita' retroattiva di una cache costruita
+da un SW legacy che non validava gli hash.
+
+7. PROVE
+Test SW Node con CacheStorage/MessageChannel/Fetch simulati e crypto SHA-256
+REALE: prima apertura, stessa versione, nuovo rilascio, asset corrotto,
+manifest in disallineamento, file JavaScript assente, interruzione download,
+cache precedente preservata, offline, ritorno online, upgrade con due
+schede di cui una attiva, riscrittura di una cache parziale, assenza di
+intercettazioni Firebase, separazione versioni, nessun fallback HTML.
+Test client con navigator/DOM/IndexedDB simulati: stato in partita, consenso,
+salvataggio in corso, blocco nuova partita, diniego, controllerchange,
+ricarica singola e protezione da loop.
+Restano obbligatori test manuali su sito HTTPS reale con Chrome/Firefox/Safari,
+due schede vere, salvataggi IndexedDB reali e sessione Firebase reale.
+Ambiente disponibile: Chromium non puo' navigare verso 127.0.0.1 a causa di
+net::ERR_BLOCKED_BY_ADMINISTRATOR; nessun test live SW e' stato dichiarato.
+
+8. PUBBLICAZIONE DELLE VERSIONI FUTURE
+1) Modificare normalmente file del gioco.
+2) Dalla radice eseguire python3 tools/build_release.py.
+3) Eseguire node tests/test_cache.js, node tests/test_auto_update.js,
+   node tests/test_update_client.js e tutte le altre tests/test_*.js.
+4) Pubblicare tutti i file nello stesso commit; non cambiare soltanto sw.js.
+La GitHub Action verifica che il manifest non sia obsoleto e tutti i test
+superino. Il Service Worker rifiuta versioni incomplete anche se il deploy
+GitHub Pages e' temporaneamente non uniforme.
+
+9. ROLLBACK
+Disponibili il branch backup/pre-auto-update-2026-11-24 e uno ZIP completo
+pre-modifica. Ripristinare TUTTI i file della precedente release in un unico
+commit preferibilmente con git revert del commit aggiornamento. NON svuotare
+le cache manualmente e non cancellare IndexedDB/Firestore. Prima di diffondere
+un nuovo rollback con questo sistema, rigenerare il manifest per la release
+di ripristino. GitHub Pages puo' richiedere tempo per propagare il rollback.

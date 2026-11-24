@@ -1024,3 +1024,16 @@ F01 — CORREZIONI MATEMATICHE ED ECONOMICHE (24/11/2026)
 NESSUNA MODIFICA A: regole Firestore, formule viaggio/velocita', Rapid Fire,
   temperatura della centrale solare, costi e tempi di costruzione delle navi,
   stive o prezzi Invictus e degli altri mezzi, stile.css e sistema depositi OGame.
+
+AGGIORNAMENTO 24/11/2026 — RELASE ATOMICHE E CACHE SICURA
+- index.html: bootstrap leggero senza esecuzione di moduli di gioco.
+- app.html: precedente pagina completa con 68 moduli + update-client.js.
+- release-manifest.json: identificativo r<hash> e SHA-256 degli asset necessari.
+- sw.js: cache per release, verifiche di integrita', consenso multitab.
+- update-client.js: stato lobby/in partita, scritture pendenti, cambio controller.
+- tools/build_release.py: genera manifest e release ID dopo ogni modifica.
+- tests/test_auto_update.js / test_update_client.js: simulazioni riproducibili.
+- .github/workflows/verify-release.yml: esegue test e controlla manifest.
+La produzione, le flotte, i salvataggi e le regole Firestore NON sono stati
+modificati dal sistema di aggiornamento. Per dettagli e limiti consultare
+"documents/rapporto aggiornamenti automatici.txt".

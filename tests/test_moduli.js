@@ -1,7 +1,7 @@
 // Verifica caricamento moduli in ordine HTML e compatibilità API. Nessuna rete/Firebase reale.
 const fs=require('fs'),vm=require('vm'),path=require('path'),assert=require('assert');
 const root=path.resolve(__dirname,'..');
-const html=fs.readFileSync(path.join(root,'index.html'),'utf8');
+const html=fs.readFileSync(path.join(root,'app.html'),'utf8');
 const scripts=[...html.matchAll(/<script\s+src="\.\/([^" ]+\.js)"(?:\s+defer)?\s*><\/script>/g)].map(x=>x[1]);
 const seen=new Set();
 for(const src of scripts){assert(!seen.has(src),'script doppio: '+src);seen.add(src);assert(fs.existsSync(path.join(root,src)),'script mancante: '+src);}

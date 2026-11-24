@@ -37,7 +37,7 @@ check(ui.formatDepositFillTime(60), '2g 12h 0m', 'long interval');
 check(ui.formatDepositFillTime(0.01), '1m', 'short interval');
 
 // Integrita' strutturale e nessuna duplicazione delle formule produttive.
-const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+const html = fs.readFileSync(path.join(root, 'app.html'), 'utf8');
 const sw = fs.readFileSync(path.join(root, 'sw.js'), 'utf8');
 const css = fs.readFileSync(path.join(root, 'style.css'), 'utf8');
 for (const type of ['metal', 'crystal', 'deuterium']) {
@@ -45,7 +45,8 @@ for (const type of ['metal', 'crystal', 'deuterium']) {
 }
 assert(html.includes('id="resource-deposit-panel"')); n++;
 assert(html.includes('resource-deposits.js')); n++;
-assert(sw.includes("'./modules/ui/resource-deposits.js'")); n++;
+const manifest=JSON.parse(fs.readFileSync(path.join(root,'release-manifest.json'),'utf8'));
+assert(manifest.files['modules/ui/resource-deposits.js']); n++;
 assert(css.includes('.res-deposit-trigger')); n++;
 assert(!src.includes('fbDB') && !/window\.UniversumEngine\.getPlanetProduction\s*\(/.test(src), 'no extra DB/production calls'); n++;
 console.log('DEPOSITI: '+n+' controlli su soglie, tempo, dati, Creativa, UI e cache superati.');

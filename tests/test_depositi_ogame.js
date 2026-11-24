@@ -16,7 +16,7 @@ const sandbox = { window: win, document: doc, console, Date: FixedDate, Math, JS
   navigator: win.navigator, localStorage: { getItem() { return null; }, setItem() {} },
   setTimeout() { return 0; }, clearTimeout() {}, setInterval() { return 0; }, clearInterval() {} };
 vm.createContext(sandbox);
-const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+const html = fs.readFileSync(path.join(root, 'app.html'), 'utf8');
 const scripts = [...html.matchAll(/<script\s+src="\.\/([^" ]+\.js)"(?:\s+defer)?\s*><\/script>/g)].map(m => m[1]);
 for (const script of scripts) {
   if (script.startsWith('graphics-') || script === 'firebase-config.js') continue;
