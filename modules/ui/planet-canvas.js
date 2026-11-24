@@ -8,12 +8,21 @@
   // =========================================================
   // CANVAS PANORAMICA — Luna + Bacino Spaziale orbitante
   // =========================================================
-  UI.startPlanetCanvas = function (planet) {
+  UI.stopPlanetCanvas = function () {
     const st = UI.state;
-    if (st.planetAnimId) {
+    if (st.planetAnimId !== null && st.planetAnimId !== undefined) {
       cancelAnimationFrame(st.planetAnimId);
       st.planetAnimId = null;
     }
+    if (st.planetAnimVisibilityHandler) {
+      document.removeEventListener('visibilitychange', st.planetAnimVisibilityHandler);
+      st.planetAnimVisibilityHandler = null;
+    }
+  };
+
+  UI.startPlanetCanvas = function (planet) {
+    const st = UI.state;
+    UI.stopPlanetCanvas();
     const canvas = document.getElementById('overview-planet-canvas');
     if (!canvas || !planet) return;
     const ctx = canvas.getContext('2d');
@@ -31,18 +40,39 @@
       palette = { core: '#ffab00', mid: '#dd2c00', dark: '#1a0500', atmo: 'rgba(255, 110, 64, 0.4)', rings: false };
     }
 
+    // Gradienti indipendenti da angolo e fase: istanziati una volta per pianeta.
+    const halo = ctx.createRadialGradient(cx, cy, radius * 0.85, cx, cy, radius * 1.45);
+    halo.addColorStop(0, palette.atmo);
+    halo.addColorStop(1, 'rgba(0,0,0,0)');
+    const grad = ctx.createRadialGradient(cx - radius * 0.38, cy - radius * 0.35, radius * 0.1, cx, cy, radius);
+    grad.addColorStop(0, palette.core);
+    grad.addColorStop(0.55, palette.mid);
+    grad.addColorStop(1, palette.dark);
+    const shadowGrad = ctx.createLinearGradient(cx - radius, cy, cx + radius, cy + radius * 0.4);
+    shadowGrad.addColorStop(0, 'rgba(0,0,0,0)');
+    shadowGrad.addColorStop(0.65, 'rgba(2,2,10,0.35)');
+    shadowGrad.addColorStop(1, 'rgba(2,2,10,0.88)');
+    // Bacino: il suo gradiente e' relativo alla trasformazione locale, non all'orbita.
+    const hubGrad = ctx.createRadialGradient(-1, -1, 0.5, 0, 0, 5);
+    hubGrad.addColorStop(0, '#b9f6ca');
+    hubGrad.addColorStop(0.6, '#00e676');
+    hubGrad.addColorStop(1, '#004d40');
+
     let lastPlanetFrame = 0;
+    const gameVisible = () => st.currentView === 'overview' &&
+      canvas.isConnected !== false && !document.getElementById('screen-game')?.classList.contains('hidden');
     function drawFrame(timestamp = 0) {
-      if (!document.getElementById('overview-planet-canvas')) return;
+      // Un callback scaduto non deve cancellare il rendering del pianeta successivo.
+      if (st.planetAnimVisibilityHandler !== onVisibility) return;
+      st.planetAnimId = null;
+      if (!gameVisible()) { UI.stopPlanetCanvas(); return; }
+      if (document.hidden) return; // Il listener visibilitychange riattiva il solo ciclo richiesto.
       st.planetAnimId = requestAnimationFrame(drawFrame);
-      if (document.hidden || timestamp - lastPlanetFrame < 1000 / 24) return;
+      if (timestamp - lastPlanetFrame < 1000 / 24) return;
       lastPlanetFrame = timestamp;
       st.planetAnimAngle += 0.02;
       ctx.clearRect(0, 0, w, h);
 
-      const halo = ctx.createRadialGradient(cx, cy, radius * 0.85, cx, cy, radius * 1.45);
-      halo.addColorStop(0, palette.atmo);
-      halo.addColorStop(1, 'rgba(0,0,0,0)');
       ctx.fillStyle = halo;
       ctx.beginPath();
       ctx.arc(cx, cy, radius * 1.45, 0, Math.PI * 2);
@@ -60,10 +90,6 @@
         ctx.restore();
       }
 
-      const grad = ctx.createRadialGradient(cx - radius * 0.38, cy - radius * 0.35, radius * 0.1, cx, cy, radius);
-      grad.addColorStop(0, palette.core);
-      grad.addColorStop(0.55, palette.mid);
-      grad.addColorStop(1, palette.dark);
 
       ctx.save();
       ctx.beginPath();
@@ -82,10 +108,6 @@
       ctx.ellipse(cx - drift * 0.8, cy + 16, 38, 6, -0.1, 0, Math.PI * 2);
       ctx.fill();
 
-      const shadowGrad = ctx.createLinearGradient(cx - radius, cy, cx + radius, cy + radius * 0.4);
-      shadowGrad.addColorStop(0, 'rgba(0,0,0,0)');
-      shadowGrad.addColorStop(0.65, 'rgba(2,2,10,0.35)');
-      shadowGrad.addColorStop(1, 'rgba(2,2,10,0.88)');
       ctx.fillStyle = shadowGrad;
       ctx.fillRect(cx - radius, cy - radius, radius * 2, radius * 2);
       ctx.restore();
@@ -137,10 +159,6 @@
         ctx.stroke();
 
         // Hub centrale
-        const hubGrad = ctx.createRadialGradient(-1, -1, 0.5, 0, 0, 5);
-        hubGrad.addColorStop(0, '#b9f6ca');
-        hubGrad.addColorStop(0.6, '#00e676');
-        hubGrad.addColorStop(1, '#004d40');
         ctx.fillStyle = hubGrad;
         ctx.beginPath();
         ctx.arc(0, 0, 4.5, 0, Math.PI * 2);
@@ -159,7 +177,17 @@
 
     }
 
-    st.planetAnimId = requestAnimationFrame(drawFrame);
+    function onVisibility() {
+      if (document.hidden || !gameVisible()) {
+        if (st.planetAnimId != null) cancelAnimationFrame(st.planetAnimId);
+        st.planetAnimId = null;
+      } else if (st.planetAnimId == null) {
+        st.planetAnimId = requestAnimationFrame(drawFrame);
+      }
+    }
+    st.planetAnimVisibilityHandler = onVisibility;
+    document.addEventListener('visibilitychange', onVisibility);
+    onVisibility();
   };
 
 

@@ -49,14 +49,8 @@ html, body {
   user-select: none;
 }
 
-#starfield {
-  position: fixed;
-  inset: 0;
-  width: 100vw;
-  height: 100vh;
-  z-index: -1;
-  pointer-events: none;
-}
+/* La lobby rimane nera, senza Canvas, animazioni o listener grafici. */
+body.lobby-black { background: #000000; }
 
 .hidden {
   display: none !important;

@@ -19,6 +19,7 @@
 
     document.getElementById('screen-game')?.classList.add('hidden');
     document.getElementById('screen-lobby')?.classList.remove('hidden');
+    document.body.classList.add('lobby-black');
     await window.UniversumDB.renderLobbyList();
     window.UniversumUpdater?.onSafeLobby();
   };
@@ -33,6 +34,7 @@
     st.currentUniverse = null;
     document.getElementById('screen-game')?.classList.add('hidden');
     document.getElementById('screen-lobby')?.classList.remove('hidden');
+    document.body.classList.add('lobby-black');
     await window.UniversumDB.renderLobbyList();
     await UI.refreshOnlineLobbyState();
     window.UniversumUpdater?.onSafeLobby();
@@ -78,10 +80,7 @@
       clearInterval(st.gameLoopTimer);
       st.gameLoopTimer = null;
     }
-    if (st.planetAnimId) {
-      cancelAnimationFrame(st.planetAnimId);
-      st.planetAnimId = null;
-    }
+    UI.stopPlanetCanvas?.();
   };
 
 
@@ -89,6 +88,7 @@
     UI.stopGameLoop();
     const st = UI.state;
     let mpTickCounter = 0;
+    let pendingCompletionRender = false;
 
     st.gameLoopTimer = setInterval(async () => {
       const uni = st.currentUniverse;
@@ -123,16 +123,20 @@
         window.UniversumGalaxy.processFleetsAndBots(uni);
       }
 
-      const newQueueCount = (activeP?.buildQueue?.length || 0) +
+      // In assenza di completamenti tick() non modifica le lunghezze delle code:
+      // evita la seconda scansione di tutti i pianeti nel tick ordinario.
+      const newQueueCount = queueCompleted ?
+        (activeP?.buildQueue?.length || 0) +
         (activeP?.shipyardQueue?.length || 0) +
         (activeP?.defenseQueue?.length || 0) +
         (uni.researchQueue ? 1 : 0) +
-        ((uni.planets || []).filter(p => p.localResearchQueue).length);
+        ((uni.planets || []).filter(p => p.localResearchQueue).length) : prevQueueCount;
 
       if (newQueueCount < prevQueueCount) {
         UI.playSound('complete');
         if (['overview', 'buildings', 'research', 'shipyard'].includes(st.currentView)) {
-          UI.renderCurrentView();
+          if (document.hidden) pendingCompletionRender = true;
+          else UI.renderCurrentView();
         }
       }
 
@@ -144,13 +148,18 @@
       st.lastAlertCount = atkCount;
 
       if (document.hidden) return; // Mantieni la simulazione, evita soltanto il lavoro DOM.
+      if (pendingCompletionRender) {
+        pendingCompletionRender = false;
+        if (['overview', 'buildings', 'research', 'shipyard'].includes(st.currentView)) UI.renderCurrentView();
+      }
       UI.updateTopBarNumbers();
       if (!st.isMultiplayerMode) window.UniversumTutorial?.check();
       UI.refreshAffordabilityButtons?.();
       document.querySelectorAll('.live-timer').forEach((el) => {
         const endTs = Number(el.dataset.end || 0);
         const remSec = Math.max(0, Math.ceil((endTs - Date.now()) / 1000));
-        el.textContent = UI.formatDuration(remSec);
+        const value = UI.formatDuration(remSec);
+        if (el.textContent !== value) el.textContent = value;
       });
     }, 1000);
   };
@@ -160,6 +169,7 @@
     const st = UI.state;
     const uni = st.currentUniverse;
     document.getElementById('screen-lobby')?.classList.add('hidden');
+    document.body.classList.remove('lobby-black');
     document.getElementById('screen-game')?.classList.remove('hidden');
 
     const mpBadge = document.getElementById('mp-live-badge');

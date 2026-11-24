@@ -1,18 +1,18 @@
 UNIVERSUM — MAPPA TECNICA INTEGRALE DEL PROGETTO MODULARE
-Data revisione: 22 novembre 2026
+Data revisione: 24 novembre 2026
 Versione: riorganizzazione strutturale mantenendo il gameplay dell’ultima release con le regole Firestore aggiornate.
 ====================================================================================================
 
 A. ARCHITETTURA IN BREVE
 ----------------------------------------------------------------------------------------------------
-Il repository ospitato su GitHub Pages contiene soltanto codice client statico. La progressione offline è salvata in IndexedDB; l’online usa Firebase Authentication e documenti Firestore, governati da firestore.rules pubblicate separatamente nella console Firebase.
-Non sono introdotti Cloud Functions, pacchetti npm di produzione o un sistema di compilazione obbligatorio: ogni modulo è un semplice script JavaScript caricato da index.html con defer.
+Il repository ospitato su GitHub Pages contiene soltanto codice client statico. La progressione offline è salvata in IndexedDB; l’online usa Firebase Authentication e documenti Firestore, governati da firestore.rules pubblicate separatamente nella console Firebase. La PWA avvia la release verificata tramite index.html, app.html, release-manifest.json e sw.js.
+Non sono introdotti Cloud Functions, pacchetti npm di produzione o un sistema di compilazione obbligatorio: ogni modulo è un semplice script JavaScript caricato da app.html con defer.
 La modularizzazione è conservativa: non cambia formule, nomi delle API window.Universum*, formato salvataggi né regole Firestore. Le classiche API pubbliche rimangono in data.js, db.js, engine-core.js, galaxy.js, multiplayer.js e ui-core.js; le implementazioni sono suddivise sotto modules/.
 
 B. COSA AVVIENE QUANDO APRI IL GIOCO
 ----------------------------------------------------------------------------------------------------
-1) Il browser legge index.html e style.css; scarica gli SDK Firebase esterni (se raggiungibili).
-2) Gli script locali defer vengono scaricati in parallelo, ma ESEGUITI nello stesso ordine dei tag in index.html prima di DOMContentLoaded.
+1) Il browser legge index.html (bootstrap) e verifica la cache di release; il gioco viene avviato con app.html, style.css e gli SDK Firebase esterni (se raggiungibili).
+2) Gli script locali defer vengono scaricati in parallelo, ma ESEGUITI nello stesso ordine dei tag in app.html prima di DOMContentLoaded.
 3) modules/offline/storage.js apre l’accesso IndexedDB tramite db.js; modules/data/* registra i cataloghi ed espone UniversumData.
 4) modules/engine/* crea Engine; engine-actions.js aggiunge le azioni. modules/galaxy/* crea la galassia offline; Firebase e modules/online/* preparano MP.
 5) ui-core.js prepara UI.state e gli helper; modules/ui/* e ui-social.js/ui-guide.js registrano renderer; missions-core.js, siege-missions.js e tutorial.js attivano plugin.
@@ -27,22 +27,22 @@ SICUREZZA: Firestore verifica request.auth e regole del file. Non è presente un
 ASSET: graphics-core, ships, structures generano illustrazioni Canvas; non sono sorgenti di regole economiche.
 ESTENSIONI: missions-core registra una ricerca aggiuntiva dopo il caricamento base; siege-missions aggiunge tick assedi; tutorial.js opera solo offline.
 
-D. ORDINE EFFETTIVO DEI FILE JAVASCRIPT (dal codice index.html)
+D. ORDINE EFFETTIVO DEI FILE JAVASCRIPT (dal codice app.html)
 ----------------------------------------------------------------------------------------------------
 01. modules/offline/storage.js
-02. modules/offline/lobby-starfield.js
-03. db.js
-04. modules/data/buildings.js
-05. modules/data/megastructures.js
-06. modules/data/researches.js
-07. modules/data/ships.js
-08. modules/data/defenses.js
-09. data.js
-10. graphics-core.js
-11. graphics-ships.js
-12. graphics-structures.js
-13. modules/engine/context.js
-14. modules/engine/foundation.js
+02. db.js
+03. modules/data/buildings.js
+04. modules/data/megastructures.js
+05. modules/data/researches.js
+06. modules/data/ships.js
+07. modules/data/defenses.js
+08. data.js
+09. graphics-core.js
+10. graphics-ships.js
+11. graphics-structures.js
+12. modules/engine/context.js
+13. modules/engine/foundation.js
+14. modules/engine/research-model.js
 15. modules/engine/timings.js
 16. modules/engine/production.js
 17. modules/engine/megastructure-costs.js
@@ -75,26 +75,28 @@ D. ORDINE EFFETTIVO DEI FILE JAVASCRIPT (dal codice index.html)
 44. ui-core.js
 45. modules/ui/lobby-online.js
 46. modules/ui/planet-canvas.js
-47. modules/ui/navigation.js
-48. modules/ui/runtime.js
-49. modules/ui/selects.js
-50. ui-guide.js
-51. modules/ui/ui-galattica.js
-52. modules/ui/ui-buildings.js
-53. modules/ui/ui-research.js
-54. modules/ui/ui-shipyard.js
-55. modules/ui/ui-moon.js
-56. modules/ui/ui-empire.js
-57. modules/ui/fleet.js
-58. modules/ui/galaxy.js
-59. modules/ui/espionage.js
-60. modules/ui/simulator.js
-61. modules/ui/diplomacy.js
-62. ui-social.js
-63. missions-core.js
-64. siege-missions.js
-65. ui-fleet-movements.js
-66. tutorial.js
+47. modules/ui/resource-deposits.js
+48. modules/ui/navigation.js
+49. modules/ui/runtime.js
+50. modules/ui/selects.js
+51. ui-guide.js
+52. modules/ui/ui-galattica.js
+53. modules/ui/ui-buildings.js
+54. modules/ui/ui-research.js
+55. modules/ui/ui-shipyard.js
+56. modules/ui/ui-moon.js
+57. modules/ui/ui-empire.js
+58. modules/ui/fleet.js
+59. modules/ui/galaxy.js
+60. modules/ui/espionage.js
+61. modules/ui/simulator.js
+62. modules/ui/diplomacy.js
+63. ui-social.js
+64. missions-core.js
+65. siege-missions.js
+66. ui-fleet-movements.js
+67. tutorial.js
+68. update-client.js
 
 E. CATALOGO ANALITICO — TUTTI I FILE DEL REPOSITORY
 ====================================================================================================
@@ -123,7 +125,7 @@ FILE: db.js
 Ruolo: Interfaccia lobby e coordinamento IndexedDB
 Dimensione attuale: 22,292 byte | Caricato direttamente dalla pagina: SI
 COSA CONTIENE E COME FUNZIONA:
-  Gestisce render elenco universi, creazione partita in modale, esportazione/importazione, rinomina, eliminazione, avvio partita, installazione PWA e interazioni con la pagina lobby. Le operazioni di I/O reali sono in modules/offline/storage.js; lo sfondo stellato è in modules/offline/lobby-starfield.js. Espone window.UniversumDB per compatibilità col codice esistente.
+  Gestisce render elenco universi, creazione partita in modale, esportazione/importazione, rinomina, eliminazione, avvio partita, installazione PWA e interazioni con la pagina lobby. Le operazioni di I/O reali sono in modules/offline/storage.js; la lobby ha sfondo #000000 senza canvas o animazioni. Espone window.UniversumDB per compatibilità col codice esistente.
 DIPENDENZE / PUNTO DI MANUTENZIONE:
   Usa UniversumDBStore interno, UniversumUI.startGame e gli elementi #screen-lobby / #screen-game. Su DOMContentLoaded apre IndexedDB e disegna la lobby.
 Funzioni e helper nominati presenti: showToastFallback, formatBotLabel, formatDate, renderLobbyList, escapeHTML, openModal, closeModal, openCreateUniverseModal, launchUniverse, setupPWAInstall, bindLobbyEvents.
@@ -502,15 +504,6 @@ Metodi condivisi nel registro galassia: tradeWithBot, blackMarketTrade, signBotC
 
 ## MODULI: SALVATAGGIO OFFLINE
 ----------------------------------------------------------------------------------------------------
-
-FILE: modules/offline/lobby-starfield.js
-Ruolo: Animazione sfondo lobby ottimizzata
-Dimensione attuale: 3,227 byte | Caricato direttamente dalla pagina: SI
-COSA CONTIENE E COME FUNZIONA:
-  Contiene initStarfield, attiva un Canvas nel lobby con stelle, nebulose precalcolate, ridimensionamento al bisogno e limitazione frame rate. Esporta UniversumLobbyStarfield.start.
-DIPENDENZE / PUNTO DI MANUTENZIONE:
-  Solo decorazione: non deve alterare tick, risorse o salvataggi. Sospende lavoro quando la scheda non è visibile.
-Funzioni e helper nominati presenti: initStarfield, rebuildNebulaLayer, render.
 
 FILE: modules/offline/storage.js
 Ruolo: Salvataggi locali e creazione universi
@@ -1037,3 +1030,15 @@ AGGIORNAMENTO 24/11/2026 — RELASE ATOMICHE E CACHE SICURA
 La produzione, le flotte, i salvataggi e le regole Firestore NON sono stati
 modificati dal sistema di aggiornamento. Per dettagli e limiti consultare
 "documents/rapporto aggiornamenti automatici.txt".
+
+
+AGGIORNAMENTO TECNICO — RIDUZIONE CPU (24 novembre 2026)
+----------------------------------------------------------------------------------------------------
+- L'animazione lobby-starfield.js e il canvas #starfield sono eliminati, non sospesi. Lo sfondo della lobby e' nero #000000.
+- modules/ui/planet-canvas.js riutilizza gradienti statici, mantiene il rendering del pianeta originale e chiude il ciclo RAF quando non serve; il listener visibilitychange viene rimosso insieme al renderer.
+- modules/ui/runtime.js rimanda i rerender di completamento quando document.hidden e salta il secondo conteggio delle code se il tick non ne ha completate.
+- modules/engine/progress.js completa in forma aggregata le code con durate e timestamp interi sicuri; per stati legacy o frazionari resta l'algoritmo di riferimento a singola unita'.
+- modules/engine/research-model.js seleziona i migliori laboratori in un passaggio e usa una sola chiamata durante il ricalcolo ETA.
+- Non modificati combattimento, formule di produzione, tempi di viaggio, salvataggi, Firestore e timer della simulazione.
+- Test: tests/test_cpu_optimizations.js; benchmark isolato tests/bench_cpu.js; test browser opzionale tests/verify_browser_cpu.py.
+- Avvio e aggiornamento delle release: python3 tools/build_release.py, poi node tests/test_cache.js e node tests/test_auto_update.js.

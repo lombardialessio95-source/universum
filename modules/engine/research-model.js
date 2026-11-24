@@ -60,14 +60,23 @@
 
   function getFreeLabTotal(universe, timestamp = Date.now()) {
     const net = Math.max(0, Math.floor(Number(universe.researches?.intergalacticNetwork) || 0));
-    const levels = (universe.planets || []).filter(p => !localBusyAt(p, timestamp))
-      .map(p => {
-        const upgrade = p.buildQueue?.[0];
-        return Math.max(0, Number(upgrade?.id === 'researchLab' &&
-          finiteTime(upgrade.endTime) <= timestamp ? upgrade.targetLevel : p.buildings?.researchLab) || 0);
-      }).filter(n => n > 0)
-      .sort((a,b) => b-a);
-    return levels.slice(0, 1 + net).reduce((a,b) => a+b, 0);
+    const limit = 1 + net;
+    if (Number.isNaN(limit)) return 0; // Come slice(0, NaN) nel modello precedente.
+    // Selezione dei migliori laboratori in un solo passaggio: nessuna catena
+    // filter/map/filter/sort; il risultato mantiene lo stesso ordine decrescente.
+    const top = [];
+    for (const p of universe.planets || []) {
+      if (localBusyAt(p, timestamp)) continue;
+      const upgrade = p.buildQueue?.[0];
+      const lv = Math.max(0, Number(upgrade?.id === 'researchLab' &&
+        finiteTime(upgrade.endTime) <= timestamp ? upgrade.targetLevel : p.buildings?.researchLab) || 0);
+      if (lv <= 0 || (top.length === limit && lv <= top[top.length - 1])) continue;
+      let pos = 0;
+      while (pos < top.length && top[pos] >= lv) pos++;
+      top.splice(pos, 0, lv);
+      if (top.length > limit) top.pop();
+    }
+    return top.reduce((a, b) => a + b, 0);
   }
 
   function researchWork(universe, queue) {
@@ -94,9 +103,10 @@
     const q = universe.researchQueue;
     if (!q) return;
     if (!Number.isFinite(q.workTotal) || q.workTotal <= 0) return;
-    const rate = (1 + getFreeLabTotal(universe, at)) * researchSpeed(universe, at);
+    const labs = getFreeLabTotal(universe, at);
     // If no free labs, imperial research pauses rather than using a phantom lv0 lab.
-    if (!getFreeLabTotal(universe, at)) { q.endTime = null; return; }
+    if (!labs) { q.endTime = null; return; }
+    const rate = (1 + labs) * researchSpeed(universe, at);
     const remaining = Math.max(0, q.workTotal - (Number(q.workDone) || 0));
     q.endTime = Math.ceil(at + 1000 * remaining / rate);
   }

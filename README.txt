@@ -112,3 +112,14 @@ commit di revert invece di sovrascrivere la storia. NON cancellare i dati del
 sito/IndexedDB e NON usare "Clear site data" per l'aggiornamento.
 
 Guida: documents/rapporto aggiornamenti automatici.txt
+
+
+AGGIORNAMENTO CPU E LOBBY — 24 novembre 2026
+La lobby utilizza uno sfondo nero fisso (#000000): non carica piu' canvas o animazioni stellate.
+Il pianeta mantiene il rendering originale con gradienti statici riutilizzati e RAF sospeso
+fuori dalla panoramica o in background. Le code cantiere/difesa con durate intere vengono
+avanzate per blocchi mantenendo tempi e quantita'; casi legacy restano sul percorso originale.
+Laboratori e rendering UI evitano ricalcoli duplicati. Nessun cambiamento a formule,
+combattimento, sincronizzazione online o IndexedDB.
+Dopo ogni modifica a file statici: python3 tools/build_release.py, poi tutti i test.
+Vedere documents/rapporto ottimizzazione cpu.txt.

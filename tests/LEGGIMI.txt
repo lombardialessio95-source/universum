@@ -35,3 +35,13 @@ La suite browser su un dominio HTTPS reale con Service Worker e' una verifica
 manuale aggiuntiva: i mock non sostituiscono Chrome/Firefox/Safari o Firebase.
 Per generare un manifest coerente DOPO ogni modifica ai file statici:
   python3 tools/build_release.py
+
+CPU E LOBBY (24/11/2026):
+  node tests/test_cpu_optimizations.js
+    235 verifiche di equivalenza delle code 1..1.000.000, ricerca 50/100 pianeti e rimozione sfondo.
+  node tests/bench_cpu.js /percorso/backup/universum-main
+    Benchmark Node isolato: code da 100.000/1.000.000, laboratorio e tick 50/100 pianeti.
+  python3 tests/verify_browser_cpu.py /percorso/backup/universum-main
+    Opzionale: usa Playwright + Chromium installati; confronta 21 frame pixel-per-pixel,
+    viewport desktop/mobile, visibilitychange e zero animazioni lobby (offline/online simulati).
+Questi test non misurano consumi CPU su dispositivi reali e non usano Firebase reale.

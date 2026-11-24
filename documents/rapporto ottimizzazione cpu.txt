@@ -1,0 +1,100 @@
+UNIVERSUM — AUDIT DI IMPLEMENTAZIONE CPU / LOBBY NERA
+Data: 24 novembre 2026
+Repository: lombardialessio95-source/universum (main)
+Commit di partenza: e18b8c7f890fe9c10412c5a41685804aea84f3e1
+Backup remoto: backup/pre-cpu-starfieldui-2026-11-24 (immutato al commit di partenza)
+Il commit finale va letto da GitHub main; il documento e' incluso nel commit, quindi non ne puo' contenere il proprio SHA.
+
+PERIMETRO
+- Nessun file della simulazione di combattimento modificato: modules/galaxy/combat.js,
+  modules/online/combat-resolver.js, fleet combat e altre formule di battaglia invariati.
+- Nessuna modifica a data.js, produzione delle risorse, consumo fusione, costi, tempi,
+  viaggio flotte, Firestore, database IndexedDB, meccaniche di Galattica e Bacini.
+- Frequenza del tick gameplay e risoluzioni di flotte online invariate.
+
+P1 — LOBBY
+- Eliminato definitivamente modules/offline/lobby-starfield.js.
+- Rimossi <canvas id="starfield">, tag <script>, initStarfield(), relativi CSS e listener resize/RAF.
+- Sfondo nero fisso #000000 tramite classe body.lobby-black. La classe viene rimossa
+  entrando in gioco e riapplicata tornando alla lobby. Nessun effetto sostitutivo.
+- Manifest SW rigenerato: il file rimosso non compare piu' negli asset obbligatori.
+- Test in Chromium: lobby 1440/375/320 px nera, nessun canvas, zero animazioni
+  stellate nei percorsi di ingresso offline/multiplayer SIMULATI.
+
+P2 — CANVAS PLANETARIO
+- Quattro gradienti invarianti, atmosferico/pianeta/ombra/hub Bacino, ora creati
+  una volta per montaggio del canvas, invece che a ogni frame.
+- Conservate condizioni di colore, palette, anelli, posizioni, orbite, clip e 24 FPS.
+- UI.stopPlanetCanvas() cancella il RAF e rimuove il listener visibilitychange.
+- Quando la scheda diventa invisibile non vengono prenotati nuovi RAF; al ritorno
+  viene programmato un solo callback. Il cambio pianeta/vista annulla il precedente.
+- Chromium: 21 immagini PNG esattamente identiche byte per byte alla versione base,
+  su pianeta standard, gelido con Luna, caldo con Bacino, 7 momenti ciascuno.
+
+P2 — TICK E DOM
+- Rimossi i ricontrolli sulle dimensioni delle code dopo tick() quando non vi e'
+  stato alcun completamento. Il check completo resta per ogni evento reale.
+- Una vista non viene ricostruita mentre la scheda e' in background solo per un
+  completamento; il refresh viene eseguito alla prima iterazione visibile.
+- Countdown: nessuna scrittura textContent se il testo non cambia.
+- Produzione, processOfflineProgress, timer 1000ms e funzioni gameplay invariati.
+- Niente cache di produzione persistente: invalidazioni troppo complesse (fusione,
+  turbo, edificio e risorse) avrebbero rischiato errori economici. Non introdotta.
+
+P3 — CODE CANTIERE E DIFESE
+- Per interi sicuri, completamento aggregato con n = min(remaining, 1 + floor((now-next)/step)).
+- Regole di somma e confronto esatte in numeri interi sicuri; tempi di fine, stock,
+  coda residua e riepilogo invariati; cambi di tipo elaborati elemento per elemento.
+- Su durate frazionarie, timestamps non sicuri, quantità legacy, stock non interi,
+  overflow potenziali, si usa l'algoritmo precedente, senza rischiare differenze
+  dovute agli arrotondamenti IEEE-754.
+- Confronto con codice unitario riferimento per 1, 100, 1000, 10000, 100000,
+  1000000 unità: tutto completato, incompleto, a meta', al confine, coda mista,
+  tipi nave/difesa e casi legacy. 235 controlli complessivi del test dedicato.
+
+P3 — RETE LABORATORI
+- getFreeLabTotal() seleziona i primi 1+Rete laboratori utili durante un solo
+  attraversamento dei pianeti, invece di tre filtri/map + sort di tutti i valori.
+- refreshImperialETA() ora calcola getFreeLabTotal una volta invece di due.
+- Nessuna cache tra tick: evita risultati obsoleti quando completano ricerche locali,
+  costruzioni, cambi proprietario e upgrade rete.
+- Confronti con algoritmo precedente a 0/1/10/50/100 pianeti, livelli e timestamp,
+  reti da 0 a 150: risultati identici.
+
+BENCHMARK ISOLATI (Node.js 22, mediana di 5 o 7 ripetizioni; NON profiling browser)
+  Scenario                             Prima          Dopo
+  Una coda 100.000 unita'              0,55-0,65 ms   0,03-0,04 ms
+  Una coda 1.000.000 unita'            5,57-5,98 ms   0,02-0,04 ms
+  5000 ricalcoli rete, 50 pianeti     76-78 ms       63-64 ms
+  5000 ricalcoli rete, 100 pianeti    154-157 ms     121-123 ms
+  50 tick inattivi, 50 pianeti        2,2-3,5 ms     2,1-2,3 ms
+  50 tick inattivi, 100 pianeti       3,4-3,9 ms     3,3-3,5 ms
+I valori su tick inattivo sono prossimi al rumore e non dimostrano un miglioramento
+sistematico. I benchmark non includono il disegno GUI, Firefox, smartphone, Firebase
+reale ne' carico di server con molti account. Nessuna % di CPU globale dichiarata.
+
+TEST ESATTAMENTE ESEGUITI
+- 14/14 suite Node del repository modificate+esistenti: superate.
+- 235 check specifici CPU, code, laboratori e riferimenti della lobby: superati.
+- Parita' della simulazione PRIMA/DOPO: 507 confronti a 1x, 10x, 100x e
+  1/50/100 pianeti, 5 tick e recupero 12h offline; JSON identico.
+- Test browser Chromium headless: 21 fotogrammi pixel-identici; 1440/375/320 px
+  senza overflow e con nero reale; ingressi offline/online con servizi simulati,
+  zero RAF stellati; stop/riattivazione e duplicazioni RAF verificati.
+- Test della cache: asset protetti SHA-256 aggiornati, 25 scenari simulati SW passati.
+- Tutti i file JS: node --check. Nessuna dipendenza esterna introdotta nel gioco.
+- Codice combattimento e file dati: hash identici alla versione di partenza.
+
+LIMITI E PROVE ANCORA NECESSARIE
+- Mancano misurazioni CPU/GPU/memoria con DevTools su smartphone e una sessione
+  multiplayer autenticata su Firebase reale con più schede e salvataggi esistenti.
+- La prova di ingresso multiplayer in Chromium e' eseguita con listener simulati.
+- L'algoritmo dei dati legacy con durate frazionarie rimane per-unità intenzionalmente.
+- Altri costi GPU del gioco, incluso il combattimento, sono fuori dal perimetro.
+- Conservare il backup e testare progressivamente la release sui dispositivi utenti.
+
+RIPRISTINO
+Usare il ramo backup/pre-cpu-starfieldui-2026-11-24 per ripristinare il codice,
+preferibilmente con un nuovo commit di revert sul branch main dopo aver verificato
+che nessun nuovo lavoro legittimo sia stato pubblicato nel frattempo.
+Non cancellare cache dati, IndexedDB, localStorage o Firestore per effettuare rollback.

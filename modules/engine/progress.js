@@ -61,6 +61,50 @@
     // Ricerca imperiale + ricerche locali; evento in ordine cronologico.
     queueCompleted = G.advanceResearchQueues(universe, nowTs, summary);
 
+    // Helper istanziato una sola volta per tick, non una volta per pianeta.
+    function advanceUnitQueue(queue, stock, catalog) {
+      while (queue.length > 0) {
+        const item = queue[0];
+        if (!(nowTs >= item.nextUnitEndTime)) break;
+        const step = item.unitDurationSec * 1000;
+        const remaining = item.remaining;
+        const owned = stock[item.id];
+        const name = catalog[item.id]?.name || item.id;
+        const previousSummary = summary?.completedUnits?.[name];
+        const canAggregate = Number.isSafeInteger(nowTs) &&
+          Number.isSafeInteger(item.nextUnitEndTime) &&
+          Number.isSafeInteger(step) && step > 0 &&
+          Number.isSafeInteger(remaining) && remaining > 0 &&
+          (!owned || (Number.isSafeInteger(owned) && Number.isSafeInteger(owned + remaining))) &&
+          (previousSummary === undefined || (Number.isSafeInteger(previousSummary) &&
+            Number.isSafeInteger(previousSummary + remaining))) &&
+          Number.isSafeInteger(item.nextUnitEndTime + remaining * step);
+        if (canAggregate) {
+          const count = Math.min(remaining, 1 + Math.floor((nowTs - item.nextUnitEndTime) / step));
+          stock[item.id] = (owned || 0) + count;
+          item.remaining -= count;
+          if (summary) summary.completedUnits[name] = (previousSummary || 0) + count;
+          if (item.remaining <= 0) {
+            queue.shift();
+            queueCompleted = true;
+          } else {
+            item.nextUnitEndTime += count * step;
+          }
+        } else {
+          // Compatibilita' rigorosa con queue legacy/non-intere: unita' per unita'.
+          stock[item.id] = (stock[item.id] || 0) + 1;
+          item.remaining -= 1;
+          if (summary) summary.completedUnits[name] = (summary.completedUnits[name] || 0) + 1;
+          if (item.remaining <= 0) {
+            queue.shift();
+            queueCompleted = true;
+          } else {
+            item.nextUnitEndTime += step;
+          }
+        }
+      }
+    }
+
     // 2. Code per ogni pianeta e luna
     for (const planet of universe.planets || []) {
       normalizePlanet(planet);
@@ -92,47 +136,11 @@
         }
       }
 
-      // Cantiere Navale
-      while (planet.shipyardQueue.length > 0) {
-        const sq = planet.shipyardQueue[0];
-        if (nowTs >= sq.nextUnitEndTime) {
-          planet.fleet[sq.id] = (planet.fleet[sq.id] || 0) + 1;
-          sq.remaining -= 1;
-          if (summary) {
-            const uName = Data.SHIPS[sq.id]?.name || sq.id;
-            summary.completedUnits[uName] = (summary.completedUnits[uName] || 0) + 1;
-          }
-          if (sq.remaining <= 0) {
-            planet.shipyardQueue.shift();
-            queueCompleted = true;
-          } else {
-            sq.nextUnitEndTime += sq.unitDurationSec * 1000;
-          }
-        } else {
-          break;
-        }
-      }
+      // Cantiere e difese: aggregazione soltanto se la somma in millisecondi
+      // e' intera e sicura; per vecchi dati anomali resta il percorso originale.
+      if (planet.shipyardQueue.length) advanceUnitQueue(planet.shipyardQueue, planet.fleet, Data.SHIPS);
+      if (planet.defenseQueue.length) advanceUnitQueue(planet.defenseQueue, planet.defenses, Data.DEFENSES);
 
-      // Difesa Planetaria
-      while (planet.defenseQueue.length > 0) {
-        const dq = planet.defenseQueue[0];
-        if (nowTs >= dq.nextUnitEndTime) {
-          planet.defenses[dq.id] = (planet.defenses[dq.id] || 0) + 1;
-          dq.remaining -= 1;
-          if (summary) {
-            const dName = Data.DEFENSES[dq.id]?.name || dq.id;
-            summary.completedUnits[dName] = (summary.completedUnits[dName] || 0) + 1;
-          }
-          if (dq.remaining <= 0) {
-            planet.defenseQueue.shift();
-            queueCompleted = true;
-          } else {
-            dq.nextUnitEndTime += dq.unitDurationSec * 1000;
-          }
-        } else {
-          break;
-        }
-      }
     }
     return queueCompleted;
   }

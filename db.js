@@ -3,7 +3,6 @@
   'use strict';
 
   const {MAX_UNIVERSES, init, getAll, resolveStartingResources, create, save, load, remove, rename, exportJSON, importJSON} = window.__UniversumDBStore;
-  const initStarfield = window.UniversumLobbyStarfield.start;
 
   let deferredInstallPrompt = null;
 
@@ -310,6 +309,7 @@
 
     // Fallback operativo per Step 1 se ui.js non è ancora caricato
     document.getElementById('screen-lobby').classList.add('hidden');
+    document.body.classList.remove('lobby-black');
     document.getElementById('screen-game').classList.remove('hidden');
     const creativeBar = document.getElementById('creative-quick-bar');
     if (creativeBar) creativeBar.classList.toggle('hidden', !uni.creativeMode);
@@ -478,6 +478,7 @@
     document.getElementById('btn-back-lobby')?.addEventListener('click', async () => {
       document.getElementById('screen-game').classList.add('hidden');
       document.getElementById('screen-lobby').classList.remove('hidden');
+      document.body.classList.add('lobby-black');
       await renderLobbyList();
     });
   }
@@ -500,7 +501,6 @@
 
   // Avvio automatico al caricamento DOM
   document.addEventListener('DOMContentLoaded', async () => {
-    initStarfield();
     setupPWAInstall();
     bindLobbyEvents();
     try {

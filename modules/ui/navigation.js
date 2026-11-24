@@ -77,10 +77,7 @@
     const st = UI.state;
     if (!viewport || !st.currentUniverse) return;
 
-    if (st.planetAnimId && st.currentView !== 'overview') {
-      cancelAnimationFrame(st.planetAnimId);
-      st.planetAnimId = null;
-    }
+    if (st.currentView !== 'overview') UI.stopPlanetCanvas?.();
 
     switch (st.currentView) {
       case 'overview': UI.renderOverview(viewport); break;
