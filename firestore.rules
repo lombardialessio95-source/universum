@@ -227,6 +227,22 @@ service cloud.firestore {
           && (resource.data.ownerUid == request.auth.uid || isFounder(uniId));
       }
 
+      // Fortezza Volante Opzione C (staging): dati privati solo lato Admin.
+      // Nessun browser può falsificare inventario, scadenza o ricevute.
+      match /supremaOptionCPrivate/{playerId} {
+        allow read, write: if false;
+      }
+      match /supremaOptionCMissions/{missionId} {
+        allow read, write: if false;
+      }
+      match /supremaOptionCReceipts/{receiptId} {
+        allow read, write: if false;
+      }
+      match /supremaOptionCPublic/{missionId} {
+        allow read: if signedIn() && request.auth.uid in resource.data.participants;
+        allow write: if false;
+      }
+
       // Supremas staging: only the callable may change either document.
       // Access to the private battle and its receipts is denied to all browsers.
       match /supremaRecoveryPublic/{siegeId} {
