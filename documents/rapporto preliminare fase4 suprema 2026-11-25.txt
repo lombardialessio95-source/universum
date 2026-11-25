@@ -1,0 +1,82 @@
+UNIVERSUM — FASE 4 — ANALISI PRELIMINARE E BLOCCO ARCHITETTURALE
+Data: 25 novembre 2026
+Documento sorgente: UNIVERSUM_FASE4_PROMPT_DEFINITIVO.txt (specifica consegnata dall'utente).
+Stato: NON IMPLEMENTATO. NESSUNA VERSIONE PRONTA ALLA PUBBLICAZIONE.
+
+1. BASE UFFICIALE
+HEAD main verificato mediante ricerca commit e confronto GitHub: a2692426ed4a4dd14f20e6cda0d5e89bb4b8fd3a.
+Backup preesistente e riconfermato identico a main: backup/pre-fase4-suprema-2026-11-25.
+Ramo di lavoro creato dal medesimo commit: feature/fase4-suprema-candidata-2026-11-25.
+Fasi 1/2: indicate nella storia dei commit; Fase 3 confermata dal rapporto documents/rapporto fase3 nave madre.txt e dal modulo modules/galaxy/hangars.js. Non e' stata eseguita una suite completa di regressione in questa analisi.
+
+2. SPECIFICA DEFINITIVA
+Il nuovo documento precisa le regole precedentemente assenti, fra cui:
+- PRUDENTE: alla distruzione di una Suprema qualsiasi dell'assedio le altre rientrano;
+  OFFENSIVA: le altre continuano.
+- SUPPORTO ORBITALE irreversibile dopo depositi pieni; rientro se restano solo supporti.
+- Lancio coordinato da un solo pianeta, non ingresso tardivo in assedio.
+- Controffensiva anche da alleati autorizzati contro bersaglio e tutti i supporti,
+  senza includere altre Supreme offensive; cattura destinata al comandante.
+- Intercettazione delle flotte del difensore entranti, anche in caso di sconfitta,
+  con consegna al pianeta delle risorse e delle navi superstiti.
+- 40 rate reali, rimborso annullamento 50% del pagato, navi negli hangar senza scarico manuale.
+Le regole complete sono esclusivamente nel file consegnato.
+
+3. RISCHI TECNICI ACCERTATI DAL CODICE
+- firestore.rules dichiara esplicitamente che il motore di combattimento rimane CLIENT-SIDE e che le regole NON verificano risultati e bottino.
+- firestore.rules, validHumanFleetCreate, consente fra le missioni esistenti 'incursion' ma non i nuovi identificatori dell'invasione o della controffensiva; servira' revisione con test e deploy esplicito.
+- missions-core.js utilizza flotte in volo e activeSieges per calcolare slot; la Fase 4 richiede stato persistente e ordinamento degli eventi piu' complessi.
+- modules/engine/megastructure-progress.js contiene gia' pagamento giornaliero di Invictus, Galattica e Crepuscolo; riuso possibile solo dopo verifica minuziosa di stati e rate.
+- modules/galaxy/hangars.js gestisce gli hangar individuali delle Navi Madre normali, ma non equivale al sistema multi-classe/ruoli/produzione delle Supreme.
+- db.js gestisce la lobby offline, non costituisce un arbitro remoto.
+
+4. BLOCCO DI RILASCIO
+La specifica impone che le ondate continuino online anche con attaccante e difensore
+disconnessi e che produzione, intercettazioni, controffensive, rientri, bottini,
+catture, detriti e lune siano serializzati e applicati una sola volta.
+Un browser che esegue catch-up in locale o un setInterval lato cliente non
+costituiscono un arbitro affidabile quando tutti i client sono chiusi.
+La persistenza Firestore da sola non esegue eventi scaduti in autonomia.
+La client-side combat resolution, riconosciuta nelle regole e nel rapporto Fase 3,
+non fornisce una verifica server-side dei risultati.
+Per la correttezza richiesta occorre progettare un coordinatore trusted/server
+(ad esempio Cloud Functions pianificate + trigger/event worker, documenti evento,
+lease transazionali e ricevute), verificare costi, limiti e deploy reali.
+Questa e' una modifica architetturale, esplicitamente fuori dall'autonomia
+di Programmazione ordinaria nel mandato. NON puo' essere spacciata per un
+semplice refactor del client. Necessaria approvazione del direttore e, se
+richiesto, coinvolgimento Programmazione Profonda prima del rilascio online.
+
+5. STRUTTURE DATI PROPOSTE (NON IMPLEMENTATE)
+- supreme[id]: id stabile, stato, origine, bacinoBuildingId, hangar in 5 classi,
+  ripartizione ruolo per classe, depositi, fuel operativo, ritorno protetto,
+  coda cantiere, timestamp progressione e versione.
+- supremeConstructions[id]: ratePagate, totalePagato, prossimoPagamentoAt,
+  bacinoId, stato e ricevute giornaliere; una costruzione per Bacino.
+- sieges[id]: aggressore, pianeta, origine, partecipanti ordinati,
+  modalita' segreta, frequenza, prossimaOndaAt, phase/version.
+- siegeEvents[id]: chiave deterministica (assedio+tipo+sequenza), outcome
+  immutabile, appliedAt, revisioni/receipts e legami con transazioni.
+- counteroffensives[id]: flotta, uid comandante, targetSupremeId,
+  partecipanti e ricevuta evento.
+Queste strutture non devono essere introdotte finche' non sono stabiliti
+i confini di trust e le garanzie di transazione.
+
+6. PIANO SUCCESSIVO
+A: fondamenta/rate/Bacino; B: identita'/hangar/cantiere/depositi;
+C: invasioni/ondate/intercettazioni; D: controffensive/catture/luna;
+E: integrazione offline/online/UI/PWA e profiling.
+Per ciascun gruppo: suite di test dedicate, regressione intera, scenari
+concorrenti, salvataggi precedenti, mobile e verifica Rules/emulator.
+L'integrazione di un arbitro server per il multiplayer e' prerequisito di
+rilascio, non sostituibile con mock Firestore.
+
+7. STATO CONSEGNA
+Codice di gameplay modificato: NESSUNO.
+Test nuovi eseguiti: NESSUNO. Solo verifica commit/backup e lettura mirata
+di moduli e rapporto, senza compilazione o test CPU/GPU.
+ZIP distributivo: NON PRODOTTO, non esiste alcuna build candidata implementata.
+Firebase Rules: NON MODIFICATE, NON DEPLOYATE.
+main: INVARIATO.
+Decisione: SOSPENDERE IL RILASCIO. Richiedere autorizzazione a realizzare
+l'arbitro affidabile nel livello server, mantenendo le meccaniche approvate.
