@@ -276,7 +276,7 @@
       local.phase = 'IN RITORNO';
       local.mission = 'recall';
       local.recalled = true;
-      local.returnStartTime = newArrival - Math.max(0, newArrival - Date.now());
+      local.returnStartTime = Date.now();
       local.arrivalTime = newArrival;
       local.returnTime = newArrival;
     }
