@@ -17,6 +17,7 @@ class Snap {
 class Ref {
   constructor(path){this.path=path;}
   collection(name){return new Collection(this.path+'/'+name);}
+  get(){return Promise.resolve(new Snap(this.path));}
 }
 class Collection {
   constructor(path){this.path=path;}
