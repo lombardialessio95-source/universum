@@ -109,6 +109,16 @@ async function run(){
     check(state.inventory.ships.length===1&&state.inventory.ships[0].status==='docked',
       'una sola Suprema rientrata');
   }
+  const nextStart=launch.arrivalAt+100000;
+  await act('userA',{action:'build',commandId:'build2',originKey:'1_1_1',supremeId:'Sup2'},nextStart);
+  const metalBefore=store.get(home).inbox.resources.metal;
+  const updated=await API.getState(db,{uid:'userA',universeId:'t1'},()=>nextStart+day+1000);
+  check(updated.inventory.constructions.find(s=>s.id==='Sup2')?.paidDays===1,'una rata giornaliera sulla seconda costruzione');
+  check(store.get(home).inbox.resources.metal===metalBefore-500000,'costo seconda costruzione una sola volta');
+  const cancelled=await act('userA',{action:'cancelBuild',commandId:'cancel2',originKey:'1_1_1',
+    supremeId:'Sup2'},nextStart+day+2000);
+  check(cancelled.refund.metal===250000,'rimborso 50% della rata versata');
+  check(store.get(home).inbox.resources.metal===metalBefore-250000,'rimborso non duplica risorse');
   console.log('Fase 4 Opzione C: '+count+' asserzioni passate (Firestore simulato, NON staging reale)');
 }
 run().catch(err=>{console.error(err);process.exitCode=1;});
