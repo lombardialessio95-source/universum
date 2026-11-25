@@ -20,4 +20,13 @@ for (const filename of files) {
   const code = fs.readFileSync(path.join(root,filename),'utf8');
   vm.runInContext(code,context,{filename,timeout:1000});
 }
-module.exports = window.UniversumSupremaSieges;
+// Mantiene tutti gli export dell'assedio staging; i servizi Opzione C
+// usano direttamente gli STESSI risolutori di combattimento e volo del gioco.
+module.exports = Object.freeze({
+  ...window.UniversumSupremaSieges,
+  core: window.UniversumSuprema,
+  resolveCombat: window.__UniversumGalaxyModules.resolveCombat,
+  calculateDistance: window.__UniversumGalaxyModules.calculateDistance,
+  getFleetSpeedAndFuel: window.__UniversumGalaxyModules.getFleetSpeedAndFuel,
+  data: window.UniversumData
+});
