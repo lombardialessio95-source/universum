@@ -66,7 +66,33 @@ service cloud.firestore {
         'arrivalTime', 'returnTime',
         'siegeDeuterium', 'lastSiegeTickAt', 'siegeStartedAt',
         'pendingRansom', 'repaired', 'repairReason',
-        'mission', 'schemaVersion', 'departureTime', 'carrierHangars'];
+        'mission', 'schemaVersion', 'departureTime', 'carrierHangars',
+        // Solo per correggere i due orari al timestamp di partenza Firebase.
+        'zoneArrivalTime', 'explorationEndTime'];
+    }
+
+    // Mantiene coerenti gli istanti di una spedizione corretti sul timestamp
+    // Firebase; non autorizza modifiche arbitrarie alle durate immutabili.
+    function validExplorationClockCorrection() {
+      return !request.resource.data.diff(resource.data).affectedKeys()
+        .hasAny(['zoneArrivalTime', 'explorationEndTime'])
+        || (
+          request.auth.uid == resource.data.attackerUid
+          && resource.data.status == 'outbound'
+          && request.resource.data.status == 'outbound'
+          && resource.data.mission == 'expedition'
+          && request.resource.data.mission == resource.data.mission
+          && request.resource.data.travelDurationMs == resource.data.travelDurationMs
+          && request.resource.data.explorationHoldMs == resource.data.explorationHoldMs
+          && request.resource.data.returnTravelDurationMs == resource.data.returnTravelDurationMs
+          && request.resource.data.zoneArrivalTime ==
+            request.resource.data.departureTime + resource.data.travelDurationMs
+          && request.resource.data.explorationEndTime ==
+            request.resource.data.zoneArrivalTime + resource.data.explorationHoldMs
+          && request.resource.data.arrivalTime == request.resource.data.explorationEndTime
+          && request.resource.data.returnTime ==
+            request.resource.data.explorationEndTime + resource.data.returnTravelDurationMs
+        );
     }
 
     // Un client che non partecipa allo scontro non puo' modificare le flotte.
@@ -247,6 +273,7 @@ service cloud.firestore {
         // o di riscrivere ships/cargo con valori inventati durante il volo.
         allow update: if signedIn() && fleetParty()
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(fleetFieldsForUpdate())
+          && validExplorationClockCorrection()
           && (
             request.resource.data.mission == resource.data.mission
             || (resource.data.attackerUid == request.auth.uid
