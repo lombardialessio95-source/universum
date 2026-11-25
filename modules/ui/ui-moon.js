@@ -98,6 +98,41 @@
       const missingSupreme = showSuprema && Object.entries(suprema.requirements)
         .filter(([id,level])=>!(planet.localResearches?.[id]>=level))
         .map(([id,level])=>`${Data.RESEARCHES[id].name} Lv.${level}`);
+      const ownedDocked = ownedSupreme.filter(ship=>ship.status==='docked');
+      const assault = window.UniversumSupremaSieges;
+      const supremeOptions = suprema && Object.keys(suprema.slotsPerShip).map(
+        id=>`<option value="${id}">${escapeHTML(Data.SHIPS[id].name)}</option>`).join('');
+      const siegeRows = (uni.supremaSieges || []).filter(s=>s.originId===planet.id && !s.endedAt).map(s=>
+        `<p>Assedio [${s.targetCoords.g}:${s.targetCoords.s}:${s.targetCoords.p}]
+          · ${s.started?'Prossima ondata':'Arrivo'} <span class="live-timer" data-end="${s.nextAt}"></span>
+          <input type="number" min="1" max="10" step="1" value="${s.waveHours}" aria-label="Frequenza futura in ore">
+          <button type="button" class="btn btn-ghost" data-supreme-frequency="${escapeHTML(s.id)}">Imposta frequenza futura</button>
+          <button type="button" class="btn btn-ghost" data-supreme-recall="${escapeHTML(s.id)}">Ritira assedio</button></p>`).join('');
+      const supremeFleet = ownedDocked.length ? `
+        <form id="supreme-controls">
+          <label>Suprema <select name="ship" class="form-control">${ownedDocked.map((ship,i)=>
+            `<option value="${escapeHTML(ship.id)}">Suprema ${i+1} · ${formatNum(ship.operatingFuel)} D</option>`).join('')}</select></label>
+          <label>Nave <select name="unit" class="form-control">${supremeOptions}</select></label>
+          <label>Quantità <input name="qty" type="number" min="1" step="1" value="1" class="form-control"></label>
+          <label>Ruolo <select name="role" class="form-control"><option value="invasion">Invasione</option><option value="escort">Scorta</option><option value="reserve">Riserva</option></select></label>
+          <label>Ruolo attuale <select name="source" class="form-control"><option value="reserve">Riserva</option><option value="invasion">Invasione</option><option value="escort">Scorta</option></select></label>
+          <button type="submit" class="btn btn-ghost" value="assign">Cambia ruolo</button>
+          <button type="submit" class="btn btn-ghost" value="load">Carica dal pianeta</button>
+          <button type="submit" class="btn btn-ghost" value="build">Programma nel cantiere</button>
+          <label>Risorsa <select name="resource" class="form-control"><option value="fuel">Serbatoio operativo</option><option value="metal">Metallo</option><option value="crystal">Cristallo</option><option value="deuterium">Deuterio del deposito</option></select></label>
+          <button type="submit" class="btn btn-ghost" value="deposit">Trasferisci alla Suprema</button>
+          <button type="submit" class="btn btn-ghost" value="withdraw">Trasferisci al pianeta</button>
+        </form>
+        <form id="supreme-invasion">
+          ${ownedDocked.map((ship,i)=>`<label><input type="checkbox" name="selected" value="${escapeHTML(ship.id)}"> Suprema ${i+1}</label>
+            <select class="form-control" name="when-full-${escapeHTML(ship.id)}" aria-label="A depositi pieni, Suprema ${i+1}"><option value="return">Rientra a depositi pieni</option><option value="support">Supporto a depositi pieni</option></select>`).join('')}
+          <label>Galassia <input name="g" type="number" min="1" max="${uni.galaxies || 1}" required class="form-control"></label>
+          <label>Sistema <input name="s" type="number" min="1" max="${uni.systemsPerGalaxy || 499}" required class="form-control"></label>
+          <label>Posizione <input name="p" type="number" min="1" max="15" required class="form-control"></label>
+          <label>Modalità <select name="mode" class="form-control"><option value="prudente">Prudente</option><option value="offensiva">Offensiva</option></select></label>
+          <label>Intervallo ondate (ore) <input name="hours" type="number" min="1" max="10" value="1" required class="form-control"></label>
+          <button class="btn btn-blue" type="submit">Lancia invasione</button>
+        </form>`:'';
       const supremaHtml = showSuprema ? `
         <div class="glass-panel" style="margin-top:14px; padding:12px;">
           <strong>Nave Madre Suprema</strong>
@@ -108,7 +143,14 @@
             ${missingSupreme.length ? `<p class="text-muted">Requisiti mancanti · ${escapeHTML(missingSupreme.join(', '))}</p>` : ''}
             <button type="button" id="btn-start-suprema" class="btn btn-blue"
               ${!Galaxy.isBacinoVuoto(planet,uni) || missingSupreme.length?'disabled':''}>Costruisci Suprema</button>`}
-          ${ownedSupreme.map(ship=>`<p class="text-muted">Suprema ormeggiata · Hangar ${suprema.usedSlots(ship)} / ${suprema.hangarCapacity}</p>`).join('')}
+          ${ownedSupreme.map(ship=>`<p class="text-muted">Suprema · ${escapeHTML(ship.status)} · Hangar ${suprema.usedSlots(ship)} / ${suprema.hangarCapacity}
+            · Depositi ${formatNum(ship.resources.metal)} M / ${formatNum(ship.resources.crystal)} C / ${formatNum(ship.resources.deuterium)} D
+            · Riserva di ritorno ${formatNum(ship.returnReserve || 0)} D
+            · Cantiere ${ship.shipyardQueue.length} lotti</p>`).join('')}
+          ${ownedSupreme.flatMap(ship=>ship.shipyardQueue.map(order=>`<p>${escapeHTML(Data.SHIPS[order.ship].name)}
+            · ${order.remaining} da produrre ${order.finishAt ? `<span class="live-timer" data-end="${order.finishAt}"></span>` : ''}
+            <button type="button" class="btn btn-ghost" data-supreme-ship="${escapeHTML(ship.id)}" data-supreme-cancel="${escapeHTML(order.id)}">Annulla unità in attesa</button></p>`)).join('')}
+          ${siegeRows}${supremeFleet}
         </div>`:'';
 
       const bacinoArtId = b.status === 'stopped' ? 'bacinoSpazialeStopped' : b.status === 'building' ? 'bacinoSpazialeBuilding' : 'bacinoSpaziale';
@@ -129,6 +171,75 @@
           ${supremaHtml}
         </div>
       `;
+      async function persistSuprema() {
+        await UI.persistUniverseState();
+        UI.updateTopBarNumbers();
+        UI.renderCurrentView();
+      }
+      viewport.querySelector('#supreme-controls')?.addEventListener('submit',async e=>{
+        e.preventDefault();
+        const form=new FormData(e.currentTarget);
+        const ship=ownedDocked.find(s=>s.id===form.get('ship'));
+        if (!ship) return;
+        const count=Number(form.get('qty')), unit=form.get('unit'), role=form.get('role'), now=Date.now();
+        try {
+          assault.advanceOffline(uni,now);
+          switch (e.submitter.value) {
+            case 'load':
+              suprema.load(uni,planet,ship,unit,count);
+              if (role!=='reserve') suprema.assign(ship,unit,count,'reserve',role);
+              break;
+            case 'assign':
+              suprema.assign(ship,unit,count,form.get('source'),role);
+              break;
+            case 'build':
+              suprema.queueShips(ship,uni,Engine,Data.SHIPS,crypto.randomUUID(),unit,count,now);
+              suprema.advanceShipyard(ship,now);
+              break;
+            case 'deposit':
+            case 'withdraw':
+              assault.transfer(planet,ship,form.get('resource'),e.submitter.value==='deposit'?count:-count,now);
+              break;
+          }
+          await persistSuprema();
+        } catch (error) { UI.toast(error.message,'error'); }
+      });
+      viewport.querySelector('#supreme-invasion')?.addEventListener('submit',async e=>{
+        e.preventDefault();
+        const form=new FormData(e.currentTarget);
+        const coords=['g','s','p'].map(k=>Number(form.get(k)));
+        try {
+          const target=window.__UniversumGalaxyModules.generateProceduralSlot(uni,...coords);
+          if (target.ownerType!=='bot') throw Error('Scegli un pianeta nemico occupato.');
+          const selection=form.getAll('selected').map(id=>({id,whenFull:form.get('when-full-'+id)}));
+          assault.start(uni,planet,target,crypto.randomUUID(),selection,form.get('mode'),Number(form.get('hours')),Date.now());
+          await persistSuprema();
+        } catch (error) { UI.toast(error.message,'error'); }
+      });
+      viewport.querySelectorAll('[data-supreme-frequency]').forEach(button=>button.addEventListener('click',async ()=>{
+        const siege=(uni.supremaSieges || []).find(s=>s.id===button.dataset.supremeFrequency);
+        if (!siege) return;
+        try {
+          const now=Date.now();
+          assault.advanceOffline(uni,now);
+          assault.changeFrequency(siege,Number(button.previousElementSibling.value),now);
+          await persistSuprema();
+        } catch (error) { UI.toast(error.message,'error'); }
+      }));
+      viewport.querySelectorAll('[data-supreme-cancel]').forEach(button=>button.addEventListener('click',async ()=>{
+        if (!confirm('Annullare le unità ancora in attesa?')) return;
+        const ship=ownedSupreme.find(s=>s.id===button.dataset.supremeShip);
+        assault.advanceOffline(uni,Date.now());
+        if (ship && suprema.cancelShipOrder(ship,button.dataset.supremeCancel)) await persistSuprema();
+      }));
+      viewport.querySelectorAll('[data-supreme-recall]').forEach(button=>button.addEventListener('click',async ()=>{
+        const siege=(uni.supremaSieges || []).find(s=>s.id===button.dataset.supremeRecall);
+        const now=Date.now();
+        assault.advanceOffline(uni,now);
+        if (siege && !siege.endedAt && siege.nextAt<=now) {
+          UI.toast('Attendere il recupero delle ondate scadute.','error');
+        } else if (siege && assault.recall(uni,siege,now)) await persistSuprema();
+      }));
       document.getElementById('btn-start-suprema')?.addEventListener('click', async () => {
         try {
           suprema.start(uni,planet,crypto.randomUUID(),Date.now(),Galaxy.getInvictusCount(planet,uni).total);

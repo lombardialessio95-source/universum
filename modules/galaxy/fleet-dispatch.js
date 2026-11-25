@@ -19,7 +19,7 @@
   }
 
 
-  function getFleetSpeedAndFuel(universe, fleet, distance, speedPct = 100) {
+  function getFleetSpeedAndFuel(universe, fleet, distance, speedPct = 100, options = {}) {
     const Data = window.UniversumData;
     let minSpeed = Infinity;
     let totalFuelPerDist = 0;
@@ -27,7 +27,7 @@
     for (const [shipId, cntRaw] of Object.entries(fleet || {})) {
       const cnt = Math.max(0, Math.floor(Number(cntRaw) || 0));
       if (cnt <= 0 || shipId === 'solarSatellite') continue;
-      const spec = Data.SHIPS[shipId];
+      const spec = options.shipSpecs?.[shipId] || Data.SHIPS[shipId];
       if (!spec) continue;
 
       const driveLv = Number(universe.researches?.[spec.driveType] || 0);
@@ -37,13 +37,13 @@
 
       const effectiveShipSpeed = spec.speed * (1 + driveLv * bonusPerLv);
       if (effectiveShipSpeed < minSpeed) minSpeed = effectiveShipSpeed;
-      totalFuelPerDist += Data.getShipFuelConsumption(shipId) * cnt;
+      totalFuelPerDist += (options.shipSpecs?.[shipId]?.fuel ?? Data.getShipFuelConsumption(shipId)) * cnt;
     }
 
     if (!isFinite(minSpeed) || minSpeed <= 0) minSpeed = 5000;
-    const speedMult = window.UniversumEngine
+    const speedMult = options.speed ?? (window.UniversumEngine
       ? window.UniversumEngine.getEffectiveSpeed(universe)
-      : (universe.speed || 10);
+      : (universe.speed || 10));
 
     const pct = Math.min(100, Math.max(10, Number(speedPct) || 100)) / 100;
     const baseSec = 10 + (35000 / Math.sqrt(speedMult)) * Math.sqrt((distance * 10) / minSpeed);

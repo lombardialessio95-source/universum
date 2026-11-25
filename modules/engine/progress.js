@@ -177,7 +177,9 @@
     const fleetEvents = services && !Number.isSafeInteger(universe.serviceRevision) &&
       universe.fleetsInFlight?.some(f=>services.ids.some(id=>(f.fleet || f.ships)?.[id]));
     if (!(pendingSupreme || fleetEvents || services?.hasServices(universe)) || !universe.lastSeen || universe.lastSeen >= now || (universe.creativeMode && !pendingSupreme)) {
-      return processOfflineInterval(universe,now);
+      const summary = processOfflineInterval(universe,now);
+      window.UniversumSupremaSieges?.advanceOffline(universe, now);
+      return summary;
     }
     const start = universe.lastSeen;
     const report = processOfflineInterval(universe,start,true);
@@ -202,6 +204,7 @@
       for (const [key,count] of Object.entries(part.completedUnits)) report.completedUnits[key] = (report.completedUnits[key] || 0) + count;
     }
     report.offlineSeconds = Math.floor((now-start)/1000);
+    window.UniversumSupremaSieges?.advanceOffline(universe, now);
     return report;
   }
 
@@ -307,6 +310,7 @@
 
     const queueCompleted = advanceQueuesAtTimestamp(universe, now, null);
     checkCrepuscoloLimbo(universe, now);
+    window.UniversumSupremaSieges?.advanceOffline(universe,now);
     return settleSupremes(universe, now) || queueCompleted;
   }
   Object.assign(G, { addResourcesWithCap, advancePlanetResources, advanceQueuesAtTimestamp, processOfflineProgress, tick });

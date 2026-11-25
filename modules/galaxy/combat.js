@@ -10,7 +10,7 @@
   // =========================================================
   // 3. MOTORE DI BATTAGLIA A 6 ROUND
   // =========================================================
-  function expandUnitPool(unitMap, tech, isDefenseMap = false, tags = {}) {
+  function expandUnitPool(unitMap, tech, isDefenseMap = false, tags = {}, shipSpecs = {}) {
     const Data = window.UniversumData;
     const pool = [];
     const wMult = 1 + (Number(tech?.weaponsTech || 0) * 0.1);
@@ -20,7 +20,7 @@
     for (const [id, countRaw] of Object.entries(unitMap || {})) {
       const count = Math.max(0, Math.floor(Number(countRaw) || 0));
       if (count <= 0) continue;
-      const spec = isDefenseMap ? Data.DEFENSES[id] : (Data.SHIPS[id] || Data.DEFENSES[id]);
+      const spec = isDefenseMap ? Data.DEFENSES[id] : (shipSpecs[id] || Data.SHIPS[id] || Data.DEFENSES[id]);
       if (!spec) continue;
 
       const maxHull = Math.floor(spec.hull * aMult);
@@ -59,8 +59,9 @@
 
   function resolveCombat(attackerFleet, attackerTech, defenderData, options = {}) {
     const Data = window.UniversumData;
-    let attackers = expandUnitPool(attackerFleet, attackerTech, false, options.attackerTags || {});
-    const defFleetUnits = expandUnitPool(defenderData.fleet || {}, defenderData.tech || {}, false, options.defenderTags || {});
+    const random = options.random || Math.random;
+    let attackers = expandUnitPool(attackerFleet, attackerTech, false, options.attackerTags || {}, options.shipSpecs);
+    const defFleetUnits = expandUnitPool(defenderData.fleet || {}, defenderData.tech || {}, false, options.defenderTags || {}, options.shipSpecs);
 
     const defClean = Object.assign({}, defenderData.defenses || {});
     const trapCount = Math.max(0, Math.floor(Number(defClean.spaceTrap || 0)));
@@ -110,7 +111,7 @@
         while (keepFiring && safetyShots < 40) {
           keepFiring = false;
           safetyShots++;
-          const targetIdx = Math.floor(Math.random() * defenders.length);
+          const targetIdx = Math.floor(random() * defenders.length);
           const target = defenders[targetIdx];
           if (!target || target.hull <= 0) continue;
 
@@ -127,7 +128,7 @@
 
             if (target.hull > 0 && target.hull < target.maxHull * 0.7) {
               const explodeProb = 1 - (target.hull / target.maxHull);
-              if (Math.random() < explodeProb) {
+              if (random() < explodeProb) {
                 target.hull = 0;
               }
             }
@@ -135,7 +136,7 @@
 
           const rf = shooter.rapidFire[target.id];
           if (rf && rf > 1) {
-            if (Math.random() < (rf - 1) / rf) {
+            if (random() < (rf - 1) / rf) {
               keepFiring = true;
             }
           }
@@ -151,7 +152,7 @@
         while (keepFiring && safetyShots < 40) {
           keepFiring = false;
           safetyShots++;
-          const targetIdx = Math.floor(Math.random() * attackers.length);
+          const targetIdx = Math.floor(random() * attackers.length);
           const target = attackers[targetIdx];
           if (!target || target.hull <= 0) continue;
 
@@ -168,7 +169,7 @@
 
             if (target.hull > 0 && target.hull < target.maxHull * 0.7) {
               const explodeProb = 1 - (target.hull / target.maxHull);
-              if (Math.random() < explodeProb) {
+              if (random() < explodeProb) {
                 target.hull = 0;
               }
             }
@@ -176,7 +177,7 @@
 
           const rf = shooter.rapidFire[target.id];
           if (rf && rf > 1) {
-            if (Math.random() < (rf - 1) / rf) {
+            if (random() < (rf - 1) / rf) {
               keepFiring = true;
             }
           }
@@ -289,15 +290,15 @@
 
     if (survivingDeathStars > 0) {
       for (let i = 0; i < survivingDeathStars; i++) {
-        if (defenderData.moon && !moonDestroyed && Math.random() < 0.10) {
+        if (defenderData.moon && !moonDestroyed && random() < 0.10) {
           moonDestroyed = true;
           log.push('🌑💥 UNA MORTE NERA HA POLVERIZZATO LA LUNA NEMICA CON TUTTI I SUOI EDIFICI!');
         }
-        if (options.allowBacinoDestruction && defenderData.bacinoSpaziale && defenderData.bacinoSpaziale.status === 'active' && !bacinoDestroyed && Math.random() < 0.10) {
+        if (options.allowBacinoDestruction && defenderData.bacinoSpaziale && defenderData.bacinoSpaziale.status === 'active' && !bacinoDestroyed && random() < 0.10) {
           bacinoDestroyed = true;
           log.push('🛠️💥 UNA MORTE NERA HA POLVERIZZATO IL BACINO SPAZIALE NEMICO!');
         }
-        if (!planetDestroyed && Math.random() < 0.01) {
+        if (!planetDestroyed && random() < 0.01) {
           planetDestroyed = true;
           moonDestroyed = true;
           log.push('☄️☠️ EVENTO EPICO! IL SUPERLASER DELLA MORTE NERA HA DISINTEGRATO L’INTERO PIANETA!');
