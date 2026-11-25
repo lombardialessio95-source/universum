@@ -3,6 +3,7 @@
 const Engine=require('./engine');
 const Inv=require('./option-c-inventory');
 const Battle=require('./option-c-battle');
+const Yard=require('./option-c-yard');
 const DAY=86400000, HOUR=3600000;
 const ID=/^[A-Za-z0-9_-]{1,80}$/, COORD=/^\d{1,2}_\d{1,3}_\d{1,2}$/;
 const kinds=['metal','crystal','deuterium'];
@@ -93,7 +94,7 @@ async function commandAction(db,input,clock=Date.now){
   const {uid,universeId,action,commandId}=input||{};
   if(!uid)fail('unauthenticated','Accesso richiesto.');
   requireId(universeId,'Universo');requireId(commandId,'Comando');
-  if(!['build','load','assign','deposit','launch','resolve','return'].includes(action)) {
+  if(!['build','load','assign','deposit','queue','launch','resolve','return'].includes(action)) {
     fail('invalid-argument','Azione Suprema non supportata.');
   }
   const base=baseFor(db,universeId),inventoryRef=privFor(base,uid),
@@ -140,15 +141,19 @@ async function commandAction(db,input,clock=Date.now){
       inv.constructions.push({id:supremeId,originKey,startedAt:now,paidDays:0,nextPaymentAt:now+DAY,status:'building'});
       result={supremeId,nextPaymentAt:now+DAY,status:'building'};
     }
-    if(['load','assign','deposit','launch'].includes(action)){
+    if(['load','assign','deposit','queue','launch'].includes(action)){
       const supremeId=requireId(input.supremeId,'ID Suprema');
       const ship=inv.ships.find(s=>s.id===supremeId);
       if(!ship||ship.status!=='docked')fail('failed-precondition','Suprema non disponibile.');
       if(ship.originKey!==originKey && action!=='assign')fail('failed-precondition','Suprema non presente su questo pianeta.');
+      for(const member of inv.ships)Yard.advance(member,now);
       if(action==='load'){
         const type=requireId(input.ship,'Classe');
         if(!qty(input.count))fail('invalid-argument','Quantità non valida.');
         if(stock(planet,type)<input.count)fail('failed-precondition','Navi insufficienti.');
+        if(Inv.inventory(ship.hangar)+Yard.reserved(ship)+input.count*Inv.WEIGHTS[type]>4000) {
+          fail('failed-precondition','Cantiere e carico superano i 4000 slot.');
+        }
         const prepared=Inv.planLoad({...planet.fleet,[type]:stock(planet,type)},ship.hangar,type,input.count);
         ship.hangar=prepared.hangar;
         originChanges['inbox.fleet.'+type]=(Number(planet.inbox?.fleet?.[type])||0)-input.count;
@@ -162,6 +167,13 @@ async function commandAction(db,input,clock=Date.now){
         ship.hangar[to][type]=(ship.hangar[to][type]||0)+input.count;
         Inv.inventory(ship.hangar);
         result={supremeId,usedSlots:Inv.inventory(ship.hangar)};
+      }else if(action==='queue'){
+        const type=requireId(input.ship,'Classe cantiere');
+        const count=input.count;
+        if(!qty(count))fail('invalid-argument','Quantità cantiere non valida.');
+        try {result=Yard.start(ship,Engine,type,count,uid+'_'+commandId,now,uniSnap.data().speed||1);}
+        catch(err){fail('failed-precondition',err.message);}
+        Yard.advance(ship,now);
       }else if(action==='deposit'){
         const kind=input.resource;
         if(!kinds.includes(kind)||!qty(input.amount))fail('invalid-argument','Risorsa o importo non valido.');
@@ -170,6 +182,7 @@ async function commandAction(db,input,clock=Date.now){
           fail('failed-precondition','Depositi o risorse insufficienti.');
         }
         ship.resources[kind]+=input.amount;
+        Yard.advance(ship,now);
         originChanges['inbox.resources.'+kind]=(Number(planet.inbox?.resources?.[kind])||0)-input.amount;
         result={supremeId,resource:kind,stored:ship.resources[kind]};
       }else if(action==='launch'){
@@ -285,7 +298,9 @@ async function getState(db,{uid,universeId},clock=Date.now) {
       if(snap.exists&&owned(snap.data(),uid)){docs.set(key,snap.data());refs.set(key,ref);}
     }
     const original=JSON.stringify(inv);
-    const debits=planSettlement(inv,docs,clock());
+    const at=clock();
+    const debits=planSettlement(inv,docs,at);
+    for(const ship of inv.ships)Yard.advance(ship,at);
     if(original!==JSON.stringify(inv)) {
       mutateInventory(tx,ownRef,inv);
       for(const [key,amount] of debits) {
