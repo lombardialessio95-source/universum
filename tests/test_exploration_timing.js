@@ -114,4 +114,99 @@ check(online.includes('await db.runTransaction(async (tx) =>') &&
   online.includes('getRecallDurationMs(fleet, now)'),'richiamo online in transazione');
 check(online.includes('getExplorationHoldDurationSec(universeObj, expeditionHours)'),
   'online formula uguale a offline');
-console.log('TEST ESPLORAZIONE: '+checks+' controlli superati, inclusa Galattica e compatibilita salvataggi.');
+// Test online che esegue DAVVERO launchOnlineFleet e recallOnlineFleet
+// con transazioni serializzate come un mock Firestore. Non è Firebase reale.
+async function runOnline(){
+  const docs=new Map();
+  let seq=0,serial=Promise.resolve();
+  class Snap {
+    constructor(ref){this.exists=docs.has(ref.key);this.id=ref.key.split('/').at(-1);}
+    data(){return docs.get(this.refKey)||null;}
+  }
+  class Ref {
+    constructor(key){this.key=key;this.id=key.split('/').at(-1);}
+    collection(part){return new Collection(this.key+'/'+part);}
+    async get(){
+      const value=docs.get(this.key);
+      return {exists:value!==undefined,data:()=>value||null,id:this.id};
+    }
+    async update(data){const v=docs.get(this.key);if(!v)throw Error('document missing');Object.assign(v,data);}
+  }
+  class Collection{
+    constructor(key){this.key=key;}
+    doc(id){return new Ref(this.key+'/'+id);}
+    async add(data){
+      const r=this.doc('fleet'+(++seq));
+      docs.set(r.key,{...data});
+      return r;
+    }
+  }
+  const db={
+    collection:name=>new Collection(name),
+    runTransaction(fn){
+      const execute=async()=>fn({
+        get:ref=>ref.get(),
+        update:(ref,data)=>{Object.assign(docs.get(ref.key),data);}
+      });
+      const job=serial.then(execute);
+      serial=job.catch(()=>{});
+      return job;
+    }
+  };
+  const mpWindow={
+    UniversumData:data,UniversumMissionsCore:C,
+    UniversumGalaxy:{calculateDistance:()=>1000,getFleetSpeedAndFuel:travel},
+    __UniversumMPVariables:{FLEET_SCHEMA_VERSION:3,_ONLINE_SUPPORTED_MISSIONS:new Set(),_mpErrorToastAt:new Map()},
+    __UniversumMPModules:{
+      getAuth:()=>({currentUser:{uid:'alice',displayName:'Alice'}}),
+      getDB:()=>db,coordsToKey:c=>[c.g,c.s,c.p].join('_'),
+      syncPlayerState:async()=>{},_tsToMs:v=>v?.toMillis?.()||0
+    }
+  };
+  const firebase={firestore:{FieldValue:{serverTimestamp:()=>({toMillis:()=>now+900})}}};
+  vm.runInNewContext(source('modules/online/fleet-control.js'),
+    {window:mpWindow,Date:FakeDate,console,Math,firebase});
+  const G=mpWindow.__UniversumMPModules;
+  const where={g:1,s:1,p:16};
+  const u=uni(1);
+  now=T;
+  const mission=await G.launchOnlineFleet(u,0,where,'explore',{lightFighter:2},{},{exploreHours:5});
+  equal(mission.zoneArrivalTime,mission.departureTime+3600000,'online arrivo zona con orologio Firebase');
+  equal(mission.explorationEndTime-mission.zoneArrivalTime,18000000,'online permanenza 5h su 1x');
+  equal(mission.returnTime-mission.departureTime,7*3600000,'online 1+5+1');
+  const fleetRef='online_universes/u1/fleets/'+mission.id;
+  equal(docs.get(fleetRef).returnTime,mission.returnTime,'online timestamp salvato nello store');
+  now=mission.zoneArrivalTime+4*3600000;
+  await G.recallOnlineFleet(u,mission.id);
+  equal(docs.get(fleetRef).returnTime,now+3600000,'online richiamo dopo 4h permanenza');
+  check(docs.get(fleetRef).mission==='recall','online richiamo non concede ricompensa');
+  await assert.rejects(G.recallOnlineFleet(u,mission.id),/già.*rientro/);checks++;
+  const another=uni(10);
+  now=T+8*3600000;
+  const later=await G.launchOnlineFleet(another,0,where,'explore',{lightFighter:2},{},{exploreHours:5});
+  equal(later.explorationEndTime-later.zoneArrivalTime,
+    C.getExplorationHoldDurationSec(another,5)*1000,'online 10x uguale offline');
+  now=later.departureTime+1800000;
+  const concurrent=await Promise.allSettled([
+    G.recallOnlineFleet(another,later.id),
+    G.recallOnlineFleet(another,later.id)
+  ]);
+  equal(concurrent.filter(x=>x.status==='fulfilled').length,1,'due client: un solo richiamo');
+  equal(concurrent.filter(x=>x.status==='rejected').length,1,'secondo richiamo rifiutato');
+  const laterRef='online_universes/u1/fleets/'+later.id;
+  equal(docs.get(laterRef).returnTime,now+1800000,'online ritorno meta tratta');
+  const old=uni(1);
+  const legacyId='oldExpedition';
+  docs.set('online_universes/u1/fleets/'+legacyId,{
+    attackerUid:'alice',resolved:false,status:'outbound',mission:'expedition',
+    departureTime:T,arrivalTime:T+6*3600000,returnTime:T+7*3600000
+  });
+  now=T+5*3600000;
+  await G.recallOnlineFleet(old,legacyId);
+  equal(docs.get('online_universes/u1/fleets/'+legacyId).returnTime,
+    now+3600000,'online legacy mantiene durata ritorno');
+}
+runOnline().then(()=>console.log('TEST ESPLORAZIONE: '+checks+
+  ' controlli superati (Firestore simulato, NON ambiente reale).'))
+  .catch(err=>{console.error(err);process.exitCode=1;});
+
