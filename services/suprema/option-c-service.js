@@ -106,10 +106,11 @@ async function commandAction(db,input,clock=Date.now){
   const targetKey=action==='launch'?requireId(input.targetKey,'Bersaglio',COORD):null;
   const missionId=['launch','resolve','return'].includes(action)?
     (action==='launch'?uid+'_'+commandId:requireId(input.missionId,'Missione')):null;
+  if(missionId&&missionId.length>80)fail('invalid-argument','Identificatore missione troppo lungo.');
   if(action==='launch'&&originKey===targetKey)fail('invalid-argument','Destinazione uguale alla partenza.');
   return db.runTransaction(async tx=>{
     const [receiptSnap,uniSnap,ownSnap]=await Promise.all([tx.get(receipt),tx.get(base),tx.get(inventoryRef)]);
-    if(!uniSnap.exists||uniSnap.data().supremaOptionCStaging!==true) {
+    if(!uniSnap.exists||uniSnap.data().supremaOptionCStaging!==true||uniSnap.data().supremaRecoveryStaging===true) {
       fail('failed-precondition','Opzione C non attiva in questo universo di prova.');
     }
     if(receiptSnap.exists) {
@@ -296,7 +297,7 @@ async function getState(db,{uid,universeId},clock=Date.now) {
   requireId(universeId,'Universo');
   const base=baseFor(db,universeId);
   const uni=await base.get();
-  if(!uni.exists||uni.data().supremaOptionCStaging!==true) {
+  if(!uni.exists||uni.data().supremaOptionCStaging!==true||uni.data().supremaRecoveryStaging===true) {
     fail('failed-precondition','Opzione C non attiva su questo universo.');
   }
   const ownRef=privFor(base,uid);
