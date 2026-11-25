@@ -21,8 +21,8 @@ function effectiveMap(doc,key) {
 function diffTarget(doc,before,after) {
   const patch = {};
   for (const key of ['resources','fleet','defenses']) {
-    for (const id of Object.keys(before[key])) {
-      const delta=(after[key]?.[id] || 0)-before[key][id];
+    for (const id of new Set([...Object.keys(before[key]), ...Object.keys(after[key] || {})])) {
+      const delta=(after[key]?.[id] || 0)-(before[key][id] || 0);
       if (delta) patch['inbox.'+key+'.'+id]=(doc.inbox?.[key]?.[id] || 0)+delta;
     }
   }
@@ -92,6 +92,7 @@ async function recoverAtLogin(db,{uid,universeId,siegeId},clock=Date.now) {
       if (event.kind!=='wave' || event.at!==battle.nextAt || event.sequence!==battle.sequence) {
         throw new RecoveryError('failed-precondition','Evento non compatibile con il checkpoint.');
       }
+      const defensesBuilt = canonical && engine.settleDefenseQueue(target,event.at);
       const state = {supremes};
       if (engine.advance(state,battle,target,event.at,1)!==1 && !battle.endedAt) {
         throw new RecoveryError('failed-precondition','Ondata non elaborata.');
@@ -102,6 +103,7 @@ async function recoverAtLogin(db,{uid,universeId,siegeId},clock=Date.now) {
       const updates = [engine.publicSiege(state,battle)];
       if (canonical) {
         const patch=diffTarget(canonical,before,target);
+        if (defensesBuilt) patch.defenseQueue = target.defenseQueue;
         const changed = Object.keys(patch).length > 0;
         // Firestore uses one commit time for documents updated by the same atomic transaction.
         const nextLock = battle.endedAt ? {siegeId:null} :
