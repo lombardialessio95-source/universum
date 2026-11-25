@@ -14,7 +14,9 @@ service = root / "services/suprema"
 engine = (service / "engine.js").read_text()
 for name in re.findall(r"'((?:modules/[^']+|data)\.js)'", engine) + [
     "modules/online/siege-recovery.js", "services/suprema/engine.js",
-    "services/suprema/recover.js", "services/suprema/launch.js", "services/suprema/functions.js"
+    "services/suprema/recover.js", "services/suprema/launch.js", "services/suprema/functions.js",
+    "services/suprema/option-c-inventory.js", "services/suprema/option-c-yard.js",
+    "services/suprema/option-c-battle.js", "services/suprema/option-c-service.js"
 ]:
     target = out / "functions" / name
     target.parent.mkdir(parents=True, exist_ok=True)
