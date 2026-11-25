@@ -1,0 +1,42 @@
+name: Suprema - transazioni e archivio candidato
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'services/suprema/**'
+      - 'modules/online/siege-recovery.js'
+      - '.github/workflows/suprema-candidate.yml'
+permissions:
+  contents: read
+jobs:
+  emulator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - run: npm ci --prefix services/suprema
+      - name: Transazioni con due identità locali
+        run: |
+          export FIRESTORE_EMULATOR_JAR="$RUNNER_TEMP/firestore.jar"
+          curl -fsSL --retry 3 https://storage.googleapis.com/firebase-preview-drop/emulator/cloud-firestore-emulator-v1.19.8.jar -o "$FIRESTORE_EMULATOR_JAR"
+          python3 tools/test_suprema_staging.py
+      - name: Archivio integrale dal commit candidato
+        run: |
+          git archive --format=zip -o UNIVERSUM_Candidato.zip HEAD
+          unzip -tq UNIVERSUM_Candidato.zip
+          unzip -Z1 UNIVERSUM_Candidato.zip | grep -Fx index.html
+          sha256sum UNIVERSUM_Candidato.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UNIVERSUM_Candidato
+          path: UNIVERSUM_Candidato.zip
