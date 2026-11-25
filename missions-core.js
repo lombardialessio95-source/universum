@@ -86,7 +86,8 @@
     // Compatibilità con i vecchi salvataggi: la differenza tra returnTime e
     // arrivalTime contiene la singola tratta, NON le ore di permanenza.
     getExplorationTimeline(fleet) {
-      if (!fleet || !['explore', 'expedition'].includes(fleet.mission)) return null;
+      if (!fleet || (!['explore', 'expedition'].includes(fleet.mission)
+        && !(fleet.mission === 'recall' && Number(fleet.zoneArrivalTime || 0) > 0))) return null;
       const departureTime = Number(fleet.departureTime || fleet.startTime || 0);
       const explorationEndTime = Number(fleet.explorationEndTime || fleet.arrivalTime || 0);
       const legacyReturnMs = Number(fleet.returnTime || 0) - Number(fleet.arrivalTime || 0);
