@@ -91,6 +91,26 @@
               <button type="button" id="btn-start-galattica" class="btn btn-creative" ${!galReq.met ? 'disabled' : ''}>COSTRUISCI GALATTICA</button>`}
           </div>` : '';
 
+      const suprema = window.UniversumSuprema;
+      const order = b.supremaConstruction;
+      const showSuprema = suprema && !st.isMultiplayerMode && b.status === 'active';
+      const ownedSupreme = (uni.supremes || []).filter(ship=>ship.planetId===planet.id);
+      const missingSupreme = showSuprema && Object.entries(suprema.requirements)
+        .filter(([id,level])=>!(planet.localResearches?.[id]>=level))
+        .map(([id,level])=>`${Data.RESEARCHES[id].name} Lv.${level}`);
+      const supremaHtml = showSuprema ? `
+        <div class="glass-panel" style="margin-top:14px; padding:12px;">
+          <strong>Nave Madre Suprema</strong>
+          ${order ? `<p>${order.status==='stopped'?'Rata sospesa':'In costruzione'} · ${order.daysPaid} / ${suprema.installments} rate
+            ${order.status==='building'? `· Prossima rata <span class="live-timer" data-end="${Number(order.nextPaymentAt)}"></span>`:''}</p>
+            <button type="button" id="btn-cancel-suprema" class="btn btn-ghost">Annulla costruzione</button>` : `
+            <p class="text-muted">40 rate giornaliere da 500.000 M, 300.000 C e 200.000 D.</p>
+            ${missingSupreme.length ? `<p class="text-muted">Requisiti mancanti · ${escapeHTML(missingSupreme.join(', '))}</p>` : ''}
+            <button type="button" id="btn-start-suprema" class="btn btn-blue"
+              ${!Galaxy.isBacinoVuoto(planet,uni) || missingSupreme.length?'disabled':''}>Costruisci Suprema</button>`}
+          ${ownedSupreme.map(ship=>`<p class="text-muted">Suprema ormeggiata · Hangar ${suprema.usedSlots(ship)} / ${suprema.hangarCapacity}</p>`).join('')}
+        </div>`:'';
+
       const bacinoArtId = b.status === 'stopped' ? 'bacinoSpazialeStopped' : b.status === 'building' ? 'bacinoSpazialeBuilding' : 'bacinoSpaziale';
       viewport.innerHTML = `
         <div class="glass-panel" style="padding:20px;">
@@ -106,8 +126,25 @@
           ${invictusHtml}
           ${crepuscoloHtml}
           ${galatticaHtml}
+          ${supremaHtml}
         </div>
       `;
+      document.getElementById('btn-start-suprema')?.addEventListener('click', async () => {
+        try {
+          suprema.start(uni,planet,crypto.randomUUID(),Date.now(),Galaxy.getInvictusCount(planet,uni).total);
+          await UI.persistUniverseState();
+          UI.renderCurrentView();
+        } catch (error) { UI.toast(error.message,'error'); }
+      });
+      document.getElementById('btn-cancel-suprema')?.addEventListener('click', async () => {
+        if (!confirm('Annullare la costruzione? Sarà rimborsato il 50% delle rate già pagate.')) return;
+        try {
+          if (!suprema.cancel(planet,order.id)) return;
+          await UI.persistUniverseState();
+          UI.updateTopBarNumbers();
+          UI.renderCurrentView();
+        } catch (error) { UI.toast(error.message,'error'); }
+      });
       document.getElementById('btn-start-galattica')?.addEventListener('click', async () => {
         try {
           const res = Galaxy.startGalatticaConstruction(uni, pIdx);

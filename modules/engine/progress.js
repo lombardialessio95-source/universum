@@ -173,15 +173,22 @@
   // =========================================================
   function processOfflineProgress(universe, now = Date.now()) {
     const services = window.UniversumServices;
+    const pendingSupreme = universe.planets?.some(p=>p.bacinoSpaziale?.supremaConstruction);
     const fleetEvents = services && !Number.isSafeInteger(universe.serviceRevision) &&
       universe.fleetsInFlight?.some(f=>services.ids.some(id=>(f.fleet || f.ships)?.[id]));
-    if (!(fleetEvents || services?.hasServices(universe)) || !universe.lastSeen || universe.lastSeen >= now || universe.creativeMode) {
+    if (!(pendingSupreme || fleetEvents || services?.hasServices(universe)) || !universe.lastSeen || universe.lastSeen >= now || (universe.creativeMode && !pendingSupreme)) {
       return processOfflineInterval(universe,now);
     }
     const start = universe.lastSeen;
     const report = processOfflineInterval(universe,start,true);
     while (universe.lastSeen < now) {
-      let boundary = services.nextBoundary(universe,universe.lastSeen,now);
+      let boundary = services?.nextBoundary(universe,universe.lastSeen,now) ?? now;
+      if (pendingSupreme) for (const p of universe.planets) {
+        const order = p.bacinoSpaziale?.supremaConstruction;
+        if (order?.status === 'building' && order.nextPaymentAt > universe.lastSeen && order.nextPaymentAt < boundary) {
+          boundary = order.nextPaymentAt;
+        }
+      }
       if (fleetEvents) for (const f of universe.fleetsInFlight) {
         if (!services.ids.some(id=>(f.fleet || f.ships)?.[id])) continue;
         const at = f.status==='returning' ? f.returnTime : f.arrivalTime;
@@ -218,6 +225,7 @@
         p.resources.crystal = CREATIVE_RESOURCE_CAP;
         p.resources.deuterium = CREATIVE_RESOURCE_CAP;
       }
+      settleSupremes(universe, now, report);
       universe.lastSeen = now;
       return report;
     }
@@ -226,6 +234,7 @@
       for (const planet of universe.planets || []) settleBacinoDue(planet, now, report);
       advanceQueuesAtTimestamp(universe, now, report);
       checkCrepuscoloLimbo(universe, now);
+      settleSupremes(universe, now, report);
       universe.lastSeen = now;
       return report;
     }
@@ -253,8 +262,25 @@
     transformCompletedGalattiche(universe, report);
     advanceQueuesAtTimestamp(universe, now, report);
     checkCrepuscoloLimbo(universe, now);
+    settleSupremes(universe, now, report);
     universe.lastSeen = now;
     return report;
+  }
+
+
+  function settleSupremes(universe, now, report = null) {
+    if (!window.UniversumSuprema || Number.isSafeInteger(universe.serviceRevision)) return false;
+    let changed = false;
+    for (const planet of universe.planets || []) {
+      if (!planet.bacinoSpaziale?.supremaConstruction) continue;
+      if (window.UniversumSuprema.settle(universe, planet, now)) {
+        changed = true;
+        if (report && !planet.bacinoSpaziale.supremaConstruction) {
+          report.completedUnits['Nave Madre Suprema'] = (report.completedUnits['Nave Madre Suprema'] || 0) + 1;
+        }
+      }
+    }
+    return changed;
   }
 
 
@@ -269,7 +295,7 @@
         planet.resources.crystal = CREATIVE_RESOURCE_CAP;
         planet.resources.deuterium = CREATIVE_RESOURCE_CAP;
       }
-      return;
+      return settleSupremes(universe, now);
     }
 
     for (const planet of universe.planets || []) {
@@ -281,7 +307,7 @@
 
     const queueCompleted = advanceQueuesAtTimestamp(universe, now, null);
     checkCrepuscoloLimbo(universe, now);
-    return queueCompleted;
+    return settleSupremes(universe, now) || queueCompleted;
   }
   Object.assign(G, { addResourcesWithCap, advancePlanetResources, advanceQueuesAtTimestamp, processOfflineProgress, tick });
 

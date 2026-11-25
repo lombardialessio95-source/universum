@@ -169,6 +169,7 @@
     if (!planet) throw new Error('Pianeta non trovato.');
     const bacino = planet.bacinoSpaziale;
     if (!bacino || bacino.status !== 'active') throw new Error('Serve un Bacino Spaziale attivo per costruire un Invictus.');
+    if (bacino.supremaConstruction) throw Error('Il Bacino è impegnato nella costruzione della Suprema.');
     if (!Array.isArray(bacino.invictusConstructions)) bacino.invictusConstructions = [];
     const counts = getInvictusCount(planet, universe);
     if (counts.total >= def.maxPerBacino) throw new Error(`Massimo ${def.maxPerBacino} Invictus per Bacino (attive + in costruzione + in missione).`);
@@ -191,7 +192,7 @@
     const b = planet && planet.bacinoSpaziale;
     if (!b || b.status !== 'active') return false;
     const counts = getInvictusCount(planet, universe);
-    return counts.total === 0 && !b.crepuscolo && !b.galatticaConstruction;
+    return counts.total === 0 && !b.crepuscolo && !b.galatticaConstruction && !b.supremaConstruction;
   }
 
 
@@ -303,6 +304,7 @@
     if (!universe.creativeMode && !req.met) throw new Error(`Requisiti mancanti: ${req.missing.join(', ')}`);
     const bacino = planet.bacinoSpaziale;
     if (!bacino || bacino.status !== 'active') throw new Error('Serve un Bacino Spaziale attivo per costruire una Galattica.');
+    if (bacino.supremaConstruction) throw Error('Il Bacino è impegnato nella costruzione della Suprema.');
     if (bacino.galatticaConstruction) throw new Error('Costruzione Galattica già in corso in questo Bacino.');
     const invictus = getInvictusCount(planet, universe);
     if (invictus.total > 0 || bacino.crepuscolo) throw new Error('Il Bacino ha navi legate: la Galattica richiede un Bacino senza navi.');
