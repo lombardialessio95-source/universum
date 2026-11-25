@@ -257,6 +257,9 @@
     st.currentUniverse = universe;
     universe.creativeMode = false;
 
+    if (universe.supremaOptionCStaging) window.UniversumOptionC?.onJoin(universe)
+      .catch(error=>UI.toast(error.message,'error'));
+
     if (universe.supremaRecoveryStaging) window.UniversumSupremaStaging?.onJoin(universe)
       .catch(error=>UI.toast(error.message,'error'));
 
