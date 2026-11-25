@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "version": "r6f54262bb8178cd1720e",
+  "version": "r3dacdd28a0f5a4ae102d",
   "workerHash": "e6113328911026127c7b936a2bc671e2eddf4a68cf7f6168b1138fb7daa1e923",
   "files": {
     "app.html": "1e0687dd6141a0078d2c6ad901912be4ed98a5cbcca3d3786cfa74dda85e4b21",
@@ -29,7 +29,7 @@
     "modules/engine/progress.js": "ca707c75c92bca09bb62b189ce723242138894a01dc1530a3e29e0a23a3aa0bb",
     "modules/engine/research-model.js": "343c9939825fc12e812b34899f2be4c53484bbeee004bd293097c0824a8dce3a",
     "modules/engine/specialists.js": "4d4f72df2443e38a0023fda3ef9598e897e37266b68ca6d055e83ce978e02ef7",
-    "modules/engine/suprema.js": "657d80573e7b975d4f61836ba167b19c2df2981813444f84a7e5759980a01703",
+    "modules/engine/suprema.js": "f0616205c757233bd743847f57e7341f5e703feecd084f8c2e52e833d8ed7dcb",
     "modules/engine/timings.js": "35d4b0dc9c6543cf41346c9793c65ccf8be51010abb470dd64604959dc73ebfb",
     "modules/galaxy/bot-ai.js": "ff2f10e1085949d898e93a67061ac9f7ea6ef13e724e8142236b034798b45670",
     "modules/galaxy/combat.js": "058c863ac466c04f38ce451a1b43a5e22f184cb7af32ce2a371e4384e84f15db",

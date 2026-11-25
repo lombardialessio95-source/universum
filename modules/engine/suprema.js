@@ -87,13 +87,18 @@
     return used;
   }
 
+  function reservedSlot(supreme) {
+    const first = supreme.shipyardQueue[0];
+    return first?.finishAt === undefined ? 0 : slotsPerShip[first.ship];
+  }
+
   function load(universe, planet, supreme, ship, count) {
     if (!universe.planets.includes(planet) || !universe.supremes?.includes(supreme) ||
         supreme.status !== 'docked' || supreme.planetId !== planet.id ||
         !Object.hasOwn(slotsPerShip,ship) || !Number.isSafeInteger(count) || count<1) {
       throw Error('Caricamento hangar non valido.');
     }
-    if ((planet.fleet[ship] || 0)<count || usedSlots(supreme)+slotsPerShip[ship]*count>hangarCapacity) {
+    if ((planet.fleet[ship] || 0)<count || usedSlots(supreme)+reservedSlot(supreme)+slotsPerShip[ship]*count>hangarCapacity) {
       throw Error('Navi o spazio hangar insufficienti.');
     }
     planet.fleet[ship] -= count;
@@ -110,8 +115,58 @@
     supreme.hangar[target][ship] = (supreme.hangar[target][ship] || 0)+count;
   }
 
+  function queueShips(supreme, universe, engine, catalog, id, ship, count, now) {
+    if (!Object.hasOwn(slotsPerShip,ship) || !Number.isSafeInteger(count) || count<1 ||
+        typeof id !== 'string' || !id || supreme.shipyardQueue.some(order=>order.id===id) ||
+        !Number.isSafeInteger(now) || now<0) throw Error('Ordine del cantiere non valido.');
+    const cost = catalog[ship].cost;
+    const seconds = engine.getSingleUnitTime(universe,{buildings:{shipyard:12}},ship);
+    supreme.shipyardQueue.push({id,ship,remaining:count,queuedAt:now,
+      duration:Math.max(1000,seconds*1000),cost:Object.fromEntries(resources.map(k=>[k,cost[k]]))});
+  }
+
+  function advanceShipyard(supreme, now) {
+    const queue = supreme.shipyardQueue;
+    let cursor = supreme.shipyardAt ?? 0;
+    while (queue.length) {
+      const order = queue[0];
+      if (order.finishAt !== undefined) {
+        if (order.finishAt>now) break;
+        cursor = order.finishAt;
+        supreme.hangar.reserve[order.ship] = (supreme.hangar.reserve[order.ship] || 0)+1;
+        order.remaining--;
+        delete order.finishAt;
+        if (!order.remaining) queue.shift();
+        continue;
+      }
+      if (order.queuedAt>now) break;
+      if (usedSlots(supreme)+slotsPerShip[order.ship]>hangarCapacity ||
+          resources.some(k=>supreme.resources[k]<order.cost[k])) {
+        // Record when the line was still blocked to avoid retroactive production.
+        supreme.shipyardAt = now;
+        return;
+      }
+      for (const key of resources) supreme.resources[key] -= order.cost[key];
+      order.finishAt = Math.max(cursor,order.queuedAt)+order.duration;
+    }
+    supreme.shipyardAt = Math.max(supreme.shipyardAt ?? 0,cursor);
+  }
+
+  function cancelShipOrder(supreme, id) {
+    const queue = supreme.shipyardQueue;
+    const index = queue.findIndex(order=>order.id===id);
+    if (index<0) return false;
+    const order = queue[index];
+    // An active hull stays in production. Only unpaid pending hulls are removed.
+    if (order.finishAt !== undefined) {
+      if (order.remaining===1) return false;
+      order.remaining=1;
+    } else queue.splice(index,1);
+    return true;
+  }
+
   const core = Object.freeze({DAY_MS, installments, dailyCost, requirements, depotCaps, slotsPerShip, hangarCapacity,
-    operatingCapacity, start, settle, cancel, usedSlots, load, assign});
+    operatingCapacity, start, settle, cancel, usedSlots, load, assign, queueShips, advanceShipyard, cancelShipOrder});
   if (typeof module !== 'undefined' && module.exports) module.exports = core;
   else root.UniversumSuprema = core;
 })(typeof window !== 'undefined' ? window : globalThis);
