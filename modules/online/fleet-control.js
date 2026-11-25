@@ -95,7 +95,8 @@
     }
 
     const speedPct = Math.min(100, Math.max(10, Number(options.fuelPercent || options.speedPct) || 100));
-    const expeditionHours = Math.min(24, Math.max(1, Number(options.exploreHours || options.expeditionHours) || 1));
+    const expeditionHours = Math.min(MCore?.getMaxExploreHours(universeObj) || 1,
+      Math.max(1, Math.floor(Number(options.exploreHours || options.expeditionHours) || 1)));
     const dist = window.UniversumGalaxy.calculateDistance(planet.coords, targetCoords);
     const flightStats = window.UniversumGalaxy.getFleetSpeedAndFuel(universeObj, cleanShips, dist, speedPct);
 
@@ -143,10 +144,13 @@
 
     const now = Date.now();
     const holdDurationSec = normalizedMission === 'expedition'
-      ? Math.max(5, Math.round((expeditionHours * 3600) / Math.max(1, universeObj.speed || 10)))
+      ? MCore.getExplorationHoldDurationSec(universeObj, expeditionHours)
       : 0;
-    const arrivalTime = now + (flightStats.durationSec + holdDurationSec) * 1000;
-    const returnTime = arrivalTime + flightStats.durationSec * 1000;
+    const timeline = normalizedMission === 'expedition'
+      ? MCore.buildExplorationTimeline(now, flightStats.durationSec, holdDurationSec)
+      : null;
+    const arrivalTime = timeline ? timeline.arrivalTime : now + flightStats.durationSec * 1000;
+    const returnTime = timeline ? timeline.returnTime : arrivalTime + flightStats.durationSec * 1000;
 
     const ransom = options.ransom ? {
       metal: Math.max(0, Math.floor(Number(options.ransom.metal) || 0)),
@@ -186,6 +190,7 @@
       departureTime: now,
       arrivalTime,
       returnTime,
+      ...(timeline || {}),
       resolved: false
     };
 
@@ -205,12 +210,21 @@
         const durationMs = arrivalTime - now;
         const returnDurationMs = returnTime - arrivalTime;
         fleetDoc.departureTime = serverDepartureMs;
-        fleetDoc.arrivalTime = serverDepartureMs + durationMs;
-        fleetDoc.returnTime = fleetDoc.arrivalTime + returnDurationMs;
+        if (timeline) {
+          Object.assign(fleetDoc, MCore.buildExplorationTimeline(
+            serverDepartureMs, flightStats.durationSec, holdDurationSec));
+        } else {
+          fleetDoc.arrivalTime = serverDepartureMs + durationMs;
+          fleetDoc.returnTime = fleetDoc.arrivalTime + returnDurationMs;
+        }
         await ref.update({
           departureTime: fleetDoc.departureTime,
           arrivalTime: fleetDoc.arrivalTime,
-          returnTime: fleetDoc.returnTime
+          returnTime: fleetDoc.returnTime,
+          ...(timeline ? {
+            zoneArrivalTime: fleetDoc.zoneArrivalTime,
+            explorationEndTime: fleetDoc.explorationEndTime
+          } : {})
         });
       }
     } catch (e) { /* fallback ai tempi gia' salvati */ }
@@ -229,30 +243,40 @@
 
     const uniRef = db.collection('online_universes').doc(universeObj.id);
     const fleetRef = uniRef.collection('fleets').doc(fleetId);
-    const snap = await fleetRef.get();
-    if (!snap.exists) throw new Error('Flotta non trovata.');
+    let newArrival = 0;
 
-    const fleet = snap.data();
-    if (fleet.attackerUid !== user.uid) throw new Error('Non puoi richiamare una flotta non tua.');
-    if (fleet.resolved || fleet.status !== 'outbound') {
-      throw new Error('La flotta sta già rientrando o ha completato la missione.');
-    }
-
-    const now = Date.now();
-    const elapsedMs = Math.max(2000, now - Number(fleet.departureTime || now));
-    const newArrival = now + elapsedMs;
-
-    await fleetRef.update({
-      status: 'returning',
-      mission: 'recall',
-      arrivalTime: newArrival,
-      returnTime: newArrival
+    // Una sola transazione: due schede non possono richiamare due volte la
+    // stessa missione o sostituire reciprocamente i timestamp di ritorno.
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(fleetRef);
+      if (!snap.exists) throw new Error('Flotta non trovata.');
+      const fleet = snap.data();
+      if (fleet.attackerUid !== user.uid) throw new Error('Non puoi richiamare una flotta non tua.');
+      if (fleet.resolved || fleet.status !== 'outbound') {
+        throw new Error('La flotta sta già rientrando o ha completato la missione.');
+      }
+      const now = Date.now();
+      const MCore = window.UniversumMissionsCore;
+      const durationMs = MCore
+        ? MCore.getRecallDurationMs(fleet, now)
+        : Math.max(2000, now - Number(fleet.departureTime || now));
+      newArrival = now + durationMs;
+      tx.update(fleetRef, {
+        status: 'returning',
+        phase: 'IN RITORNO',
+        mission: 'recall',
+        arrivalTime: newArrival,
+        returnTime: newArrival
+      });
     });
 
     const local = (universeObj.fleetsInFlight || []).find((f) => f.id === fleetId);
     if (local) {
       local.status = 'returning';
+      local.phase = 'IN RITORNO';
       local.mission = 'recall';
+      local.recalled = true;
+      local.returnStartTime = newArrival - Math.max(0, newArrival - Date.now());
       local.arrivalTime = newArrival;
       local.returnTime = newArrival;
     }
