@@ -54,7 +54,7 @@
       const snapshots = await Promise.all(refs.map(ref=>tx.get(ref)));
       const values = snapshots.map(s=>s.exists?s.data():null);
       siege.pending.shift();
-      const result = reduce({siege,event,values,seed:siegeRef.id+'/'+event.id});
+      const result = reduce({siege,event,values,snapshots,seed:siegeRef.id+'/'+event.id});
       if (!result || !Array.isArray(result.updates) || result.updates.length!==refs.length) {
         throw Error('Il risultato non corrisponde ai documenti dichiarati.');
       }

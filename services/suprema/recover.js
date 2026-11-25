@@ -56,7 +56,7 @@ async function recoverAtLogin(db,{uid,universeId,siegeId},clock=Date.now) {
       return [publicRef,base.collection('planets').doc(siege.targetDocKey),
         base.collection('supremaTargetPrivate').doc(siege.targetDocKey)];
     },
-    reduce({siege,event,values}) {
+    reduce({siege,event,values,snapshots}) {
       const {battle,supremes} = siege;
       if (!values[0]) throw new RecoveryError('failed-precondition','Vista pubblica assente.');
       if (event.kind==='departure') {
@@ -77,6 +77,13 @@ async function recoverAtLogin(db,{uid,universeId,siegeId},clock=Date.now) {
       if (siege.targetDocKey && (!canonical || canonical.ownerUid!==siege.defenderUid)) {
         throw new RecoveryError('failed-precondition','Il pianeta assediato ha cambiato proprietario.');
       }
+      if (canonical) {
+        const lock = values[2];
+        const expected = lock?.sharedCommit ? snapshots[2].updateTime : lock?.planetVersion;
+        if (lock?.siegeId !== battle.id || !expected || !snapshots[1].updateTime.isEqual(expected)) {
+          throw new RecoveryError('failed-precondition','Cronologia del pianeta da riconciliare prima dell’ondata.');
+        }
+      }
       const target = canonical ? {...canonical,resources:effectiveMap(canonical,'resources'),
         defenses:effectiveMap(canonical,'defenses'),fleet:effectiveMap(canonical,'fleet')} : siege.target;
       if (canonical) for (const key of materials) target.resources[key] ||= 0;
@@ -95,9 +102,11 @@ async function recoverAtLogin(db,{uid,universeId,siegeId},clock=Date.now) {
       const updates = [engine.publicSiege(state,battle)];
       if (canonical) {
         const patch=diffTarget(canonical,before,target);
-        const lock=values[2];
-        if (lock?.siegeId!==battle.id) throw new RecoveryError('failed-precondition','Blocco assedio incoerente.');
-        updates.push(Object.keys(patch).length ? patch : null,battle.endedAt ? {siegeId:null} : null);
+        const changed = Object.keys(patch).length > 0;
+        // Firestore uses one commit time for documents updated by the same atomic transaction.
+        const nextLock = battle.endedAt ? {siegeId:null} :
+          changed ? {sharedCommit:true,sequence:event.sequence} : null;
+        updates.push(changed ? patch : null,nextLock);
         for (const ship of state.supremes) if (ship.status==='returning') {
           recovery.enqueue(siege,{id:'return-'+ship.id,kind:'departure',shipId:ship.id,at:ship.returnAt});
         }

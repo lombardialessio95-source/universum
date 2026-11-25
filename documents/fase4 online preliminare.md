@@ -1,0 +1,9 @@
+# Fase 4 online · verifica preliminare del 25 novembre 2026
+
+Base e nuovo backup verificati su GitHub: 12a8d79f8802f06d2e22f11f4991094368bb4775, commit delle 11:27:09 CET. Backup: backup/pre-fase4-online-2026-11-25. Candidato: candidate/fase4-online-2026-11-25. Il backup storico pre-Fase 4 resta distinto.
+
+Il motore in modules/engine/suprema.js e modules/galaxy/suprema-siege.js è presente. Il servizio in services/suprema/{functions,launch,recover,engine}.js riusa combattimento e viaggio. modules/online/siege-recovery.js ordina solo gli eventi registrati dell’assedio. sync.js salva snapshot, combat-resolver.js risolve arrivi e fleet-control.js aggiorna flotte. Le rules consentono aggiornamenti ordinari dei pianeti dal browser. I due strumenti Python di confezionamento e test, il client staging e i punti di ingresso universes.js e runtime.js sono presenti.
+
+Scelta architetturale: materializzare le scadenze prima di ogni mutazione. I checkpoint esistenti non contengono gli ordini intermedi necessari per ricostruire una storia mediante replay. La migrazione richiede un confine iniziale verificato, con code e missioni già pendenti importate con la loro scadenza. Ogni successivo comando deve passare per il servizio. Servono produzione fino alla scadenza, ordinamento stabile delle operazioni contemporanee, ricevuta e revisione atomiche, blocchi condivisi tra pianeta, proprietario e flotte interessate. Un evento per transazione mantiene limitato il numero di scritture; il recupero esistente procede in blocchi di otto. Prima del passaggio completo, arrestare la transazione quando lo snapshot del pianeta diverge dalla versione verificata: l’inbox corrente da sola non certifica lo stato storico.
+
+Ordine: collaudare prima la barriera temporale e instradare tutti gli scrittori, poi inventario, missioni, riconnessione, permessi e collaudo a due account sul progetto separato. Nessuna migrazione automatica basata sull'orologio del browser.

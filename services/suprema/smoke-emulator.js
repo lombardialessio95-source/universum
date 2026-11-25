@@ -105,6 +105,22 @@ async function run() {
   assert.equal(returned.returnReserve,undefined);
   assert.equal(returned.resources.metal,8000);
   assert.equal((await destination.get()).data().inbox.resources.metal,-8000);
+  await inventory.update({ships:[{...returned,operatingFuel:200000}]});
+  const secondLaunch = await startStagingSiege(db,{...command,siegeId:'interposed'},()=>T+2*hour);
+  const secondLive={...options,siegeId:secondLaunch.siegeId,uid:'defender'};
+  await recoverAtLogin(db,secondLive,()=>secondLaunch.arrivalAt);
+  const secondPrivate=base.collection('supremaRecoveryPrivate').doc(secondLaunch.siegeId);
+  const previous=(await secondPrivate.get()).data();
+  await destination.update({'defenses.rocketLauncher':20});
+  const changed=(await destination.get()).data();
+  for (const actor of roster) {
+    await assert.rejects(()=>recoverAtLogin(db,{...secondLive,uid:actor},()=>secondLaunch.arrivalAt+hour),
+      {code:'failed-precondition'});
+  }
+  assert.deepEqual((await secondPrivate.get()).data(),previous);
+  assert.deepEqual((await destination.get()).data(),changed);
+  assert.equal((await secondPrivate.collection('receipts').get()).size,1);
+  console.log('Checkpoint interposto: due recuperi respinti, dati e ricevute invariati.');
   console.log('Emulatore Firestore: lancio, addebito, ondata sul pianeta, ritorno e replay verificati.');
   console.log('Emulatore Firestore: recupero con il solo difensore, concorrenza, due ricevute e riservatezza verificati.');
 }
