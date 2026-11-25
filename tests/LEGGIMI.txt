@@ -45,3 +45,10 @@ CPU E LOBBY (24/11/2026):
     Opzionale: usa Playwright + Chromium installati; confronta 21 frame pixel-per-pixel,
     viewport desktop/mobile, visibilitychange e zero animazioni lobby (offline/online simulati).
 Questi test non misurano consumi CPU su dispositivi reali e non usano Firebase reale.
+
+FASE 3 — NAVI MADRE NORMALI (25/11/2026)
+  node tests/test_fase3_hangars.js     (casi offline, battaglie, salvataggi)
+  node tests/test_fase3_online.js      (transazioni e riconciliazione Firestore SIMULATE)
+  python3 tests/smoke_fase3_ui.py      (Chrome/Playwright, interfaccia simulata a 3 larghezze)
+  Non certificano regole Firestore sul servizio reale: richiedono collaudo
+  e deploy delle regole aggiornate dal proprietario del progetto Firebase.

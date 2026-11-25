@@ -14,6 +14,7 @@ window.UniversumMP = {
   listenUniverseDeleted: window.__UniversumMPModules.listenUniverseDeleted,
   calculateLiveResources: window.__UniversumMPModules.calculateLiveResources,
   syncPlayerState: window.__UniversumMPModules.syncPlayerState,
+  changeOnlineMothershipHangar: window.__UniversumMPModules.changeOnlineMothershipHangar,
   renameOnlinePlanet: window.__UniversumMPModules.renameOnlinePlanet,
   renameOnlineMoon: window.__UniversumMPModules.renameOnlineMoon,
   getOnlineSystem: window.__UniversumMPModules.getOnlineSystem,

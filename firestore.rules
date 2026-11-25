@@ -51,7 +51,7 @@ service cloud.firestore {
       return ['inbox', 'debris', 'embargo', 'occupation', 'moon',
         'ownerUid', 'ownerName', 'isNpc',
         'botLevel', 'botPersonality', 'botCreatedAt', 'growthEnabled',
-        'resources', 'fleet', 'defenses',
+        'resources', 'fleet', 'defenses', 'mothershipHangars',
         'buildQueue', 'shipyardQueue', 'defenseQueue', 'lastUpdated', 'lastResolutionFleetId','services'];
     }
 
@@ -66,7 +66,7 @@ service cloud.firestore {
         'arrivalTime', 'returnTime',
         'siegeDeuterium', 'lastSiegeTickAt', 'siegeStartedAt',
         'pendingRansom', 'repaired', 'repairReason',
-        'mission', 'schemaVersion', 'departureTime'];
+        'mission', 'schemaVersion', 'departureTime', 'carrierHangars'];
     }
 
     // Un client che non partecipa allo scontro non puo' modificare le flotte.
@@ -96,8 +96,20 @@ service cloud.firestore {
         && request.resource.data.cargo is map
         && request.resource.data.mission in [
           'attack', 'destroyMoon', 'spy', 'transport', 'deploy', 'colonize',
-          'recycle', 'expedition', 'embargo', 'blockade', 'occupy'
+          'recycle', 'expedition', 'embargo', 'blockade', 'occupy', 'incursion'
         ]
+        && (request.resource.data.mission != 'incursion' || (
+          request.resource.data.ships.keys().hasOnly(['mothership'])
+          && request.resource.data.ships.mothership is int
+          && request.resource.data.ships.mothership > 0
+          && request.resource.data.carrierHangars is list
+          && request.resource.data.carrierHangars.size() == request.resource.data.ships.mothership
+          && request.resource.data.targetKey != request.resource.data.originKey
+          && exists(/databases/$(database)/documents/online_universes/$(uniId)/planets/$(request.resource.data.targetKey))
+          && get(/databases/$(database)/documents/online_universes/$(uniId)/planets/$(request.resource.data.targetKey)).data.ownerUid != request.auth.uid
+          && getAfter(/databases/$(database)/documents/online_universes/$(uniId)/planets/$(request.resource.data.originKey)).data.fleet.mothership ==
+            get(/databases/$(database)/documents/online_universes/$(uniId)/planets/$(request.resource.data.originKey)).data.fleet.mothership - request.resource.data.ships.mothership
+        ))
         && request.resource.data.status == 'outbound'
         && request.resource.data.resolved == false
         && request.resource.data.arrivalTime is number
@@ -197,6 +209,11 @@ service cloud.firestore {
             (resource.data.ownerUid == request.auth.uid && validOwnerCheckpoint(uniId))
             || (resource.data.ownerUid != request.auth.uid
               && request.resource.data.diff(resource.data).affectedKeys().hasOnly(planetFieldsForOthers())
+              // Hangar del giocatore sono modificabili solo dal proprietario:
+              // i combattimenti esterni registrano gli ID persi nell'inbox.
+              && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['mothershipHangars'])
+                || resource.data.isNpc == true
+                || request.resource.data.ownerUid != resource.data.ownerUid)
               && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['services'])
                 || (request.resource.data.ownerUid != resource.data.ownerUid && !('services' in request.resource.data)))
               && (

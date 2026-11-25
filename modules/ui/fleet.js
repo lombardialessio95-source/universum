@@ -17,6 +17,22 @@
     const Siege = window.UniversumSiege;
     const pIdx = UI.getActivePlanetIndex();
     const planet = UI.getActivePlanet();
+    const Hangars = window.UniversumHangars;
+    const mothers = Hangars && Number(planet?.fleet?.mothership || 0) ? Hangars.normalizePlanet(planet) : [];
+    if (st.fleetHangarPlanetId !== planet.id) {
+      st.fleetHangarPlanetId = planet.id;
+      st.fleetHangarIds = [];
+    }
+    const explicitCarriers = (st.fleetHangarIds || []).filter(id => mothers.some(h=>h.id===id));
+    const raidSelected = Math.max(0,Math.floor(Number(st.fleetSelection?.mothership || 0)));
+    let raidManifest = [];
+    let raidError = '';
+    if (st.fleetMission === 'incursion') {
+      try {
+        if (Object.entries(st.fleetSelection || {}).some(([id,n]) => id !== 'mothership' && Number(n)>0)) throw Error('Rimuovi tutte le navi diverse dalle Navi Madre.');
+        raidManifest=Hangars.select(planet,raidSelected,explicitCarriers.length===raidSelected?explicitCarriers:null,true);
+      } catch(e) {raidError=e.message;}
+    }
 
     if (!st.fleetFuelPercent) st.fleetFuelPercent = 100;
     if (!st.fleetExploreHours) st.fleetExploreHours = 1;
@@ -98,6 +114,22 @@
           </div>
         </div>
 
+        ${mothers.length ? `<div class="glass-panel" style="padding:14px;">
+          <h2 style="font-size:1.05rem; color:var(--res-crystal); margin-bottom:10px;">HANGAR NAVI MADRE</h2>
+          <p class="text-muted" style="font-size:0.85rem;">Ogni Nave Madre dispone di 50 posti per Caccia Leggeri. Il caricamento è manuale: i caccia imbarcati non sono contati nella flotta libera.</p>
+          <p class="text-muted" style="font-size:0.85rem; margin:8px 0;">Caccia liberi: ${formatNum(planet.fleet?.lightFighter || 0)}</p>
+          <div class="mother-hangar-list">
+          ${mothers.map((h,i)=>`<div class="mother-hangar-row">
+            <label class="mother-hangar-choice"><input type="checkbox" class="mother-hangar-select" data-id="${escapeHTML(h.id)}" ${explicitCarriers.includes(h.id)?'checked':''} ${st.fleetMission==='incursion' && !h.fighters ? 'disabled':''}> <strong>Nave Madre #${i+1}</strong></label>
+            <span class="text-muted">${h.fighters}/50 Caccia</span>
+            <input type="number" inputmode="numeric" class="form-control mother-hangar-amount" data-id="${escapeHTML(h.id)}" value="1" min="1" max="50" aria-label="Quantità caccia da spostare" style="width:75px;">
+            <button type="button" class="btn btn-blue btn-sm mother-hangar-load" data-id="${escapeHTML(h.id)}" ${h.fighters===50?'disabled':''}>CARICA</button>
+            <button type="button" class="btn btn-ghost btn-sm mother-hangar-unload" data-id="${escapeHTML(h.id)}" ${h.fighters===0?'disabled':''}>SCARICA</button>
+          </div>`).join('')}
+          </div>
+          <small class="text-muted">Seleziona gli hangar da inviare; ogni gruppo conserva il proprio carico e la propria identità.</small>
+        </div>` : ''}
+
         <div class="glass-panel" style="padding:14px;">
           <h2 style="font-size:1.05rem; color:var(--res-crystal); margin-bottom:10px;">2. COORDINATE, SPINTA &amp; MISSIONE</h2>
           <div class="form-grid-3">
@@ -128,6 +160,7 @@
             <label>Tipo Missione</label>
             <select id="flt-mission-select" class="form-control">
               <option value="attack" ${st.fleetMission === 'attack' ? 'selected' : ''}>Attacca Bersaglio</option>
+              <option value="incursion" ${st.fleetMission === 'incursion' ? 'selected' : ''}>Incursione Planetaria (Navi Madre e Caccia imbarcati)</option>
               <option value="spy" ${st.fleetMission === 'spy' ? 'selected' : ''}>Spionaggio</option>
               <option value="embargo" ${st.fleetMission === 'embargo' ? 'selected' : ''}>Embargo Planetario (Blocca Rotte)</option>
               <option value="occupy" ${st.fleetMission === 'occupy' ? 'selected' : ''}>Occupazione Planetaria (Prelievo 5%/g + Riscatto)</option>
@@ -212,12 +245,46 @@
             <span>Carburante: <strong class="text-deuterium">${formatNum(fuelReserved)} D</strong>${invictusJumpFuel ? ` <small>(viaggio ${formatNum(ordinaryFuel)} + salto ${formatNum(invictusJumpFuel)})</small>` : ''}</span>
           </div>
 
-          <button type="button" id="btn-launch-fleet" class="btn btn-green" style="width:100%;" ${usedSlots >= maxSlots ? 'disabled' : ''}>
+          ${st.fleetMission==='incursion' ? `<div class="glass-panel" style="padding:10px; margin-bottom:10px;">
+            <strong>INCURSIONE PLANETARIA</strong>
+            <p class="text-muted">Due combattimenti da massimo 3 round: Navi Madre contro flotta orbitale, caccia imbarcati contro difese. Nessun altro tipo di nave ammesso.</p>
+            <div>Cariche selezionate: <strong>${raidManifest.length}</strong> / ${raidSelected}</div>
+            <div>Caccia imbarcati: <strong>${formatNum(raidManifest.reduce((n,h)=>n+h.fighters,0))}</strong></div>
+            <div>Bottino teorico massimo: <strong>${formatNum(raidManifest.reduce((n,h)=>n+h.fighters,0)*1000)}</strong> risorse, soggetto a stiva e protezione nemica.</div>
+            ${raidError?`<div class="text-danger">Requisiti mancanti: ${escapeHTML(raidError)}</div>`:''}
+          </div>` : ''}
+          <button type="button" id="btn-launch-fleet" class="btn btn-green" style="width:100%;" ${usedSlots >= maxSlots || (st.fleetMission==='incursion' && raidError) ? 'disabled' : ''}>
             ${svgIcon('rocket')} ${usedSlots >= maxSlots ? `SLOT FLOTTA PIENI (${usedSlots}/${maxSlots})` : 'INVIA FLOTTA IN MISSIONE'}
           </button>
         </div>
       </div>
     `;
+
+    viewport.querySelectorAll('.mother-hangar-select').forEach(box => box.addEventListener('change', () => {
+      st.fleetHangarIds = [...viewport.querySelectorAll('.mother-hangar-select:checked')].map(n=>n.dataset.id);
+      st.fleetSelection.mothership = st.fleetHangarIds.length;
+      UI.renderCurrentView();
+    }));
+    const operateHangar=async (button,direction)=>{
+      const id=button.dataset.id;
+      const amountBox=[...viewport.querySelectorAll('.mother-hangar-amount')].find(el=>el.dataset.id===id);
+      const amount=Number(amountBox?.value);
+      if (!Number.isSafeInteger(amount) || amount<1 || amount>50) return UI.toast('Inserisci da 1 a 50 Caccia Leggeri.', 'error');
+      button.disabled=true;
+      try {
+        if (st.isMultiplayerMode) {
+          if (!window.UniversumMP?.changeOnlineMothershipHangar) throw Error('Servizio hangar online non disponibile.');
+          await window.UniversumMP.changeOnlineMothershipHangar(uni,pIdx,id,amount*direction);
+        } else {
+          Hangars.changeLoad(planet,id,amount*direction);
+          await window.UniversumDB.save(uni);
+        }
+        UI.updateTopBarNumbers();
+        UI.renderCurrentView();
+      } catch(e) {button.disabled=false;UI.toast(e.message,'error');}
+    };
+    viewport.querySelectorAll('.mother-hangar-load').forEach(b=>b.addEventListener('click',()=>operateHangar(b,1)));
+    viewport.querySelectorAll('.mother-hangar-unload').forEach(b=>b.addEventListener('click',()=>operateHangar(b,-1)));
 
     const cargoFields = { metal: 'flt-cargo-m', crystal: 'flt-cargo-c', deuterium: 'flt-cargo-d' };
     const cargoKeys = Object.keys(cargoFields);
@@ -346,7 +413,8 @@
           blackHole: st.fleetBlackHole,
           fuelPercent: st.fleetFuelPercent,
           exploreHours: st.fleetExploreHours,
-          ransom: st.fleetRansom
+          ransom: st.fleetRansom,
+          carrierIds: st.fleetHangarIds?.length===Math.floor(Number(st.fleetSelection.mothership)||0) ? st.fleetHangarIds.slice() : null
         };
 
         if (st.isMultiplayerMode && window.UniversumMP?.launchOnlineFleet) {
@@ -384,6 +452,7 @@
         }
 
         st.fleetSelection = {};
+        st.fleetHangarIds = [];
         st.fleetCargo = { metal: 0, crystal: 0, deuterium: 0 };
         UI.updateTopBarNumbers();
         UI.playSound('success');

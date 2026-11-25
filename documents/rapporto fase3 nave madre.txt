@@ -1,0 +1,115 @@
+UNIVERSUM — FASE 3 — NAVE MADRE NORMALE: HANGAR E INCURSIONE PLANETARIA
+Rapporto tecnico di implementazione (25 novembre 2026)
+Repository: lombardialessio95-source/universum / branch main
+Commit di partenza verificato: 87b08e289da5e629455a787c708daf1ae3aed6b0
+Backup remoto: backup/pre-fase3-nave-madre-2026-11-25
+Commit finale: consultare GitHub; il documento e' contenuto nel commit e non puo'
+contenere il proprio hash senza invalidarne il contenuto.
+
+ARCHITETTURA E COMPATIBILITA'
+- La base e' l'artefatto GitHub Pages del run 45522572588 per lo stesso commit
+  ufficiale, non una vecchia versione del gioco. Verificata la presenza della
+  Fase 1, Fase 2 e delle ottimizzazioni CPU/GPU della release di partenza.
+- La Nave Madre Suprema, l'Invasione Planetaria e la Controffensiva Orbitale
+  NON sono state implementate. Nessuna modifica a costi, velocita', stive,
+  formule energetiche, tecnologia, Fase 1, Fase 2 o grafica planetaria.
+- La compatibilita' dei vecchi salvataggi e' ottenuta tramite manifest vuoti
+  associati a ogni nave normale preesistente. Nessun Caccia viene creato.
+- I Caccia imbarcati non compaiono nello stock orbitale, ma rimangono nel
+  conteggio dei punti imperiali. Non occupano slot missione separati.
+
+HANGAR
+- modules/galaxy/hangars.js nuovo: ID individuale immutabile del vettore,
+  quantita' di 0-50 Caccia Leggeri, controlli di unicita', mutazioni manuali,
+  manifesto delle navi in volo, recupero al rientro, riconciliazione inbox.
+- UI Flotta: comandi CARICA/SCARICA manuali, capacita', caccia liberi,
+  selezione delle navi, requisiti, carburante e bottino teorico.
+- La persistenza offline usa i salvataggi esistenti; la modalita' online usa
+  campi mothershipHangars nei pianeti e carrierHangars nelle flotte.
+- Incongruenze numeriche bloccano l'operazione invece di azzerare gli hangar.
+
+INCURSIONE PLANETARIA
+- Partenza esclusivamente con Navi Madre normali cariche (1-50 Caccia ciascuna).
+  Verifica nel pannello UI, nel motore missioni e nella transazione online.
+  Nessuna maggiorazione a velocita' o carburante ordinari.
+- Orbitale: Nave Madre contro sola flotta; planetaria: soli Caccia imbarcati
+  contro sole difese. Due chiamate indipendenti al motore originale con
+  maxRounds:3 e marcatori d'origine delle singole unita'.
+- Motore dei combattimenti ordinari: ancora 6 round, danni/scudi/Rapid Fire,
+  scelte bersaglio e regole originali invariati; nuovi parametri opzionali
+  sono usati solo dove serve l'associazione con il vettore.
+- I Caccia superstiti vengono recuperati SOLO dalla propria Nave Madre se
+  viva; nessun trasferimento automatico a un altro vettore. Caccia dispersi
+  con il vettore distrutto contabilizzati anche nei detriti.
+- Bottino: massimo 1000 x Caccia recuperati; contemporaneamente 50% delle
+  risorse non protette (Bunker secondo formula esistente), e spazio libero
+  nelle stive delle Navi Madre superstiti. Assegnazione proporzionale per
+  metallo, cristallo e deuterio, con residui interi deterministici.
+- La vittoria assoluta non e' richiesta. Nessuna conquista/occupazione.
+- Ogni missione produce rapporto dettagliato, rientro automatico e un
+  solo evento di sottrazione/accredito, anche dopo ricaricamento offline.
+
+MULTIPLAYER, ATOMICITA' E RECUPERO
+- Caricamento/scaricamento online: checkpoint iniziale e transazione Firestore
+  con controllo serviceRevision. In caso di modifiche concorrenti dello stock
+  caccia o delle Navi Madre si respinge l'operazione, non si rischiano duplicati.
+- Lancio: integra il percorso transazionale di partenza della Fase 2;
+  navi, hangar e carburante vengono riservati nella stessa transazione.
+- Risoluzione arrivo: due battaglie nella stessa transazione che sottrae il
+  bottino del difensore, scrive il rapporto e modifica la flotta di ritorno.
+- Rientro: ricevuta inbox.hangarReturns.<idMissione> associata al credito
+  inbox.fleet, protetta dal flag di risoluzione della flotta; alla
+  successiva sincronizzazione il giocatore incorpora le navi una sola volta.
+- Perdite in difesa: inbox.hangarLosses.<idMissione> registra ID di vettori
+  distrutti; il proprietario li elimina dal salvataggio al checkpoint.
+- Schieramento su colonia propria trasferisce gli hangar tramite ricevuta.
+- Missioni con hangar non vengono cancellate dal fallback di cleanup dopo
+  errori di rete: la transazione puo' essere riprovata senza perdere navi.
+- Nessun nuovo polling, listener, timer, libreria esterna o chiamata periodica.
+  Le letture aggiuntive sono puntuali e legate solo alle operazioni richieste.
+
+TEST EFFETTIVAMENTE ESEGUITI
+- node tests/test_fase3_hangars.js: 13 gruppi; 1/50 caccia, piu' vettori,
+  ID persistenti, stock invariato, validazione, duplicati, battaglie 3 round,
+  pareggio, perdite di vettore, bunker, stiva e salvataggio offline durante
+  il viaggio, arrivo/rientro e assenza di doppio bottino.
+- node tests/test_fase3_online.js: 7 scenari con mock Firestore transazionale;
+  revisione, due sessioni in concorrenza, rifiuto flotte miste, lancio atomico,
+  risoluzione dell'arrivo, ritorno idempotente, perdita in difesa e
+  trasferimento interplanetario degli hangar. Verifica punteggio.
+- Tutte le 17 suite JavaScript tests/test_*.js: superate dopo la
+  rigenerazione della cache (incluse le due nuove suite Fase 3). Le suite 15 preesistenti garantiscono Fasi 1/2, CPU,
+  depositi OGame, F01, inbox, sicurezza e cache.
+- python tests/smoke_fase3_ui.py: Chromium/Playwright reali a 1440, 375 e
+  320 px con dati di gioco simulati, comandi carica e UI Incursione, nessun
+  overflow orizzontale.
+- python tests/verify_browser_cpu.py (con base ufficiale): 21 frame
+  pixel-identici, lobby nera e zero RAF stellati, offline/online simulati.
+- Test del Service Worker/manifest: mock CacheStorage e SHA-256 su ogni asset.
+- Analisi codice: nessuna nuova chiamata a requestAnimationFrame,
+  setInterval, onSnapshot o monitoraggio periodico introdotta.
+
+LIMITI RESIDUI (IMPORTANTI)
+- Non sono stati eseguiti test di produzione Firebase reale con due account.
+  I test online usano un Firestore simulato con transazioni e versioni.
+- Il test opzionale delle regole sul Firestore Emulator richiede un JAR
+  non disponibile nell'ambiente. La sintassi/richieste specifiche delle nuove
+  regole devono essere verificate e poi DEPLOYATE sul progetto Firebase vero:
+  il commit GitHub da solo non pubblica firestore.rules.
+- Il combattimento rimane risolto dal client come prima della Fase 3:
+  le regole Firestore possono controllare missione e riduzione degli stock,
+  ma non verificano matematicamente per ogni caccia l'esito o il bottino.
+  Anticheat forte e atomicita' server-authoritative richiederebbero
+  una logica trusted server (non presente nella architettura attuale).
+- In caso di planetario d'origine perso durante un rientro, resta il normale
+  fallback verso un'altra colonia proprietaria; senza colonie rimaste, non e'
+  disponibile una destinazione di accredito.
+- Nessuna misura di CPU/GPU su telefoni reali o test di carico Firebase;
+  benchmark Node sono indicativi e non equivalgono a profiling browser.
+
+RIPRISTINO
+Se dovessero emergere regressioni non cancellare IndexedDB, localStorage,
+cache dati o Firestore. Ripristinare con un nuovo commit basato sul ramo
+backup/pre-fase3-nave-madre-2026-11-25, dopo confronto con eventuali commit
+piu' recenti. Ridistribuire il vecchio firestore.rules se le nuove regole
+fossero state attivate, solo dopo verifica della compatibilita'.

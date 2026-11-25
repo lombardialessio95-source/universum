@@ -184,6 +184,7 @@
         flt.cargo = { metal: 0, crystal: 0, deuterium: 0 };
 
         if (flt.mission === 'deploy') {
+          if (flt.carrierHangars?.length) window.UniversumHangars.restore(destPlanet,flt.carrierHangars);
           for (const [id, qty] of Object.entries(flt.fleet)) {
             destPlanet.fleet[id] = (destPlanet.fleet[id] || 0) + qty;
           }
@@ -320,7 +321,14 @@
         flt.status = 'returning';
         return;
       }
-      const combat = resolveCombat(flt.fleet, universe.researches, defenderData);
+      const H=window.UniversumHangars;
+      const defendingHangars=ownPlanet?.fleet?.mothership && H ? H.normalizePlanet(ownPlanet).slice() : [];
+      const combat = resolveCombat(flt.fleet, universe.researches, defenderData,
+        defendingHangars.length ? {defenderTags:{mothership:defendingHangars.map(h=>h.id)}} : {});
+      if (defendingHangars.length) {
+        const survivors=new Set(combat.defenderTagsAlive?.mothership || []);
+        ownPlanet.mothershipHangars=defendingHangars.filter(h=>survivors.has(h.id));
+      }
       addMessage(universe, 'combat', `Rapporto Difesa [${key}] — ${combat.result.toUpperCase()} (${siegeType === 'embargo' ? 'Embargo' : 'Occupazione'})`,
         `Il pianeta attaccato ha affrontato la flotta ${siegeType === 'embargo' ? 'da embargo' : 'di occupazione'}. Round: ${combat.roundsPlayed}. ${formatCombatDetails(combat)}`);
       if (ownPlanet) {
@@ -370,6 +378,39 @@
           : `Battaglia vinta. Prelievo 5% risorse/giorno, mantenimento dal deuterio del pianeta occupato (${Math.floor(targetDeut).toLocaleString()} D). `) +
         `Round: ${combat.roundsPlayed}. ${formatCombatDetails(combat)}`);
       return 'remove';
+    }
+
+    if (flt.mission === 'incursion') {
+      const hangars = window.UniversumHangars;
+      hangars.validateMission(flt.fleet, flt.carrierHangars);
+      const target = generateProceduralSlot(universe, flt.targetCoords.g, flt.targetCoords.s, flt.targetCoords.p);
+      if (target.ownerType !== 'bot') {
+        addMessage(universe, 'combat', `Incursione Respinta [${key}]`, 'Il pianeta nemico non è più disponibile. La flotta rientra.');
+        flt.status = 'returning';
+        return;
+      }
+      const combat = hangars.resolveIncursion(flt.carrierHangars, universe.researches, target, flt.cargo);
+      flt.fleet = combat.ships;
+      flt.ships = Object.assign({}, combat.ships);
+      flt.carrierHangars = combat.carriers;
+      for (const k of ['metal','crystal','deuterium']) flt.cargo[k] = (flt.cargo[k] || 0) + combat.loot[k];
+      const remaining = {};
+      for (const k of ['metal','crystal','deuterium']) remaining[k] = Math.max(0,(target.resources?.[k] || 0) - combat.loot[k]);
+      universe.galaxyDeltas[key] = Object.assign({}, universe.galaxyDeltas[key], {
+        lootedAt: now, resourcesOverride: remaining,
+        fleetOverride: combat.defenderFleet,
+        defensesOverride: combat.defenderDefenses,
+        debris: { metal:(target.debris?.metal || 0)+combat.debris.metal,
+          crystal:(target.debris?.crystal || 0)+combat.debris.crystal }
+      });
+      addMessage(universe, 'combat', `Incursione Planetaria [${key}]`,
+        `Battaglia orbitale: ${combat.orbit.result}, ${combat.orbit.roundsPlayed}/3 round. ${formatCombatDetails(combat.orbit)} `+
+        `Battaglia planetaria: ${combat.ground.result}, ${combat.ground.roundsPlayed}/3 round. ${formatCombatDetails(combat.ground)} `+
+        `Navi Madre superstiti ${combat.carriers.length}; Caccia recuperati ${combat.recoveredFighters}; `+
+        `Caccia persi per perdita del vettore ${combat.lostWithCarriers}. `+
+        `Bottino ${combat.loot.metal} M, ${combat.loot.crystal} C, ${combat.loot.deuterium} D.`);
+      flt.status = 'returning';
+      return;
     }
 
     if (flt.mission === 'attack' || flt.mission === 'destroyMoon') {
@@ -440,7 +481,13 @@
         return;
       }
 
-      const combat = resolveCombat(flt.fleet, universe.researches, slot, { allowBacinoDestruction: flt.mission === 'destroyMoon' });
+      const hangars = flt.carrierHangars || [];
+      const combat = resolveCombat(flt.fleet, universe.researches, slot, { allowBacinoDestruction: flt.mission === 'destroyMoon',
+        ...(hangars.length ? {attackerTags:{mothership:hangars.map(h=>h.id)}} : {}) });
+      if (hangars.length) {
+        const alive = new Set(combat.attackerTagsAlive?.mothership || []);
+        flt.carrierHangars = hangars.filter(h=>alive.has(h.id));
+      }
       addMessage(universe, 'combat', `Rapporto Difesa [${key}] — ${combat.result.toUpperCase()} (Attacco normale)`,
         `${slot.name} (${slot.emperor || 'Difensore'}) e' stato attaccato. Round: ${combat.roundsPlayed}. Bottino ceduto: ${combat.loot.metal.toLocaleString()} M, ${combat.loot.crystal.toLocaleString()} C, ${combat.loot.deuterium.toLocaleString()} D. ${formatCombatDetails(combat)}`);
       flt.fleet = combat.attackerSurvivors;

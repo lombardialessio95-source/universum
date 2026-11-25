@@ -5,7 +5,7 @@
  * Non legge, scrive o cancella IndexedDB, localStorage o Firebase.
  */
 'use strict';
-const VERSIONE_RELEASE = 'r4e9faf0abd55d1c21498';
+const VERSIONE_RELEASE = 'r9ea6677e2f7229688657';
 const CACHE_PREFIX = 'universum-static-release-';
 const CACHE_NAME = CACHE_PREFIX + VERSIONE_RELEASE;
 const META_PATH = './__universum_cache_metadata__';

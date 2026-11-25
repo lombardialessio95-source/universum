@@ -10,7 +10,7 @@
   // =========================================================
   // 3. MOTORE DI BATTAGLIA A 6 ROUND
   // =========================================================
-  function expandUnitPool(unitMap, tech, isDefenseMap = false) {
+  function expandUnitPool(unitMap, tech, isDefenseMap = false, tags = {}) {
     const Data = window.UniversumData;
     const pool = [];
     const wMult = 1 + (Number(tech?.weaponsTech || 0) * 0.1);
@@ -29,6 +29,7 @@
 
       for (let i = 0; i < count; i++) {
         pool.push({
+          carrierTag: tags?.[id]?.[i] || null,
           id,
           isDefense: Boolean(Data.DEFENSES[id]),
           maxHull,
@@ -58,8 +59,8 @@
 
   function resolveCombat(attackerFleet, attackerTech, defenderData, options = {}) {
     const Data = window.UniversumData;
-    let attackers = expandUnitPool(attackerFleet, attackerTech, false);
-    const defFleetUnits = expandUnitPool(defenderData.fleet || {}, defenderData.tech || {}, false);
+    let attackers = expandUnitPool(attackerFleet, attackerTech, false, options.attackerTags || {});
+    const defFleetUnits = expandUnitPool(defenderData.fleet || {}, defenderData.tech || {}, false, options.defenderTags || {});
 
     const defClean = Object.assign({}, defenderData.defenses || {});
     const trapCount = Math.max(0, Math.floor(Number(defClean.spaceTrap || 0)));
@@ -92,7 +93,8 @@
     }
 
     let roundsPlayed = 0;
-    for (let round = 1; round <= 6; round++) {
+    const maxRounds = options.maxRounds === 3 ? 3 : 6;
+    for (let round = 1; round <= maxRounds; round++) {
       if (attackers.length === 0 || defenders.length === 0) break;
       roundsPlayed = round;
 
@@ -306,7 +308,11 @@
     return {
       result,
       roundsPlayed,
+      attackerTagsAlive: options.attackerTags ? Object.fromEntries(Object.keys(options.attackerTags).map(id =>
+        [id, attackers.filter(u => u.id === id && u.carrierTag).map(u => u.carrierTag)])) : undefined,
       attackerSurvivors,
+      defenderTagsAlive: options.defenderTags ? Object.fromEntries(Object.keys(options.defenderTags).map(id =>
+        [id, defenders.filter(u => u.id === id && u.carrierTag).map(u => u.carrierTag)])) : undefined,
       defenderFleetSurvivors,
       repairedDefenses,
       attackerLosses,

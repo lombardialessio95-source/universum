@@ -71,6 +71,7 @@
   // *** MODIFICA A: launchFleet accetta origine "galattica" ***
   function launchFleet(universe, originPlanetIndex, targetCoords, mission, fleetSelection, cargo = { metal: 0, crystal: 0, deuterium: 0 }, options = {}) {
     const isGalatticaOrigin = options.originType === 'galattica';
+    const hangars = window.UniversumHangars;
 
     let originP = null;
     let originG = null;
@@ -143,6 +144,15 @@
 
     if (totalShips === 0) throw new Error('Seleziona almeno una nave per la missione.');
 
+    if (mission === 'incursion' && isGalatticaOrigin) throw new Error('Incursione: partenza solo da un pianeta.');
+    const carrierHangars = cleanFleet.mothership && !isGalatticaOrigin
+      ? hangars.select(originP,cleanFleet.mothership,options.carrierIds || null,mission === 'incursion') : [];
+    if (mission === 'incursion') {
+      hangars.validateMission(cleanFleet,carrierHangars);
+      const targetSlot = G.generateProceduralSlot(universe,targetCoords.g,targetCoords.s,targetCoords.p);
+      if (targetSlot.ownerType !== 'bot') throw new Error('Incursione consentita solo contro un pianeta nemico.');
+    }
+
     if (mission === 'spy' && !cleanFleet.espionageProbe) {
       throw new Error('Devi inviare almeno una Sonda Spia per la missione Spionaggio.');
     }
@@ -195,6 +205,7 @@
       resourceSource.deuterium -= (loadD + fuelCost + blackHoleFee);
     }
 
+    if (carrierHangars.length) hangars.take(originP,carrierHangars);
     for (const [id, qty] of Object.entries(cleanFleet)) {
       if (isGalatticaOrigin) {
         shipSource[id] -= qty;
@@ -218,6 +229,7 @@
       ships: Object.assign({}, cleanFleet),
       fleet: cleanFleet,
       cargo: { metal: loadM, crystal: loadC, deuterium: loadD },
+      carrierHangars,
       options,
       status: 'outbound',
       departureTime: now,

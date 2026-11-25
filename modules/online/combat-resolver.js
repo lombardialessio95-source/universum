@@ -157,6 +157,7 @@
           let reportTitle = `Missione ${fleet.mission.toUpperCase()} [${fleet.targetKey}]`;
           let reportBody = 'Missione completata.';
           let returnShips = Object.assign({}, fleet.ships || {});
+          let returnHangars = Array.isArray(fleet.carrierHangars) ? fleet.carrierHangars.slice() : [];
           let returnCargo = Object.assign({ metal: 0, crystal: 0, deuterium: 0 }, fleet.cargo || {});
           let completeNow = fleet.status === 'returning';
           let persistentStatus = null;
@@ -228,6 +229,14 @@
             targetPlanet.resources.metal += returnCargo.metal;
             targetPlanet.resources.crystal += returnCargo.crystal;
             targetPlanet.resources.deuterium += returnCargo.deuterium;
+            // Le Navi Madre schierate mantengono i propri hangar come un evento
+            // di accredito atomico, evitando che il checkpoint successivo li ricrei vuoti.
+            if (returnHangars.length) {
+              window.UniversumHangars.verifyManifest(returnHangars, Number(returnShips.mothership || 0));
+              if (targetBefore?.inbox?.hangarReturns?.[fDoc.id]) throw Error('Hangar schierati già accreditati.');
+              tx.update(targetPlanetRef,{[`inbox.hangarReturns.${fDoc.id}`]:returnHangars});
+              returnHangars=[];
+            }
             returnShips = {};
             returnCargo = { metal: 0, crystal: 0, deuterium: 0 };
             completeNow = true;
@@ -303,6 +312,50 @@
               reportTitle = `Esplorazione Profonda [${fleet.targetKey}] (${hrs}h)`;
               reportBody = 'Nessuna anomalia rilevata nel settore esplorato. Flotta rientrata alla base.';
             }
+          } else if (fleet.mission === 'incursion') {
+            const H=window.UniversumHangars;
+            if (!H) throw Error('Hangar non disponibile: missione rinviata.');
+            H.validateMission(fleet.ships,returnHangars);
+            if (!targetPlanet || targetPlanet.ownerUid === fleet.attackerUid ||
+                (!targetPlanet.isNpc && !targetPlanet.ownerUid)) {
+              reportTitle=`Incursione Annullata [${fleet.targetKey}]`;
+              reportBody='Il bersaglio nemico non è più valido. Le Navi Madre rientrano con i propri caccia.';
+            } else {
+              let defTech={weaponsTech:0,shieldingTech:0,armourTech:0};
+              const defenderUid=fleet.defenderUid || targetPlanet.ownerUid;
+              if (defenderUid && !targetPlanet.isNpc) {
+                const snap=await tx.get(uniRef.collection('players').doc(defenderUid));
+                const r=snap.exists ? (snap.data().researches || {}) : {};
+                defTech={weaponsTech:Number(r.weaponsTech||0),shieldingTech:Number(r.shieldingTech||0),armourTech:Number(r.armourTech||0)};
+              }
+              if (targetPlanet.fleet?.mothership) H.normalizePlanet(targetPlanet);
+              const battle=H.resolveIncursion(returnHangars,fleet.attackerTech,{
+                fleet:targetPlanet.fleet || {},defenses:targetPlanet.defenses || {},
+                mothershipHangars:targetPlanet.mothershipHangars || [],
+                resources:targetPlanet.resources || {},buildings:targetPlanet.buildings || {},tech:defTech
+              },returnCargo);
+              targetPlanet.fleet=battle.defenderFleet;
+              targetPlanet.mothershipHangars=battle.defenderHangars;
+              targetPlanet.defenses=battle.defenderDefenses;
+              for (const key of ['metal','crystal','deuterium']) {
+                targetPlanet.resources[key]=Math.max(0,(targetPlanet.resources[key]||0)-battle.loot[key]);
+                returnCargo[key]=(returnCargo[key]||0)+battle.loot[key];
+              }
+              targetPlanet.debris={metal:(targetPlanet.debris?.metal||0)+battle.debris.metal,
+                crystal:(targetPlanet.debris?.crystal||0)+battle.debris.crystal};
+              returnShips=battle.ships;
+              returnHangars=battle.carriers;
+              reportTitle=`Incursione Planetaria [${fleet.targetKey}]`;
+              reportBody=`Orbitale: ${battle.orbit.result}, round ${battle.orbit.roundsPlayed}/3; `+
+                `perdite Navi Madre ${battle.orbit.attackerLosses.mothership||0}. `+
+                `Planetaria: ${battle.ground.result}, round ${battle.ground.roundsPlayed}/3; `+
+                `perdite Caccia ${battle.ground.attackerLosses.lightFighter||0}. `+
+                `Navi Madre rientranti ${battle.carriers.length}; Caccia recuperati ${battle.recoveredFighters}, `+
+                `persi con i vettori ${battle.lostWithCarriers}. `+
+                `Bottino: ${battle.loot.metal} M, ${battle.loot.crystal} C, ${battle.loot.deuterium} D. `+
+                `Difese superstiti ${JSON.stringify(battle.defenderDefenses)}. Flotta superstite ${JSON.stringify(battle.defenderFleet)}.`;
+              _writePlanetResult(tx,targetPlanetRef,targetBefore,targetPlanet,fDoc.id);
+            }
           } else if (
             (fleet.mission === 'attack' || fleet.mission === 'destroyMoon' || fleet.mission === 'blockade' || fleet.mission === 'embargo' || fleet.mission === 'occupy') &&
             targetPlanet &&
@@ -324,6 +377,8 @@
               }
             }
 
+            if (targetPlanet.fleet?.mothership) window.UniversumHangars?.normalizePlanet(targetPlanet);
+            const defendingHangars = targetPlanet.mothershipHangars || [];
             const combat = window.UniversumGalaxy.resolveCombat(
               fleet.ships,
               fleet.attackerTech,
@@ -334,8 +389,20 @@
                 resources: targetPlanet.resources,
                 buildings: targetPlanet.buildings || {},
                 moon: targetPlanet.moon || null
+              },
+              {
+                ...(returnHangars.length ? {attackerTags:{mothership:returnHangars.map(h=>h.id)}} : {}),
+                ...(defendingHangars.length ? {defenderTags:{mothership:defendingHangars.map(h=>h.id)}} : {})
               }
             );
+            if (defendingHangars.length) {
+              const alive=new Set(combat.defenderTagsAlive?.mothership || []);
+              targetPlanet.mothershipHangars=defendingHangars.filter(h=>alive.has(h.id));
+            }
+            if (returnHangars.length) {
+              const alive=new Set(combat.attackerTagsAlive?.mothership || []);
+              returnHangars=returnHangars.filter(h=>alive.has(h.id));
+            }
 
             targetPlanet.fleet = combat.defenderFleetSurvivors || combat.defenderSurvivors || {};
             targetPlanet.defenses = combat.repairedDefenses || combat.defenderDefenseSurvivors || {};
@@ -482,7 +549,19 @@
             _writePlanetResult(tx, targetPlanetRef, targetBefore, targetPlanet, fDoc.id);
           }
 
+          // Riduzione di Nave Madre per eventi non bellici: nessun hangar
+          // può tornare senza il proprio vettore fisico.
+          if (returnHangars.length > Number(returnShips.mothership || 0)) {
+            returnHangars=returnHangars.slice(0,Math.max(0,Math.floor(Number(returnShips.mothership || 0))));
+          }
           if (completeNow && fleet.status === 'returning' && creditRef) {
+            if (returnHangars.length) {
+              if (Number(returnShips.mothership || 0)!==returnHangars.length) throw Error('Rientro Nave Madre inconsistente.');
+              const receiving=await tx.get(creditRef);
+              if (!receiving.exists || receiving.data().ownerUid!==fleet.attackerUid) throw Error('Pianeta d’origine non più disponibile.');
+              if (receiving.data().inbox?.hangarReturns?.[fDoc.id]) throw Error('Rientro Nave Madre duplicato.');
+              tx.update(creditRef,{[`inbox.hangarReturns.${fDoc.id}`]:returnHangars});
+            }
             const ransomBack = fleet.pendingRansom || {};
             _inboxCredit(tx, creditRef, {
               resources: {
@@ -513,7 +592,7 @@
             });
           } else {
             const legMs = Math.max(5000, (Number(fleet.returnTime || now) - Number(fleet.arrivalTime || now)) || 60000);
-            localReturning = { ships: returnShips, cargo: returnCargo, arrivalTime: now + legMs };
+            localReturning = { ships: returnShips, cargo: returnCargo, carrierHangars:returnHangars, arrivalTime: now + legMs };
             tx.update(fleetRef, {
               status: 'returning',
               phase: 'IN RITORNO',
@@ -521,6 +600,7 @@
               ships: returnShips,
               fleet: returnShips,
               cargo: returnCargo,
+              carrierHangars:returnHangars,
               arrivalTime: now + legMs,
               returnTime: now + legMs,
               schemaVersion: FLEET_SCHEMA_VERSION
@@ -557,6 +637,7 @@
               localFleet.ships = localReturning.ships;
               localFleet.fleet = localReturning.ships;
               localFleet.cargo = localReturning.cargo;
+              localFleet.carrierHangars = localReturning.carrierHangars;
               localFleet.arrivalTime = localReturning.arrivalTime;
               localFleet.returnTime = localReturning.arrivalTime;
             }
@@ -571,7 +652,10 @@
         }
       } catch (err) {
         _mpNotifyError('risoluzione flotta', err);
-        if (Date.now() - _fleetDueTime(fleetNorm) > 60000) {
+        // Fase 3: mai eliminare una missione con hangar dopo un errore temporaneo.
+        // Senza una transazione di rientro verificata perderemmo Navi Madre e
+        // caccia: conserviamo il documento e lasciamo riprovare il resolver.
+        if (!fleetNorm.carrierHangars?.length && fleetNorm.mission !== 'incursion' && Date.now() - _fleetDueTime(fleetNorm) > 60000) {
           await forceCleanupOnlineFleet(uniRef, fleetNorm, fleetRef, err.message || 'resolve-failed');
         }
       }

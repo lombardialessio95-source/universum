@@ -1357,3 +1357,12 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance:none; margi
 
 /* Blocca temporaneamente la lobby SOLO durante il cambio di release verificata. */
 #screen-lobby.universum-update-lock { pointer-events: none; }
+
+/* FASE 3 — Hangar Nave Madre, in linea con i pannelli Flotta esistenti. */
+.mother-hangar-list { display:flex; flex-direction:column; gap:8px; margin:10px 0; }
+.mother-hangar-row { display:flex; align-items:center; flex-wrap:wrap; gap:8px;
+  background:rgba(0,0,0,.35); border-radius:8px; padding:8px 10px; }
+.mother-hangar-choice { min-width:120px; flex:1; display:flex; align-items:center; gap:7px; }
+.mother-hangar-row > .text-muted { min-width:85px; }
+@media (max-width:480px) { .mother-hangar-row { justify-content:space-between; }
+  .mother-hangar-choice { width:100%; flex-basis:100%; } }

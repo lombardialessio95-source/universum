@@ -46,7 +46,7 @@
 
   const _ONLINE_SUPPORTED_MISSIONS = new Set([
     'attack', 'destroyMoon', 'spy', 'transport', 'deploy', 'colonize', 'recycle',
-    'expedition', 'explore', 'embargo', 'blockade', 'occupy', 'recall'
+    'expedition', 'explore', 'embargo', 'blockade', 'occupy', 'recall', 'incursion'
   ]);
 
 

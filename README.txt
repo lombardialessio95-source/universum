@@ -123,3 +123,16 @@ Laboratori e rendering UI evitano ricalcoli duplicati. Nessun cambiamento a form
 combattimento, sincronizzazione online o IndexedDB.
 Dopo ogni modifica a file statici: python3 tools/build_release.py, poi tutti i test.
 Vedere documents/rapporto ottimizzazione cpu.txt.
+
+FASE 3 — NAVI MADRE NORMALI (25/11/2026)
+  Ogni Nave Madre normale conserva il proprio hangar ID, massimo 50 Caccia Leggeri.
+  Carico/scarico manuali dalla schermata Flotta; caccia imbarcati fuori dallo stock
+  orbitale ma sempre presenti nel punteggio. Incursione Planetaria: due battaglie
+  indipendenti da massimo 3 round; bottino massimo 1000 x caccia recuperato,
+  50% delle risorse non protette e stiva effettiva; ritorno automatico.
+  Online: partenza/checkpoint revisionati, arrivo transazionale, ricevute
+  inbox.hangarReturns e inbox.hangarLosses. Le regole firestore.rules aggiornate
+  DEVONO essere pubblicate separatamente sul progetto Firebase operativo.
+  Test: node tests/test_fase3_hangars.js, node tests/test_fase3_online.js
+  Smoke visivo: python3 tests/smoke_fase3_ui.py (browser Chrome, DB simulato).
+  Rapporto: documents/rapporto fase3 nave madre.txt

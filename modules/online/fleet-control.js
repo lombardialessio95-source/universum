@@ -83,6 +83,10 @@
       }
     }
     if (totalShips === 0) throw new Error('Seleziona almeno una nave.');
+    const H=window.UniversumHangars;
+    const carrierHangars=cleanShips.mothership && H ?
+      H.select(planet,cleanShips.mothership,options.carrierIds || null,normalizedMission === 'incursion') : [];
+    if (normalizedMission === 'incursion') H.validateMission(cleanShips,carrierHangars);
     if (normalizedMission === 'colonize' && !cleanShips.colonyShip) {
       throw new Error('Devi includere almeno una Colonizzatrice per fondare una colonia.');
     }
@@ -112,11 +116,15 @@
     const targetKey = coordsToKey(targetCoords);
     if (specialist && originKey === targetKey) throw Error('Scegli una colonia di destinazione diversa.');
     const targetSnap = await uniRef.collection('planets').doc(targetKey).get();
+    if (normalizedMission === 'incursion' && (!targetSnap.exists ||
+        (!targetSnap.data().ownerUid && !targetSnap.data().isNpc) || targetSnap.data().ownerUid === user.uid)) {
+      throw new Error('Incursione consentita solo su un pianeta nemico valido.');
+    }
     if (normalizedMission === 'colonize' && targetSnap.exists) {
       throw new Error(`Lo slot [${targetCoords.g}:${targetCoords.s}:${targetCoords.p}] è già occupato!`);
     }
 
-    if (!specialist) {
+    if (!specialist && !carrierHangars.length) {
       for (const [sId, qty] of Object.entries(cleanShips)) {
         planet.fleet[sId] -= qty;
       }
@@ -128,6 +136,10 @@
     }
 
     const defenderUid = targetSnap.exists ? (targetSnap.data().ownerUid || null) : null;
+    if (carrierHangars.length) {
+      const cap=Object.entries(cleanShips).reduce((s,[id,n])=>s+n*(window.UniversumData.SHIPS[id]?.cargo || 0),0);
+      if (cargoM+cargoC+cargoD+flightStats.fuelCost > cap) throw Error('Stiva Nave Madre insufficiente per carico e carburante.');
+    }
 
     const now = Date.now();
     const holdDurationSec = normalizedMission === 'expedition'
@@ -167,6 +179,7 @@
       expeditionHours,
       ransom,
       ships: cleanShips,
+      carrierHangars,
       cargo: { metal: cargoM, crystal: cargoC, deuterium: cargoD },
       blackHole: Boolean(options.blackHole),
       status: 'outbound',
@@ -177,9 +190,10 @@
     };
 
     let ref;
-    if (specialist) {
+    if (specialist || carrierHangars.length) {
       ref = uniRef.collection('fleets').doc();
       await syncPlayerState(universeObj,{force:true,dispatch:{ref,doc:fleetDoc,
+        carrierHangars,specialist:Boolean(specialist),
         debit:{metal:cargoM,crystal:cargoC,deuterium:cargoD+flightStats.fuelCost}}});
     } else ref = await uniRef.collection('fleets').add(fleetDoc);
     fleetDoc.id = ref.id;

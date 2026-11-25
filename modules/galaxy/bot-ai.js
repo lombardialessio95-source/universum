@@ -43,6 +43,8 @@
             defenderFleet.crepuscolo = 1;
           }
         }
+        const H=window.UniversumHangars;
+        const defenderHangars=H && defenderFleet.mothership ? H.normalizePlanet(targetPlanet).slice() : [];
         const combat = resolveCombat(atk.fleet, atk.tech, {
           fleet: defenderFleet,
           defenses: targetPlanet.defenses,
@@ -51,7 +53,11 @@
           buildings: targetPlanet.buildings,
           moon: targetPlanet.moon,
           bacinoSpaziale: targetPlanet.bacinoSpaziale || null
-        });
+        }, defenderHangars.length ? {defenderTags:{mothership:defenderHangars.map(h=>h.id)}} : {});
+        if (defenderHangars.length) {
+          const survivors=new Set(combat.defenderTagsAlive?.mothership || []);
+          targetPlanet.mothershipHangars=defenderHangars.filter(h=>survivors.has(h.id));
+        }
 
         const fleetSurvivors = Object.assign({}, combat.defenderFleetSurvivors);
         if (targetPlanet.bacinoSpaziale) {

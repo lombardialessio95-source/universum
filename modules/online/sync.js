@@ -55,6 +55,12 @@
         const spec = Data?.SHIPS?.[sId];
         if (spec) pts += Math.floor(((spec.cost.metal + spec.cost.crystal + spec.cost.deuterium) / 1000) * cnt);
       }
+      // I Caccia imbarcati non figurano nello stock orbitale, ma rimangono
+      // posseduti dal giocatore e continuano a contare nella classifica.
+      const fighter = Data?.SHIPS?.lightFighter;
+      if (fighter) for (const hangar of p.mothershipHangars || []) {
+        pts += Math.floor(((fighter.cost.metal + fighter.cost.crystal + fighter.cost.deuterium) / 1000) * Number(hangar.fighters || 0));
+      }
       for (const [dId, cnt] of Object.entries(p.defenses || {})) {
         const spec = Data?.DEFENSES?.[dId];
         if (spec) pts += Math.floor(((spec.cost.metal + spec.cost.crystal + spec.cost.deuterium) / 1000) * cnt);
@@ -132,7 +138,11 @@
     restoreServices(u,planets,profile,now);
     const p = byKey.get(targetSnap.id);
     const inbox = pendingInbox(p,target);
+    const oldCount=Number(p.fleet?.mothership || 0);
     for (const key of ['resources','fleet','defenses']) p[key] = _applyUnitDelta(p[key],inbox[key]);
+    if (window.UniversumHangars && (oldCount || p.fleet?.mothership || inbox.hangarLosses || inbox.hangarReturns)) {
+      window.UniversumHangars.applyInbox(p,inbox,oldCount);
+    }
     return p;
   }
   function pendingInbox(p,data) {
@@ -155,7 +165,7 @@
   function _hasInbox(data) {
     const ib = data && data.inbox;
     if (!ib || typeof ib !== 'object') return false;
-    if (Object.keys(ib.serviceEvents || {}).length) return true;
+    if (Object.keys(ib.serviceEvents || {}).length || Object.keys(ib.hangarReturns || {}).length || Object.keys(ib.hangarLosses || {}).length) return true;
     for (const part of ['resources', 'fleet', 'defenses']) {
       const m = ib[part];
       if (m && Object.values(m).some((v) => Number(v) !== 0)) return true;
@@ -175,6 +185,10 @@
     }
     live.resources = res;
     live.fleet = _applyUnitDelta(planetDoc.fleet, inbox.fleet);
+    if (window.UniversumHangars && (live.fleet.mothership || planetDoc.mothershipHangars?.length ||
+        inbox.hangarReturns || inbox.hangarLosses)) {
+      window.UniversumHangars.applyInbox(live,inbox,Number(planetDoc.fleet?.mothership || 0));
+    }
     live.defenses = _applyUnitDelta(planetDoc.defenses, inbox.defenses);
     delete live.inbox;
     return live;
@@ -188,6 +202,7 @@
       hadServices: Boolean(p.services),
       resources: p.resources || {},
       fleet: p.fleet || {},
+      mothershipHangars:p.mothershipHangars || [],
       defenses: p.defenses || {},
       debris: p.debris ?? null,
       embargo: p.embargo ?? null,
@@ -224,6 +239,7 @@
       upd.isNpc = Boolean(after.isNpc);
       upd.resources = floorMap(after.resources);
       upd.fleet = floorMap(after.fleet);
+      upd.mothershipHangars=[];
       upd.defenses = floorMap(after.defenses);
       if (before.hadServices) upd.services = FV.delete();
       upd.buildQueue = [];
@@ -234,6 +250,7 @@
     } else if (after.isNpc) {
       upd.resources = floorMap(after.resources);
       upd.fleet = floorMap(after.fleet);
+      upd.mothershipHangars=after.mothershipHangars || [];
       upd.defenses = floorMap(after.defenses);
       upd.lastUpdated = Date.now();
       upd.inbox = FV.delete();
@@ -249,6 +266,11 @@
           const d = Math.round(Number(after[part]?.[id] || 0) - Number(before[part]?.[id] || 0));
           if (d) { delta[part][id] = d; upd[`inbox.${part}.${id}`] = FV.increment(d); }
         }
+      }
+      if (resolutionFleetId) {
+        const survivorIds=new Set((after.mothershipHangars || []).map(h=>h.id));
+        const losses=(before.mothershipHangars || []).filter(h=>!survivorIds.has(h.id)).map(h=>h.id);
+        if (losses.length) upd[`inbox.hangarLosses.${resolutionFleetId}`]=losses;
       }
       recordServiceEvent(upd,before.fleet,delta.fleet,delta.resources,delta.defenses,before.serviceEvents);
     }
@@ -320,6 +342,10 @@
   }
   function debitFleet(u,p,dispatch,now,validate = true) {
     window.UniversumServices.settlePlanet(u,p,now);
+    if (dispatch.carrierHangars?.length) {
+      if (!window.UniversumHangars) throw conflict();
+      window.UniversumHangars.take(p,dispatch.carrierHangars);
+    }
     const ships = dispatch.doc.ships;
     if (validate && (Object.entries(ships).some(([id,n])=>(p.fleet[id] || 0)<n) ||
         Object.entries(dispatch.debit).some(([k,n])=>p.resources[k]<n))) throw conflict();
@@ -376,11 +402,19 @@
         }
       }
       if (dispatch) {
-        for (const key of [dispatch.doc.targetKey,dispatch.doc.originKey]) {
-          const i = entries.findIndex(e=>e.ref.id===key);
+        const origin = entries.findIndex(e=>e.ref.id===dispatch.doc.originKey);
+        if (origin < 0 || snaps[origin].data()?.ownerUid !== user.uid) throw conflict();
+        if (dispatch.doc.mission === 'incursion') {
+          const dest = await tx.get(planetsCol.doc(dispatch.doc.targetKey));
+          if (!dest.exists || (dest.data().ownerUid === user.uid) ||
+              (!dest.data().isNpc && !dest.data().ownerUid)) throw conflict();
+          if (dispatch.doc.defenderUid !== (dest.data().ownerUid || null)) throw conflict();
+          window.UniversumHangars.validateMission(dispatch.doc.ships,dispatch.carrierHangars);
+        } else if (dispatch.specialist || !dispatch.carrierHangars?.length) {
+          const i = entries.findIndex(e=>e.ref.id===dispatch.doc.targetKey);
           if (i < 0 || snaps[i].data()?.ownerUid !== user.uid) throw conflict();
         }
-        activeRefs = [...activeRefs,dispatch.ref.id];
+        if (dispatch.specialist || !dispatch.carrierHangars?.length) activeRefs = [...activeRefs,dispatch.ref.id];
       }
 
       entries.forEach((e, i) => {
@@ -398,6 +432,22 @@
         const model = sending ? clone(p) : p;
         if (sending) debitFleet(universeObj,model,dispatch,nowTs);
         const res = Object.assign({}, model.resources);
+        const H = window.UniversumHangars;
+        let savedHangars = Array.isArray(model.mothershipHangars) ? model.mothershipHangars.slice() : [];
+        const returns = Object.values(inbox.hangarReturns || {});
+        if (H && (Number(model.fleet?.mothership || 0) || savedHangars.length || returns.length)) {
+          const snapshot = {id:p.id,coords:p.coords,fleet:{mothership:Number(model.fleet?.mothership || 0)},mothershipHangars:savedHangars};
+          H.normalizePlanet(snapshot);
+          savedHangars = snapshot.mothershipHangars;
+          const lostIds=new Set(Object.values(inbox.hangarLosses || {}).flat());
+          savedHangars=savedHangars.filter(h=>!lostIds.has(h.id));
+          const ids = new Set(savedHangars.map(h=>h.id));
+          for (const list of returns) for (const h of H.verifyManifest(list)) {
+            if (ids.has(h.id)) throw conflict();
+            ids.add(h.id);
+            savedHangars.push(h);
+          }
+        }
         for (const k of _INBOX_RES_KEYS) {
           res[k] = Math.max(0, Math.floor(Number(model.resources?.[k] || 0) + Number(inbox.resources?.[k] || 0)));
         }
@@ -408,6 +458,7 @@
           buildings: p.buildings,
           defenses: _applyUnitDelta(p.defenses, inbox.defenses),
           fleet: _applyUnitDelta(model.fleet, inbox.fleet),
+          mothershipHangars: savedHangars,
           ...(model.services ? {services:model.services} : {}),
           ...(versioned ? {serviceRevision:expected+1} : {}),
           buildQueue: p.buildQueue || [],
@@ -418,6 +469,12 @@
           bacinoSpaziale: p.bacinoSpaziale || null,
           lastUpdated: nowTs
         };
+        if (H && (payload.fleet.mothership || payload.mothershipHangars.length)) {
+          if (payload.mothershipHangars.length > Math.floor(Number(payload.fleet.mothership || 0))) throw conflict();
+          const check={id:p.id,coords:p.coords,fleet:payload.fleet,mothershipHangars:payload.mothershipHangars};
+          H.normalizePlanet(check);
+          payload.mothershipHangars=check.mothershipHangars;
+        }
         if (checkCapacity) for (const id of services.ids) {
           const reserved = payload.shipyardQueue.reduce((n,lot)=>n+(lot.id===id ? lot.remaining : 0),0);
           totals[id] = (totals[id] || 0) + (payload.fleet[id] || 0) + reserved + (sending ? dispatch.doc.ships[id] || 0 : 0);
@@ -464,8 +521,11 @@
         const d = Number(inbox.resources?.[k] || 0);
         if (d) planet.resources[k] = Math.max(0, Math.floor(Number(planet.resources[k] || 0) + d));
       }
+      const motherCountBefore=Number(planet.fleet?.mothership || 0);
       planet.fleet = _applyUnitDelta(planet.fleet, inbox.fleet);
       planet.defenses = _applyUnitDelta(planet.defenses, inbox.defenses);
+      if (window.UniversumHangars && (motherCountBefore || planet.fleet.mothership ||
+          inbox.hangarReturns || inbox.hangarLosses)) window.UniversumHangars.applyInbox(planet,inbox,motherCountBefore);
     }
     for (const { planet, moon } of moonUpdates) {
       planet.moon = moon;
@@ -614,6 +674,44 @@
     };
   }
 
-  Object.assign(G, { combatPlanet, restoreServices, calculateLiveResources, computePlayerPoints, _applyUnitDelta, _hasInbox, _effectivePlanetView, _snapshotForDiff, _writePlanetResult, _inboxCredit, _resolveCreditRef, syncPlayerState, listenOwnPlanets, renameOnlinePlanet, renameOnlineMoon, getOnlineSystem, fetchOnlineSystem });
+
+  async function changeOnlineMothershipHangar(u,planetIndex,id,amount) {
+    const user=getAuth().currentUser, db=getDB(), H=window.UniversumHangars;
+    if (!user || !u?.id || !H || !Number.isSafeInteger(amount) || !amount) throw Error('Operazione hangar non valida.');
+    const planet=u.planets[planetIndex];
+    if (!planet) throw Error('Pianeta selezionato non disponibile.');
+    // Prima conclude qualsiasi checkpoint della partita: i due client non devono
+    // usare due versioni diverse del campo fleet mentre spostano i caccia.
+    await syncPlayerState(u,{force:true});
+    const uni=db.collection('online_universes').doc(u.id);
+    const ref=uni.collection('planets').doc(coordsToKey(planet.coords));
+    const player=uni.collection('players').doc(user.uid);
+    const expected=Number(u.serviceRevision || 0);
+    let accepted;
+    await db.runTransaction(async tx=>{
+      const [pSnap,playerSnap]=await Promise.all([tx.get(ref),tx.get(player)]);
+      if (!pSnap.exists || !playerSnap.exists || pSnap.data().ownerUid!==user.uid ||
+          Number(playerSnap.data().serviceRevision || 0)!==expected) throw conflict();
+      const data=pSnap.data(), before={id:data.id,coords:data.coords,
+        fleet:Object.assign({},data.fleet || {}), mothershipHangars:data.mothershipHangars || []};
+      // Se nel frattempo sono arrivate perdite/rientri di caccia o vettori,
+      // l'hangar non può operare sullo stock precedente: prima serve il checkpoint.
+      if (Object.keys(data.inbox?.hangarReturns || {}).length ||
+          Object.keys(data.inbox?.hangarLosses || {}).length ||
+          Number(data.inbox?.fleet?.lightFighter || 0) !== 0 ||
+          Number(data.inbox?.fleet?.mothership || 0) !== 0) throw conflict();
+      H.changeLoad(before,id,amount);
+      accepted={fleet:before.fleet,hangars:before.mothershipHangars};
+      tx.update(ref,{fleet:before.fleet,mothershipHangars:before.mothershipHangars,
+        serviceRevision:expected+1,lastUpdated:Date.now()});
+      tx.update(player,{serviceRevision:expected+1,serviceCheckpoint:Date.now()});
+    });
+    planet.fleet.lightFighter=accepted.fleet.lightFighter;
+    planet.mothershipHangars=accepted.hangars;
+    u.serviceRevision=expected+1;
+    return true;
+  }
+
+  Object.assign(G, { changeOnlineMothershipHangar, combatPlanet, restoreServices, calculateLiveResources, computePlayerPoints, _applyUnitDelta, _hasInbox, _effectivePlanetView, _snapshotForDiff, _writePlanetResult, _inboxCredit, _resolveCreditRef, syncPlayerState, listenOwnPlanets, renameOnlinePlanet, renameOnlineMoon, getOnlineSystem, fetchOnlineSystem });
 
 })();

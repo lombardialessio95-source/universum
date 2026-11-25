@@ -235,6 +235,12 @@
           }
         }
         if (homeP) {
+          if (Array.isArray(flt.carrierHangars) && flt.carrierHangars.length) {
+            // Anche un evento di esplorazione può distruggere un vettore:
+            // i suoi caccia non possono ricomparire nel pianeta di ritorno.
+            const survived=Math.max(0,Math.floor(Number((flt.fleet||flt.ships)?.mothership || 0)));
+            window.UniversumHangars.restore(homeP,flt.carrierHangars.slice(0,survived));
+          }
             for (const [id, qty] of Object.entries(returningFleet)) {
             if (qty > 0) {
               homeP.fleet[id] = (homeP.fleet[id] || 0) + qty;
