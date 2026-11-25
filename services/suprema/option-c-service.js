@@ -145,7 +145,7 @@ async function commandAction(db,input,clock=Date.now){
       const supremeId=requireId(input.supremeId,'ID Suprema');
       const ship=inv.ships.find(s=>s.id===supremeId);
       if(!ship||ship.status!=='docked')fail('failed-precondition','Suprema non disponibile.');
-      if(ship.originKey!==originKey && action!=='assign')fail('failed-precondition','Suprema non presente su questo pianeta.');
+      if(ship.originKey!==originKey && !['assign','queue'].includes(action))fail('failed-precondition','Suprema non presente su questo pianeta.');
       for(const member of inv.ships)Yard.advance(member,now);
       if(action==='load'){
         const type=requireId(input.ship,'Classe');
