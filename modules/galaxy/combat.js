@@ -57,6 +57,13 @@
   }
 
 
+  function evaluateEspionage(probes, myEsp, defEsp, defProbes, random = Math.random) {
+    const diff = (myEsp-defEsp)+Math.floor(Math.sqrt(probes));
+    const catchChance = Math.min(0.85,Math.max(0.02,(defProbes/(Math.max(1,probes)*8))*0.25-diff*0.03));
+    const probesLost = probes>0 && random()<catchChance ? Math.min(probes,Math.ceil(probes*0.5)) : 0;
+    return {diff,probesLost};
+  }
+
   function resolveCombat(attackerFleet, attackerTech, defenderData, options = {}) {
     const Data = window.UniversumData;
     const random = options.random || Math.random;
@@ -426,6 +433,6 @@
     };
   }
 
-  Object.assign(G, { expandUnitPool, summarizePool, resolveCombat, simulateBattle });
+  Object.assign(G, { evaluateEspionage, expandUnitPool, summarizePool, resolveCombat, simulateBattle });
 
 })();

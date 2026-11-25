@@ -138,10 +138,10 @@
     }
   }
 
-  function destroy(universe,siege,target,ships,at,random,capture=false,winningFleet={}) {
+  function destroy(universe,siege,target,ships,at,random,capture=false,winningFleet={},originalCargo={}) {
     const captured = {};
     const loot = Object.fromEntries(materials.map(k=>[k,0]));
-    let space = cargo(winningFleet);
+    let space = Math.max(0,cargo(winningFleet)-total(originalCargo));
     target.debris ||= {metal:0,crystal:0};
     for (const ship of ships) {
       if (capture) for (const id of hulls) {
@@ -191,7 +191,7 @@
     endIfNeeded(universe,siege,at);
   }
 
-  function orbital(universe,siege,target,fleet,tech,at,seed,targetSupremeId=null) {
+  function orbital(universe,siege,target,fleet,tech,at,seed,targetSupremeId=null,originalCargo={}) {
     if (!siege.started || siege.endedAt) return null;
     charge(universe,siege,at);
     if (siege.endedAt) return null;
@@ -208,8 +208,82 @@
     target.debris.metal += battle.debris.metal;
     target.debris.crystal += battle.debris.crystal;
     const result = destroy(universe,siege,target,losses,at,random,Boolean(targetSupremeId),
-      battle.result==='attacker_win'?battle.attackerSurvivors:{});
+      battle.result==='attacker_win'?battle.attackerSurvivors:{},originalCargo);
     return {...battle,...result};
+  }
+
+  function trimCargo(load, capacity) {
+    const cargoAtArrival = {};
+    for (const key of materials) {
+      const kept = Math.min(capacity,Math.max(0,Math.floor(load?.[key] || 0)));
+      cargoAtArrival[key] = kept;
+      capacity -= kept;
+    }
+    return cargoAtArrival;
+  }
+
+  // Callers check ownership from their fresh planet snapshot. A fleet of an
+  // ally is left to the ordinary arrival flow. The returned fleet and cargo
+  // must replace the originals in the same write that records the combat.
+  function interceptArrival(universe,siege,planet,fleet,at) {
+    if (planet.ownerUid == null || fleet.attackerUid !== planet.ownerUid ||
+        planet.ownerUid !== siege.targetOwner || fleet.targetKey !== siege.targetKey ||
+        !fleet.id) return null;
+    const battle = orbital(universe,siege,planet,fleet.ships,fleet.attackerTech || {},at,fleet.id);
+    if (!battle) return null;
+    return {
+      ships:battle.attackerSurvivors,
+      cargo:trimCargo(fleet.cargo,cargo(battle.attackerSurvivors)),
+      result:battle.result,
+      rounds:battle.roundsPlayed
+    };
+  }
+
+  // Alliance membership is an input from a trusted snapshot of current
+  // permissions. It must never be copied from a flag in a fleet document.
+  function counteroffensive(universe,siege,planet,fleet,targetId,at,isAuthorizedAlly) {
+    if (planet.ownerUid == null || planet.ownerUid!==siege.targetOwner ||
+        fleet.targetKey!==siege.targetKey || !fleet.id || !targetId) return null;
+    if (fleet.attackerUid!==planet.ownerUid && !isAuthorizedAlly(fleet.attackerUid,planet.ownerUid)) {
+      throw Error('Controffensiva riservata al difensore e agli alleati autorizzati.');
+    }
+    const battle = orbital(universe,siege,planet,fleet.ships,fleet.attackerTech || {},at,fleet.id,targetId,fleet.cargo);
+    if (!battle) return null;
+    const ships={...battle.attackerSurvivors};
+    const carried=trimCargo(fleet.cargo,cargo(ships));
+    const space=Math.max(0,cargo(ships)-total(carried));
+    const collected=trimCargo(battle.loot,space);
+    for (const key of materials) carried[key]+=collected[key];
+    if (total(ships)>0) for (const [id,n] of Object.entries(battle.captured)) {
+      ships[id]=(ships[id] || 0)+n;
+    }
+    return {ships,cargo:carried,result:battle.result,rounds:battle.roundsPlayed};
+  }
+
+  function publicSiege(universe,siege) {
+    return {
+      attackerUid:siege.attackerUid || null,
+      targetKey:siege.targetKey,
+      ships:present(universe,siege).length,
+      frequencyHours:siege.waveHours,
+      nextWaveAt:siege.endedAt ? null : siege.nextAt
+    };
+  }
+
+  function spySupreme(universe,siege,planet,fleet,targetId) {
+    const probes = Math.floor(Number(fleet.ships?.espionageProbe || 0));
+    if (planet.ownerUid==null || fleet.attackerUid!==planet.ownerUid || planet.ownerUid!==siege.targetOwner ||
+        fleet.targetKey!==siege.targetKey || !fleet.id || !(probes>0)) return null;
+    const ship=present(universe,siege).find(x=>x.id===targetId);
+    if (!ship) return null;
+    const {diff,probesLost}=G.evaluateEspionage(probes,Number(fleet.attackerTech?.espionageTech || 0),
+      Number(siege.attackTech.espionageTech || 0),0,randomFrom(siege.id+'/spy/'+fleet.id));
+    return {
+      resources:{...ship.resources},
+      fleet:diff>=0 ? {...ship.hangar.escort} : null,
+      internals:diff>=1 ? {reserve:{...ship.hangar.reserve},invasion:{...ship.hangar.invasion}} : null,
+      probesLost
+    };
   }
 
   function changeFrequency(siege,hours,at=null) {
@@ -327,5 +401,5 @@
     }
   }
 
-  window.UniversumSupremaSieges = Object.freeze({spec,start,advance,orbital,recall,changeFrequency,settleReturns,advanceOffline,transfer,distribute});
+  window.UniversumSupremaSieges = Object.freeze({spec,start,advance,orbital,recall,changeFrequency,settleReturns,advanceOffline,transfer,distribute,interceptArrival,counteroffensive,publicSiege,spySupreme});
 })();

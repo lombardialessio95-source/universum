@@ -64,9 +64,7 @@
         const defEsp = Number(slot.tech?.espionageTech || 0);
         const defProbes = Number(slot.fleet?.espionageProbe || 0);
 
-        const diff = (myEsp - defEsp) + Math.floor(Math.sqrt(probes));
-        const catchChance = Math.min(0.85, Math.max(0.02, (defProbes / (probes * 8)) * 0.25 - diff * 0.03));
-        const probesLost = Math.random() < catchChance ? Math.min(probes, Math.ceil(probes * 0.5)) : 0;
+        const {diff,probesLost} = G.evaluateEspionage(probes,myEsp,defEsp,defProbes);
         flt.fleet.espionageProbe = Math.max(0, probes - probesLost);
         flt.ships = Object.assign({}, flt.fleet);
 

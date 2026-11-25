@@ -88,3 +88,52 @@ assert.deepEqual(Object.keys(result.captured),[]);
 assert.equal(is.endedAt,is.arrival);
 assert.equal(intercept.supremes.length,0);
 console.log('Suprema: distruzione del supporto in modalità Prudente e intercettazione senza catture verificate nel motore.');
+
+function arena(id) {
+  const world=structuredClone(before);
+  world.supremaSieges=[];
+  for (const ship of world.supremes) ship.status='docked';
+  const colony=structuredClone(modeTarget);
+  colony.ownerUid='defender';
+  colony.fleet={};
+  const record=B.start(world,world.planets[0],colony,id,selected,'offensiva',1,T);
+  B.advance(world,record,colony,record.arrival);
+  return {world,record,colony};
+}
+const ia=arena('ia');
+const delivery={id:'supply',targetKey:ia.record.targetKey,attackerUid:'defender',ships:{smallCargo:2},
+  cargo:{metal:9000,crystal:1000,deuterium:0},attackerTech:{}};
+assert.equal(B.interceptArrival(ia.world,ia.record,ia.colony,{...delivery,attackerUid:'ally'},ia.record.arrival),null);
+const delivered=B.interceptArrival(ia.world,ia.record,ia.colony,delivery,ia.record.arrival);
+assert.equal(delivered.result,'defender_win');
+assert.equal(Object.values(delivered.cargo).reduce((a,b)=>a+b,0),0);
+assert.equal(ia.world.supremes.length,3);
+
+const ca=arena('ca');
+ca.world.supremes[1].role='support';
+ca.world.supremes[1].resources.metal=900000;
+const raid={id:'counter',targetKey:ca.record.targetKey,attackerUid:'ally',ships:{deathStar:500},
+  cargo:{metal:100,crystal:4,deuterium:7},attackerTech:{weaponsTech:40}};
+assert.throws(()=>B.counteroffensive(ca.world,ca.record,ca.colony,raid,'s1',ca.record.arrival,()=>false),/alleati/);
+assert.equal(ca.world.supremes.length,3);
+const ret=B.counteroffensive(ca.world,ca.record,ca.colony,raid,'s1',ca.record.arrival,(a,b)=>a==='ally'&&b==='defender');
+assert.equal(ret.ships.lightFighter,3);
+assert.equal(ret.cargo.metal,450100);
+assert.equal(ca.world.supremes.length,2);
+assert.equal(B.counteroffensive(ca.world,ca.record,ca.colony,raid,'s1',ca.record.arrival,()=>true),null);
+console.log('Suprema: proprietario della flotta intercettata, carico superstite e controffensiva alleata verificati.');
+
+const intel=arena('intelligence');
+const scan={id:'probe-1',targetKey:intel.record.targetKey,attackerUid:'defender',ships:{espionageProbe:3},
+  attackerTech:{espionageTech:30}};
+assert.equal(B.spySupreme(intel.world,intel.record,intel.colony,{...scan,attackerUid:'other'},'s0'),null);
+const fullReport=B.spySupreme(intel.world,intel.record,intel.colony,scan,'s0');
+assert.deepEqual(Object.keys(fullReport).sort(),['fleet','internals','probesLost','resources']);
+assert.equal(fullReport.internals.reserve.lightFighter,10);
+intel.record.attackTech.espionageTech=40;
+const partial=B.spySupreme(intel.world,intel.record,intel.colony,scan,'s0');
+assert.equal(partial.fleet,null);
+assert.equal(partial.internals,null);
+assert.deepEqual(Object.keys(B.publicSiege(intel.world,intel.record)).sort(),
+  ['attackerUid','frequencyHours','nextWaveAt','ships','targetKey']);
+console.log('Suprema: rapporto con formule ordinarie e proiezione pubblica senza dati privati.');
