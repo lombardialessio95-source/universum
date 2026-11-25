@@ -5,6 +5,7 @@ const {getFirestore} = require('firebase-admin/firestore');
 const {onCall,HttpsError} = require('firebase-functions/v2/https');
 const {recoverAtLogin} = require('./recover');
 const {startStagingSiege} = require('./launch');
+const {commandAction,getState} = require('./option-c-service');
 
 initializeApp();
 function stagingCallable(run) {
@@ -26,3 +27,8 @@ function stagingCallable(run) {
 
 exports.recoverSuprema = stagingCallable(recoverAtLogin);
 exports.launchSuprema = stagingCallable(startStagingSiege);
+
+// Opzione C è indipendente dagli assedi staging. Non disattivare il blocco
+// per il progetto universum-online senza il collaudo Firebase richiesto.
+exports.optionCSuprema = stagingCallable((db,input)=>
+  input.action==='state' ? getState(db,input) : commandAction(db,input));
