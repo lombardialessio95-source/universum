@@ -327,6 +327,9 @@
     const target = st.fleetTarget || { g: gal.coords.g, s: gal.coords.s, p: gal.coords.p };
     const cargo = st.fleetCargo || { metal: 0, crystal: 0, deuterium: 0 };
     const fuelPercent = Number(st.fleetFuelPercent) || 100;
+    const MCore = window.UniversumMissionsCore;
+    const maxExploreHours = MCore?.getMaxExploreHours(uni) || 1;
+    st.fleetExploreHours = Math.min(maxExploreHours, Math.max(1, Math.floor(Number(st.fleetExploreHours) || 1)));
     const isCreative = Boolean(uni.creativeMode && !st.isMultiplayerMode);
 
     const totalShipsSelected = Object.values(st.fleetSelection || {}).reduce((a, q) => a + Math.max(0, Math.floor(Number(q) || 0)), 0);
@@ -362,6 +365,13 @@
           <div class="form-group">
             <select id="gal-fleet-mission" class="form-control">
               ${missions.map((m) => `<option value="${m.id}" ${m.id === st.fleetMission ? 'selected' : ''}>${escapeHTML(m.label)}</option>`).join('')}
+            </select>
+          </div>
+          <div id="gal-fleet-explore-options" class="${st.fleetMission === 'explore' ? '' : 'hidden'}" style="margin-top:12px;">
+            <label>Durata esplorazione (massimo ${maxExploreHours}h — Ricerca Esplorazione Profonda Lv.${Number(uni.researches?.expeditionTech || 0)})</label>
+            <select id="gal-fleet-explore-hours" class="form-control">
+              ${Array.from({ length:maxExploreHours }, (_, i) => i + 1).map(h =>
+                `<option value="${h}" ${h === st.fleetExploreHours ? 'selected' : ''}>${h} ${h === 1 ? 'ora' : 'ore'}</option>`).join('')}
             </select>
           </div>
           <p class="text-muted" style="font-size:0.82rem; margin-top:6px;">Colonizzazione e Schieramento non sono disponibili dalla Galattica.</p>
@@ -467,6 +477,17 @@
 
     document.getElementById('gal-fleet-mission')?.addEventListener('change', (e) => {
       st.fleetMission = e.target.value;
+      document.getElementById('gal-fleet-explore-options')?.classList.toggle('hidden', e.target.value !== 'explore');
+      if (e.target.value === 'explore') {
+        st.fleetTarget ||= { g:gal.coords.g, s:gal.coords.s, p:16 };
+        st.fleetTarget.p = 16;
+        const pos = document.getElementById('gal-fleet-target-p');
+        if (pos) pos.value = '16';
+      }
+    });
+
+    document.getElementById('gal-fleet-explore-hours')?.addEventListener('change', (e) => {
+      st.fleetExploreHours = Math.min(maxExploreHours, Math.max(1, Math.floor(Number(e.target.value) || 1)));
     });
 
     ['g', 's', 'p'].forEach((k) => {
@@ -508,7 +529,11 @@
         Galaxy.launchFleet(uni, 0, target, mission, selection, cargo, {
           originType: 'galattica',
           originGalatticaId: galId,
-          fuelPercent
+          fuelPercent,
+          ...(mission === 'explore' ? {
+            exploreHours: Math.min(maxExploreHours, Math.max(1,
+              Math.floor(Number(document.getElementById('gal-fleet-explore-hours')?.value) || st.fleetExploreHours || 1)))
+          } : {})
         });
 
         await UI.persistUniverseState();
