@@ -488,6 +488,7 @@
       galaxies: uniData.galaxies || 3,
       systemsPerGalaxy: uniData.systemsPerGalaxy || 100,
       npcMode: uniData.npcMode || 'none',
+      supremaRecoveryStaging: uniData.supremaRecoveryStaging === true,
       botConfig: uniData.botConfig || null,
       creativeMode: false,
       planets: myPlanets,

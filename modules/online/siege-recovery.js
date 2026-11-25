@@ -42,9 +42,11 @@
       const snap = await tx.get(siegeRef);
       if (!snap.exists) return null;
       const siege = snap.data();
+      if (actor!==siege.attackerUid && actor!==siege.defenderUid) {
+        throw Object.assign(Error('Utente estraneo all’assedio.'),{code:'permission-denied'});
+      }
       const event = siege.pending[0];
       if (!event || event.at>now) return null;
-      if (actor!==siege.attackerUid && actor!==siege.defenderUid) throw Error('Utente estraneo all’assedio.');
       const receiptRef = siegeRef.collection('receipts').doc(event.id);
       const receipt = await tx.get(receiptRef);
       if (receipt.exists) throw Error('Ricevuta presente per un evento ancora in coda.');

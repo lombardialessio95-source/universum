@@ -227,6 +227,17 @@ service cloud.firestore {
           && (resource.data.ownerUid == request.auth.uid || isFounder(uniId));
       }
 
+      // Supremas staging: only the callable may change either document.
+      // Access to the private battle and its receipts is denied to all browsers.
+      match /supremaRecoveryPublic/{siegeId} {
+        allow read: if signedIn() && request.auth.uid in resource.data.participants;
+        allow write: if false;
+      }
+
+      match /supremaRecoveryPrivate/{document=**} {
+        allow read, write: if false;
+      }
+
       match /fleets/{fleetId} {
         allow read: if signedIn();
         allow create: if signedIn()

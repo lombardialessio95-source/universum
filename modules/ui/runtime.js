@@ -257,6 +257,9 @@
     st.currentUniverse = universe;
     universe.creativeMode = false;
 
+    if (universe.supremaRecoveryStaging) window.UniversumSupremaStaging?.onJoin(universe)
+      .catch(error=>UI.toast(error.message,'error'));
+
     const home = universe.planets[0];
     if (home) {
       st.galaxyG = home.coords.g;
