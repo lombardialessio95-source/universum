@@ -1,0 +1,9 @@
+# Fase 4 · Recupero alla riconnessione
+
+Il direttore ha aggiornato il requisito H. A client chiusi l'assedio resta registrato con le scadenze originali. Alla prima riconnessione di uno dei due partecipanti gli eventi scaduti vengono applicati nell'ordine registrato. I successivi blocchi di recupero proseguono dal checkpoint, fino all'allineamento. Nessun nuovo servizio remoto è necessario per attivare il recupero. Il multiplayer continua a usare il Firestore esistente.
+
+Il modulo candidato applica un evento per transazione insieme alla ricevuta e a tutte le scritture del risultato. La revisione e la rilettura dello stato tutelano dal replay tra due sessioni. Si elabora a blocchi limitati senza scartare arretrati. La modifica della frequenza entra in vigore dopo l'onda già pianificata. Per coincidenza di scadenza, manutenzione, arrivi, controffensive, ondate e partenze hanno priorità in quest'ordine. A parità di tipo si usa l'ID stabile.
+
+Il modulo attende l'integrazione con il resolver di gioco, le regole Firestore e i flussi di lancio, riconnessione e ingresso degli alleati. Il chiamante deve risolvere gli arretrati prima di modificare uno stato coinvolto e fornire tempi verificati dal server. L'autorizzazione client e la transazione proteggono dalle collisioni dei client conformi. Le regole devono convalidare l'identità e i confini delle scritture. La convalida autoritativa dell'esito del combattimento rimane distinta e non è offerta dal modello client-side attuale. Prima del rilascio servono test con due account reali o un Firebase equivalente, regole aggiornate e prove con browser chiusi e riaperti. Il test candidato corrente usa un mock transazionale.
+
+La Fase 4 è in sviluppo. Il modulo resta fuori dal bootstrap del gioco finché il resolver completo e la persistenza non sono collegati.
