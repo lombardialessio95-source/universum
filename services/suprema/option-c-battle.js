@@ -27,20 +27,33 @@ function cargo(hangar,engine) {
     sum+(engine.data.SHIPS[id]?.cargo||0)*n,0),0);
 }
 function allocateLoot(planet,ship,engine) {
-  const remaining=Math.max(0,cargo(ship.hangar,engine));
-  let space=remaining;
+  const capacity=Math.max(0,cargo(ship.hangar,engine));
   const loot={metal:0,crystal:0,deuterium:0};
   const bunker=Math.min(9,Math.max(0,Number(planet.buildings?.hiddenBunker)||0));
   const factor=Math.max(.1,1-bunker*.1);
-  const limits=Object.fromEntries(materials.map(k=>[k,Math.floor(Math.max(0,planet.resources?.[k]||0)*factor*.5)]));
-  // Preserve 50%-per-resource cap and both shared cargo and separate depot caps.
-  for (const k of materials) {
-    const free=Math.max(0,I.ONLINE_CAPACITY>=0 ? engine.core.depotCaps[k]-(ship.resources[k]||0) : 0);
-    const n=Math.min(space,free,limits[k]);
-    loot[k]=n;
-    space-=n;
+  const caps={};
+  for(const k of materials) {
+    const protectedLimit=Math.floor(Math.max(0,planet.resources[k]||0)*factor*.5);
+    const free=Math.max(0,engine.core.depotCaps[k]-(ship.resources[k]||0));
+    caps[k]=Math.min(protectedLimit,free);
   }
-  for (const k of materials) {
+  const total=materials.reduce((n,k)=>n+caps[k],0);
+  if(total>0&&capacity>0) {
+    const target=Math.min(total,capacity);
+    let distributed=0;
+    for(const k of materials) {
+      loot[k]=Math.min(caps[k],Math.floor(target*caps[k]/total));
+      distributed+=loot[k];
+    }
+    // Fino a due unità di arrotondamento, in ordine deterministico.
+    let left=target-distributed;
+    for(const k of materials) {
+      if(!left)break;
+      const add=Math.min(left,caps[k]-loot[k]);
+      loot[k]+=add;left-=add;
+    }
+  }
+  for(const k of materials) {
     planet.resources[k]-=loot[k];
     ship.resources[k]=(ship.resources[k]||0)+loot[k];
   }
