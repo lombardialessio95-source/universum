@@ -592,7 +592,14 @@
             });
           } else {
             const legMs = Math.max(5000, (Number(fleet.returnTime || now) - Number(fleet.arrivalTime || now)) || 60000);
-            localReturning = { ships: returnShips, cargo: returnCargo, carrierHangars:returnHangars, arrivalTime: now + legMs };
+            // Le spedizioni hanno già il rientro programmato alla partenza.
+            // Se Firestore risolve in ritardo, NON allungare il viaggio:
+            // il tick successivo accrediterà la flotta una sola volta.
+            const isExploration = fleet.mission === 'expedition' || fleet.mission === 'explore';
+            const plannedReturnAt = Number(fleet.returnTime || 0);
+            const dueReturnAt = isExploration && plannedReturnAt >= Number(fleet.arrivalTime || 0)
+              ? plannedReturnAt : now + legMs;
+            localReturning = { ships: returnShips, cargo: returnCargo, carrierHangars:returnHangars, arrivalTime: dueReturnAt };
             tx.update(fleetRef, {
               status: 'returning',
               phase: 'IN RITORNO',
@@ -601,8 +608,8 @@
               fleet: returnShips,
               cargo: returnCargo,
               carrierHangars:returnHangars,
-              arrivalTime: now + legMs,
-              returnTime: now + legMs,
+              arrivalTime: dueReturnAt,
+              returnTime: dueReturnAt,
               schemaVersion: FLEET_SCHEMA_VERSION
             });
           }

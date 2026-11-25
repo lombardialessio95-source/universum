@@ -53,6 +53,66 @@
       return 1 + expLv;
     },
 
+    // Una sola formula per la permanenza esplorativa planetaria, Galattica e online.
+    // La durata del volo militare NON viene modificata.
+    getExplorationHoldDurationSec(universe, hours) {
+      const maximum = MissionsCore.getMaxExploreHours(universe);
+      const validHours = Math.min(maximum, Math.max(1, Math.floor(Number(hours) || 1)));
+      const effectiveSpeed = window.UniversumEngine?.getEffectiveSpeed
+        ? window.UniversumEngine.getEffectiveSpeed(universe)
+        : Math.max(1, Number(universe?.speed) || 1);
+      return Math.max(15, Math.floor(validHours * 3600 / Math.sqrt(Math.max(1, effectiveSpeed))));
+    },
+
+    // Per il resolver esistente arrivalTime resta la FINE dell'esplorazione,
+    // non il primo arrivo: aggiungiamo gli istanti distinti senza cambiare
+    // il significato dei timestamp preesistenti.
+    buildExplorationTimeline(departureMs, travelSec, holdSec) {
+      const travelDurationMs = Math.max(5000, Math.floor(Number(travelSec) || 0) * 1000);
+      const explorationHoldMs = Math.max(0, Math.floor(Number(holdSec) || 0) * 1000);
+      const zoneArrivalTime = departureMs + travelDurationMs;
+      const explorationEndTime = zoneArrivalTime + explorationHoldMs;
+      return {
+        travelDurationMs,
+        returnTravelDurationMs: travelDurationMs,
+        explorationHoldMs,
+        zoneArrivalTime,
+        explorationEndTime,
+        arrivalTime: explorationEndTime,
+        returnTime: explorationEndTime + travelDurationMs
+      };
+    },
+
+    // Compatibilità con i vecchi salvataggi: la differenza tra returnTime e
+    // arrivalTime contiene la singola tratta, NON le ore di permanenza.
+    getExplorationTimeline(fleet) {
+      if (!fleet || (!['explore', 'expedition'].includes(fleet.mission)
+        && !(fleet.mission === 'recall' && Number(fleet.zoneArrivalTime || 0) > 0))) return null;
+      const departureTime = Number(fleet.departureTime || fleet.startTime || 0);
+      const explorationEndTime = Number(fleet.explorationEndTime || fleet.arrivalTime || 0);
+      const legacyReturnMs = Number(fleet.returnTime || 0) - Number(fleet.arrivalTime || 0);
+      const travelDurationMs = [fleet.travelDurationMs, fleet.returnTravelDurationMs,
+        (Number(fleet.durationSec) || 0) * 1000, legacyReturnMs]
+        .map(Number).find(v => Number.isFinite(v) && v >= 5000) || 0;
+      const zoneArrivalTime = Number(fleet.zoneArrivalTime || 0)
+        || (departureTime > 0 && travelDurationMs > 0 ? departureTime + travelDurationMs : 0);
+      return {
+        departureTime, zoneArrivalTime, explorationEndTime, travelDurationMs,
+        returnTime: Number(fleet.returnTime || 0)
+      };
+    },
+
+    // Richiamo prima dell'arrivo: percorre al ritorno la distanza già coperta.
+    // Dopo l'arrivo: SOLO la durata di una tratta, mai lo stazionamento.
+    getRecallDurationMs(fleet, now = Date.now()) {
+      const departureTime = Number(fleet?.departureTime || fleet?.startTime || 0);
+      const elapsedMs = Math.max(2000, now - (departureTime || now));
+      const timeline = MissionsCore.getExplorationTimeline(fleet);
+      if (!timeline || !timeline.travelDurationMs || !timeline.zoneArrivalTime) return elapsedMs;
+      if (now >= timeline.zoneArrivalTime) return timeline.travelDurationMs;
+      return Math.max(2000, Math.min(elapsedMs, timeline.travelDurationMs));
+    },
+
     // Calcola velocità, durata e consumo carburante in base alla % potenza/carburante (10% - 100%)
     getAdjustedFlightStats(universe, fleetSelection, distance, fuelPercent = 100, exploreHours = 1, mission = 'attack') {
       const Galaxy = window.UniversumGalaxy;
@@ -76,11 +136,8 @@
       }
 
       // Durata stazionamento in esplorazione scalata sulla velocità universo
-      const effSpeed = window.UniversumEngine?.getEffectiveSpeed
-        ? window.UniversumEngine.getEffectiveSpeed(universe)
-        : Math.max(1, Number(universe?.speed) || 1);
       const holdDurationSec = mission === 'explore'
-        ? Math.max(15, Math.floor((validExploreHours * 3600) / Math.sqrt(effSpeed)))
+        ? MissionsCore.getExplorationHoldDurationSec(universe, validExploreHours)
         : 0;
 
       return {
@@ -122,13 +179,12 @@
       }
 
       const now = Date.now();
-      const departureTime = Number(fleet.departureTime || (fleet.arrivalTime - 30000));
-      const elapsedMs = Math.max(3000, now - departureTime);
+      const recallDurationMs = MissionsCore.getRecallDurationMs(fleet, now);
 
       fleet.status = 'returning';
       fleet.recalled = true;
       fleet.returnStartTime = now;
-      fleet.returnTime = now + elapsedMs;
+      fleet.returnTime = now + Math.max(3000, recallDurationMs);
       fleet.arrivalTime = fleet.returnTime;
 
       return fleet;

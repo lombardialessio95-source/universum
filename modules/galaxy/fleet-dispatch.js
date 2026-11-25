@@ -178,6 +178,11 @@
     const fleetStats = getFleetSpeedAndFuel(universe, cleanFleet, distance, options.fuelPercent || 100);
     const durationSec = fleetStats.durationSec;
     const fuelCost = fleetStats.fuelCost + invictusJumpFuel;
+    const MCore = window.UniversumMissionsCore;
+    const exploreHours = mission === 'explore'
+      ? Math.min(MCore?.getMaxExploreHours(universe) || 1,
+        Math.max(1, Math.floor(Number(options.exploreHours) || 1)))
+      : 0;
 
     const loadM = Math.max(0, Math.floor(Number(cargo.metal) || 0));
     const loadC = Math.max(0, Math.floor(Number(cargo.crystal) || 0));
@@ -219,6 +224,10 @@
     }
 
     const now = Date.now();
+    const timeline = mission === 'explore' && MCore?.buildExplorationTimeline
+      ? MCore.buildExplorationTimeline(now, durationSec,
+          MCore.getExplorationHoldDurationSec(universe, exploreHours))
+      : null;
     if (specialistTransfer) window.UniversumServices.settlePlanet(universe,originP);
     const missionObj = {
       id: 'flt_' + now + '_' + Math.random().toString(36).substring(2, 6),
@@ -234,9 +243,11 @@
       status: 'outbound',
       departureTime: now,
       startTime: now,
-      arrivalTime: now + durationSec * 1000,
-      returnTime: now + durationSec * 2000,
-      durationSec
+      arrivalTime: timeline?.arrivalTime ?? now + durationSec * 1000,
+      returnTime: timeline?.returnTime ?? now + durationSec * 2000,
+      durationSec,
+      ...(timeline || {}),
+      ...(mission === 'explore' ? { exploreHours } : {})
     };
 
     if (isGalatticaOrigin) {

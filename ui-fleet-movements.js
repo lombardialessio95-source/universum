@@ -155,8 +155,21 @@
               ${flights.map((f) => {
                 const mInfo = MISSION_LABELS[f.mission] || { label: f.mission, badge: 'badge-blue' };
                 const isOutbound = f.status === 'outbound';
-                const startTs = Number(f.departureTime || f.returnStartTime || (now - 5000));
-                const endTs = Number(isOutbound ? f.arrivalTime : f.returnTime);
+                const exploration = MCore?.getExplorationTimeline(f);
+                const inExploration = isOutbound && exploration?.zoneArrivalTime > 0
+                  && now >= exploration.zoneArrivalTime
+                  && now < exploration.explorationEndTime;
+                const phaseLabel = inExploration ? 'IN ESPLORAZIONE'
+                  : isOutbound ? 'ANDATA'
+                  : (f.recalled || f.mission === 'recall') ? 'RICHIAMATA • RIENTRO' : 'RIENTRO';
+                const phaseBadge = inExploration ? 'badge-creative' : isOutbound ? 'badge-green' : 'badge-blue';
+                const startTs = inExploration ? exploration.zoneArrivalTime
+                  : exploration && !isOutbound
+                    ? Number(f.returnStartTime || exploration.explorationEndTime || now)
+                    : Number(f.departureTime || f.returnStartTime || (now - 5000));
+                const endTs = inExploration ? exploration.explorationEndTime
+                  : isOutbound && exploration?.zoneArrivalTime > 0 ? exploration.zoneArrivalTime
+                  : Number(isOutbound ? f.arrivalTime : f.returnTime);
                 const totalMs = Math.max(1000, endTs - startTs);
                 const progressPct = Math.min(100, Math.max(4, Math.round(((now - startTs) / totalMs) * 100)));
                 const fuelPct = Number(f.fuelPercent || f.speedPct || 100);
@@ -178,13 +191,17 @@
                     <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:8px;">
                       <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
                         <span class="badge ${mInfo.badge}">${escapeHTML(mInfo.label)}</span>
-                        <span class="badge ${isOutbound ? 'badge-green' : 'badge-blue'}">${isOutbound ? 'ANDATA' : (f.recalled || f.mission === 'recall' ? 'RICHIAMATA • RIENTRO' : 'RIENTRO')}</span>
+                        <span class="badge ${phaseBadge}">${phaseLabel}</span>
                         <span class="badge badge-neutral">Spinta: ${fuelPct}%</span>
                         ${expH ? `<span class="badge badge-creative">Esplorazione: ${expH}h</span>` : ''}
                         ${isGalatticaReturn ? '<span class="badge badge-creative">5% velocità</span>' : ''}
                       </div>
                       <span class="font-display text-energy live-timer" data-end="${endTs}" style="font-size:1.05rem;">${formatDuration((endTs - now) / 1000)}</span>
                     </div>
+
+                    ${exploration && Number(f.returnTime) > 0 ? `<div class="text-muted" style="font-size:0.83rem; margin-bottom:8px;">
+                      Rientro previsto: <strong>${new Date(Number(f.returnTime)).toLocaleString('it-IT')}</strong>
+                    </div>` : ''}
 
                     <div style="font-size:0.92rem; margin-bottom:8px; display:flex; justify-content:space-between; flex-wrap:wrap; gap:6px;">
                       <span>Rotta: <strong class="text-crystal">[${f.originCoords.g}:${f.originCoords.s}:${f.originCoords.p}]</strong> → <strong class="text-metal">[${f.targetCoords.g}:${f.targetCoords.s}:${f.targetCoords.p}]</strong></span>
