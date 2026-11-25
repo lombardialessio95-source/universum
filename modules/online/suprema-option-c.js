@@ -68,9 +68,14 @@
     html+=form('build','<label>Costruisci (40 rate giornaliere reali) sul pianeta</label>'+
       '<select class="form-control" name="originKey" required>'+homeOpts+'</select>'+ 
       '<input type="hidden" name="supremeId" value="'+id()+'">','Avvia costruzione');
-    for(const o of orders)html+='<div class="glass-panel" style="padding:9px;margin:7px 0;">'+
-      '<strong>Suprema '+esc(o.id)+'</strong>: '+esc(o.paidDays)+'/40 rate, '+esc(o.status)+
-      ' — prossimo controllo '+new Date(o.nextPaymentAt).toLocaleString('it-IT')+'</div>';
+    for(const o of orders){
+      html+='<div class="glass-panel" style="padding:9px;margin:7px 0;">'+
+        '<strong>Suprema '+esc(o.id)+'</strong>: '+esc(o.paidDays)+'/40 rate, '+esc(o.status)+
+        ' — prossimo controllo '+new Date(o.nextPaymentAt).toLocaleString('it-IT')+
+        form('cancelBuild','<input type="hidden" name="supremeId" value="'+esc(o.id)+'">'+
+          '<input type="hidden" name="originKey" value="'+esc(o.originKey)+'">',
+          'Annulla (rimborso 50% rate pagate)')+'</div>';
+    }
     for(const s of ships){
       const hangar=occupied(s);
       html+='<section class="glass-panel" style="padding:12px;margin:10px 0;">'+
@@ -107,6 +112,12 @@
           '<div class="form-grid-3">'+['g','s','p'].map(k=>'<input class="form-control" name="'+k+
           '" type="number" min="1" value="'+esc(target[k])+'" required>').join('')+'</div>',
           'Lancia attacco');
+      }
+      if(s.status==='returning'&&s.returnAt<=Date.now()&&s.missionId){
+        html+=form('return','<input type="hidden" name="missionId" value="'+esc(s.missionId)+'">'+
+          '<label>Pianeta di rientro (scegli una tua colonia disponibile)</label>'+
+          '<select class="form-control" name="originKey">'+homeOpts+'</select>',
+          'Conferma rientro');
       }
       html+='</section>';
     }
