@@ -180,7 +180,7 @@ async function runOnline(){
   await G.recallOnlineFleet(u,mission.id);
   equal(docs.get(fleetRef).returnTime,now+3600000,'online richiamo dopo 4h permanenza');
   check(docs.get(fleetRef).mission==='recall','online richiamo non concede ricompensa');
-  await assert.rejects(G.recallOnlineFleet(u,mission.id),/già.*rientro/);checks++;
+  await assert.rejects(G.recallOnlineFleet(u,mission.id),/già.*rientr/);checks++;
   const another=uni(10);
   now=T+8*3600000;
   const later=await G.launchOnlineFleet(another,0,where,'explore',{lightFighter:2},{},{exploreHours:5});
