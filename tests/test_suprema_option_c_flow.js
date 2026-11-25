@@ -89,7 +89,7 @@ async function run(){
     targetKey:'1_2_1',supremeId:'Sup1'},now+70000);
   check(launch.missionId==='userA_fly1','missione individuale univoca');
   await assert.rejects(act('userA',{action:'launch',commandId:'fly2',originKey:'1_1_1',
-    targetKey:'1_2_1',supremeId:'Sup1'},now+70000),/indisponibile/i);count++;
+    targetKey:'1_2_1',supremeId:'Sup1'},now+70000),/non disponibile|indisponibile/i);count++;
   const result=await act('userB',{action:'resolve',commandId:'resolution1',missionId:launch.missionId},
     launch.arrivalAt+1000);
   check(result.status==='returning' || result.status==='destroyed','una sola battaglia registrata');
