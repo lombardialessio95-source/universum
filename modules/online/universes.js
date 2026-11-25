@@ -489,6 +489,7 @@
       systemsPerGalaxy: uniData.systemsPerGalaxy || 100,
       npcMode: uniData.npcMode || 'none',
       supremaRecoveryStaging: uniData.supremaRecoveryStaging === true,
+      supremaOptionCStaging: uniData.supremaOptionCStaging === true,
       botConfig: uniData.botConfig || null,
       creativeMode: false,
       planets: myPlanets,
