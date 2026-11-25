@@ -225,83 +225,31 @@
     }
 
     if (flt.mission === 'explore') {
-      const crepDef = window.UniversumData.CREPUSCOLO;
-      const exploreHours = Number(flt.exploreHours || flt.options?.exploreHours || 1);
-      const deathStarsArrived = Math.max(0, Math.floor(Number((flt.fleet || {}).deathStar || 0)));
-      if (!(flt.options && flt.options.blackHole) && exploreHours >= crepDef.wreckExploreHours && deathStarsArrived >= crepDef.wreckMinDeathStars && Math.random() < crepDef.wreckChance) {
-        if (getCrepuscoloState(universe).has) {
-          addMessage(universe, 'expedition', `Relitto Crepuscolo Perso [${key}]`,
-            'Avete trovato il relitto di una Crepuscolo degli Dei, ma ne possedete già una nel vostro impero (max 1): il relitto è andato perso.');
-        } else {
-          const emptyPlanet = (universe.planets || []).find((pl) => isBacinoVuoto(pl, universe));
-          if (!emptyPlanet) {
-            addMessage(universe, 'expedition', `Relitto Crepuscolo Sparito [${key}]`,
-              'Avete trovato il relitto di una Crepuscolo degli Dei, ma non esiste un Bacino Spaziale vuoto (Bacini inesistenti oppure attualmente occupati): il relitto è sparito nello spazio profondo.');
-          } else if (assignCrepuscoloWreck(universe, emptyPlanet)) {
-            addMessage(universe, 'expedition', `🌌 RELITTO CREPUSCOLO RECUPERATO [${key}]!`,
-              `Il relitto di una Crepuscolo degli Dei è stato agganciato al Bacino Spaziale vuoto su ${emptyPlanet.name}: riparazione di ${crepDef.wreckRepairDays} giorni reali avviata.`);
-          }
+      if (!flt.rewardResult) {
+        const hours=Number(flt.exploreHours || 1);
+        const ships=flt.fleet || flt.ships;
+        const blackHole=Boolean(flt.options?.blackHole);
+        const origin=flt.originGalatticaId
+          ? universe.galattiche?.find(g=>g.id===flt.originGalatticaId)
+          : universe.planets.find(p=>p.id===flt.originPlanetId);
+        const dock=!blackHole && hours>=24 && ships.deathStar>=4 && !getCrepuscoloState(universe).has
+          && universe.planets.find(p=>isBacinoVuoto(p,universe));
+        const result=window.UniversumExplorationRewards.resolve({
+          version:flt.rewardRulesVersion ?? 2,id:flt.id,ships,cargo:flt.cargo,tech:flt.rewardTech || universe.researches,
+          hours,blackHole,canRecoverWreck:Boolean(dock),originResources:origin?.resources,
+          catalog:window.UniversumData.SHIPS,combat:resolveCombat
+        });
+        if (result.effects.repairDays && !assignCrepuscoloWreck(universe,dock)) throw Error('Bacino per il relitto non disponibile.');
+        for (const k of ['metal','crystal','deuterium']) {
+          if (result.cost[k]) origin.resources[k]-=result.cost[k];
+          flt.cargo[k]=(flt.cargo[k] || 0)+result.loaded[k];
         }
-        flt.status = 'returning';
-        return;
-      }
-      const roll = Math.random();
-      if (flt.options && flt.options.blackHole) {
-        if (roll < 0.05) {
-          flt.cargo.metal += 500000;
-          flt.cargo.crystal += 300000;
-          flt.cargo.deuterium += 200000;
-          addMessage(universe, 'expedition', `🌌 SINGOLARITÀ SUPERATA [${key}]!`, 'La flotta emerge dall’orizzonte degli eventi con 1.000.000 di risorse esotiche!');
-        } else if (roll < 0.35) {
-          for (const id of Object.keys(flt.fleet)) {
-            flt.fleet[id] = Math.floor(flt.fleet[id] * 0.7);
-          }
-          flt.ships = Object.assign({}, flt.fleet);
-          addMessage(universe, 'expedition', `⚠️ Anomalia Gravitazionale [${key}]`, 'Il Buco Nero ha danneggiato il 30% della flotta esplorativa.');
-        } else {
-          flt.cargo.deuterium += 25000;
-          addMessage(universe, 'expedition', `Spedizione Buco Nero [${key}]`, 'Raccolti 25.000 isotopi di Deuterio puro dalla corona.');
-        }
-      } else {
-        if (roll < 0.35) {
-          const foundM = Math.floor(15000 + Math.random() * 45000);
-          const foundC = Math.floor(10000 + Math.random() * 30000);
-          flt.cargo.metal += foundM;
-          flt.cargo.crystal += foundC;
-          addMessage(universe, 'expedition', `Giacimento Asteroidi [${key}]`, `Trovati ${foundM.toLocaleString()} Metallo e ${foundC.toLocaleString()} Cristallo.`);
-        } else if (roll < 0.55) {
-          flt.fleet.lightFighter = (flt.fleet.lightFighter || 0) + 5;
-          flt.fleet.cruiser = (flt.fleet.cruiser || 0) + 1;
-          flt.ships = Object.assign({}, flt.fleet);
-          addMessage(universe, 'expedition', `Relitto Flotta Abbandonata [${key}]`, 'Recuperati 5 Caccia Leggeri e 1 Incrociatore ancora funzionanti!');
-        } else if (roll < 0.62) {
-          const originP = universe.planets.find((p) => p.id === flt.originPlanetId) || universe.planets[0];
-          if (originP && originP.resources.metal >= 250000 && originP.resources.crystal >= 125000) {
-            originP.resources.metal -= 250000;
-            originP.resources.crystal -= 125000;
-            flt.fleet.deathStar = (flt.fleet.deathStar || 0) + 1;
-            flt.ships = Object.assign({}, flt.fleet);
-            addMessage(universe, 'expedition', `☠️ RELITTO ANTICO RIPARATO [${key}]!`, 'I tuoi ingegneri hanno riparato una Morte Nera antica usando 250k Metallo e 125k Cristallo!');
-          } else {
-            flt.cargo.metal += 80000;
-            addMessage(universe, 'expedition', `Relitto Antico [${key}]`, 'Trovato scafo di Morte Nera irrecuperabile senza 250k M / 125k C: smantellati 80.000 Metallo.');
-          }
-        } else if (roll < 0.80) {
-          const pirateCombat = resolveCombat(flt.fleet, universe.researches, {
-            fleet: { lightFighter: 12, cruiser: 3 },
-            defenses: {},
-            tech: { weaponsTech: 3, shieldingTech: 3, armourTech: 3 },
-            resources: { metal: 12000, crystal: 8000, deuterium: 2000 }
-          });
-          flt.fleet = pirateCombat.attackerSurvivors;
-          flt.ships = Object.assign({}, flt.fleet);
-          if (pirateCombat.attackerCrepuscoloDamaged && Number(flt.fleet.crepuscolo || 0) > 0) flt.crepuscoloDamaged = true;
-          flt.cargo.metal += pirateCombat.loot.metal;
-          flt.cargo.crystal += pirateCombat.loot.crystal;
-          addMessage(universe, 'combat', `Imboscata Pirata [${key}]`, `Esito: ${pirateCombat.result}. Round: ${pirateCombat.roundsPlayed}. Bottino recuperato: ${pirateCombat.loot.metal.toLocaleString()} M / ${pirateCombat.loot.crystal.toLocaleString()} C / ${pirateCombat.loot.deuterium.toLocaleString()} D. Detriti: ${pirateCombat.debris.metal.toLocaleString()} M, ${pirateCombat.debris.crystal.toLocaleString()} C. ${formatCombatDetails(pirateCombat)}`);
-        } else {
-          addMessage(universe, 'expedition', `Spedizione Tranquilla [${key}]`, 'Nessuna anomalia rilevata nel settore.');
-        }
+        flt.fleet=result.survivors;
+        flt.ships={...result.survivors};
+        if (Array.isArray(flt.carrierHangars)) flt.carrierHangars=flt.carrierHangars.slice(0,flt.ships.mothership || 0);
+        if (result.effects.crepuscoloDamaged) flt.crepuscoloDamaged=true;
+        flt.rewardResult=result;
+        addMessage(universe,'expedition','Rapporto esplorativo ['+key+']',result.message);
       }
       flt.status = 'returning';
       return;

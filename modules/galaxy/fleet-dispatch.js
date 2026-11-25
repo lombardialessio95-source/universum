@@ -188,7 +188,7 @@
     const loadC = Math.max(0, Math.floor(Number(cargo.crystal) || 0));
     const loadD = Math.max(0, Math.floor(Number(cargo.deuterium) || 0));
 
-    const blackHoleFee = (!universe.creativeMode && mission === 'explore' && options.blackHole) ? 50000 : 0;
+    const blackHoleFee = (mission === 'explore' && options.blackHole) ? 50000 : 0;
 
     // Una specialista a stiva zero può partire scarica, pagando comunque il viaggio.
     if (specialistTransfer) window.UniversumServices.settlePlanet(universe,originP);
@@ -208,6 +208,9 @@
       resourceSource.metal -= loadM;
       resourceSource.crystal -= loadC;
       resourceSource.deuterium -= (loadD + fuelCost + blackHoleFee);
+    } else if (blackHoleFee) {
+      if (!(resourceSource.deuterium>=blackHoleFee)) throw Error('Servono 50.000 Deuterio per il Buco Nero.');
+      resourceSource.deuterium-=blackHoleFee;
     }
 
     if (carrierHangars.length) hangars.take(originP,carrierHangars);
@@ -247,7 +250,7 @@
       returnTime: timeline?.returnTime ?? now + durationSec * 2000,
       durationSec,
       ...(timeline || {}),
-      ...(mission === 'explore' ? { exploreHours } : {})
+      ...(mission === 'explore' ? { exploreHours, rewardRulesVersion:2, rewardTech:{...universe.researches}, blackHoleFeePaid:blackHoleFee } : {})
     };
 
     if (isGalatticaOrigin) {

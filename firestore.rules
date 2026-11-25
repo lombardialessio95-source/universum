@@ -68,11 +68,37 @@ service cloud.firestore {
         'pendingRansom', 'repaired', 'repairReason',
         'mission', 'schemaVersion', 'departureTime', 'carrierHangars',
         // Solo per correggere i due orari al timestamp di partenza Firebase.
-        'zoneArrivalTime', 'explorationEndTime'];
+        'zoneArrivalTime', 'explorationEndTime', 'rewardResult'];
     }
 
     // Mantiene coerenti gli istanti di una spedizione corretti sul timestamp
     // Firebase; non autorizza modifiche arbitrarie alle durate immutabili.
+    function validRewardTransition(uniId,fleetId) {
+      let old = resource.data;
+      let next = request.resource.data;
+      let changed = next.diff(old).affectedKeys();
+      return old.get('rewardRulesVersion', 1) != 2
+        ? !changed.hasAny(['rewardResult'])
+        : (
+          (old.status == next.status && !changed.hasAny(['rewardResult','ships','fleet','cargo','carrierHangars','resolved'])
+            && (!changed.hasAny(['returnTime','arrivalTime','departureTime']) || changed.hasAny(['explorationEndTime'])))
+          || (old.status == 'outbound' && next.status == 'returning' && next.mission == 'recall'
+            && !changed.hasAny(['rewardResult','ships','fleet','cargo','carrierHangars']) && !next.resolved)
+          || (old.status == 'outbound' && next.status == 'returning' && next.mission == 'expedition'
+            && !('rewardResult' in next) && request.time.toMillis() >= old.explorationEndTime
+            && !changed.hasAny(['ships','fleet','cargo','carrierHangars']) && !next.resolved
+            && get(/databases/$(database)/documents/online_universes/$(uniId)/planets/$(old.targetKey)).data.embargo.attackerUid != old.attackerUid)
+          || (old.status == 'outbound' && next.status == 'returning' && next.mission == 'expedition'
+            && request.auth.uid == old.attackerUid && request.time.toMillis() >= old.explorationEndTime
+            && next.rewardResult.version == 2 && next.rewardResult.eventId == fleetId
+            && next.ships == next.rewardResult.survivors && next.arrivalTime == old.returnTime
+            && next.returnTime == old.returnTime && !next.resolved)
+          || (old.status == 'returning' && next.status == 'completed' && next.resolved
+            && request.time.toMillis() >= old.returnTime
+            && !changed.hasAny(['rewardResult','ships','fleet','cargo','returnTime','arrivalTime']))
+        );
+    }
+
     function validExplorationClockCorrection() {
       return !request.resource.data.diff(resource.data).affectedKeys()
         .hasAny(['zoneArrivalTime', 'explorationEndTime'])
@@ -109,6 +135,11 @@ service cloud.firestore {
           && request.resource.data.serviceRevision == get(/databases/$(database)/documents/online_universes/$(uniId)/players/$(request.auth.uid)).data.get('serviceRevision',0) + 1);
     }
 
+    function validExpeditionDispatch(uniId,fleetId) {
+      return !('rewardRulesVersion' in request.resource.data) || (getAfter(/databases/$(database)/documents/online_universes/$(uniId)/planets/$(request.resource.data.originKey)).data.lastExpeditionDispatch == fleetId
+           && get(/databases/$(database)/documents/online_universes/$(uniId)/planets/$(request.resource.data.originKey)).data.get('lastExpeditionDispatch','') != fleetId);
+    }
+
     function validHumanFleetCreate(uniId) {
       return request.resource.data.attackerUid == request.auth.uid
         && request.resource.data.originCoords is map
@@ -119,6 +150,10 @@ service cloud.firestore {
           || (request.resource.data.mission in ['deploy','transport']
             && request.resource.data.targetKey != request.resource.data.originKey
             && get(/databases/$(database)/documents/online_universes/$(uniId)/planets/$(request.resource.data.targetKey)).data.ownerUid == request.auth.uid))
+        && (!('rewardRulesVersion' in request.resource.data) ||
+          (request.resource.data.mission == 'expedition' && request.resource.data.rewardRulesVersion == 2
+           && !('rewardResult' in request.resource.data)
+           && request.resource.data.blackHoleFeePaid == (request.resource.data.blackHole ? 50000 : 0)))
         && request.resource.data.cargo is map
         && request.resource.data.mission in [
           'attack', 'destroyMoon', 'spy', 'transport', 'deploy', 'colonize',
@@ -267,13 +302,14 @@ service cloud.firestore {
       match /fleets/{fleetId} {
         allow read: if signedIn();
         allow create: if signedIn()
-          && (validHumanFleetCreate(uniId) || validNpcRaidCreate(uniId, fleetId));
+          && ((validHumanFleetCreate(uniId) && validExpeditionDispatch(uniId,fleetId)) || validNpcRaidCreate(uniId, fleetId));
         // P-R3: aggiornamento consentito a chiunque autenticato, MA solo sui campi di risoluzione.
         // Questo impedisce a un client malevolo di cambiare attackerUid, targetCoords, originCoords,
         // o di riscrivere ships/cargo con valori inventati durante il volo.
         allow update: if signedIn() && fleetParty()
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(fleetFieldsForUpdate())
           && validExplorationClockCorrection()
+          && validRewardTransition(uniId,fleetId)
           && (
             request.resource.data.mission == resource.data.mission
             || (resource.data.attackerUid == request.auth.uid

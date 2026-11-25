@@ -153,6 +153,7 @@
       const raw = d.data() || {};
       const uid = getAuth().currentUser?.uid;
       if (!uid || (raw.attackerUid !== uid && raw.defenderUid !== uid)) continue;
+      if (['expedition','explore'].includes(raw.mission)) continue; // La normalizzazione in lettura conserva i dati storici.
       const norm = normalizeOnlineFleet(raw, d.id);
       const needs = raw.schemaVersion !== FLEET_SCHEMA_VERSION || raw.resolved === undefined || !raw.targetKey || !raw.ships;
       if (needs) {

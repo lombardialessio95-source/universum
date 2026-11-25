@@ -33,7 +33,7 @@
       const fleet = normalizeOnlineFleet(d.data(), d.id);
       const uid = getAuth().currentUser?.uid;
       if (!uid || (fleet.attackerUid !== uid && fleet.defenderUid !== uid)) continue;
-      if (fleet.resolved) continue;
+      if (fleet.resolved || fleet.mission==='expedition' || fleet.rewardRulesVersion) continue;
       if (fleet.status === 'embargo' || fleet.status === 'occupy') continue;
       if (_fleetDueTime(fleet) <= now) {
         await forceCleanupOnlineFleet(uniRef, fleet, d.ref, 'repair-button');

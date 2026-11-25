@@ -134,7 +134,7 @@ async function runOnline(){
   }
   class Collection{
     constructor(key){this.key=key;}
-    doc(id){return new Ref(this.key+'/'+id);}
+    doc(id='fleet'+(++seq)){return new Ref(this.key+'/'+id);}
     async add(data){
       const r=this.doc('fleet'+(++seq));
       docs.set(r.key,{...data});
@@ -160,7 +160,7 @@ async function runOnline(){
     __UniversumMPModules:{
       getAuth:()=>({currentUser:{uid:'alice',displayName:'Alice'}}),
       getDB:()=>db,coordsToKey:c=>[c.g,c.s,c.p].join('_'),
-      syncPlayerState:async()=>{},_tsToMs:v=>v?.toMillis?.()||0
+      syncPlayerState:async(u,{dispatch})=>{if(dispatch) docs.set(dispatch.ref.key,{...dispatch.doc});},_tsToMs:v=>v?.toMillis?.()||0
     }
   };
   const firebase={firestore:{FieldValue:{serverTimestamp:()=>({toMillis:()=>now+900})}}};

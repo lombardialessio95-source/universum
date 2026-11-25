@@ -410,11 +410,11 @@
               (!dest.data().isNpc && !dest.data().ownerUid)) throw conflict();
           if (dispatch.doc.defenderUid !== (dest.data().ownerUid || null)) throw conflict();
           window.UniversumHangars.validateMission(dispatch.doc.ships,dispatch.carrierHangars);
-        } else if (dispatch.specialist || !dispatch.carrierHangars?.length) {
+        } else if (dispatch.specialist || (dispatch.doc.mission!=='expedition' && !dispatch.carrierHangars?.length)) {
           const i = entries.findIndex(e=>e.ref.id===dispatch.doc.targetKey);
           if (i < 0 || snaps[i].data()?.ownerUid !== user.uid) throw conflict();
         }
-        if (dispatch.specialist || !dispatch.carrierHangars?.length) activeRefs = [...activeRefs,dispatch.ref.id];
+        if (dispatch.specialist || (dispatch.doc.mission!=='expedition' && !dispatch.carrierHangars?.length)) activeRefs = [...activeRefs,dispatch.ref.id];
       }
 
       entries.forEach((e, i) => {
@@ -430,6 +430,9 @@
         const inbox = pendingInbox(p,data);
         const sending = dispatch && e.ref.id === dispatch.doc.originKey;
         const model = sending ? clone(p) : p;
+        if (sending && dispatch.doc.rewardRulesVersion===2 &&
+            (Object.entries(dispatch.debit).some(([k,n])=>n>(model.resources[k] || 0)+(inbox.resources?.[k] || 0)) ||
+             Object.entries(dispatch.doc.ships).some(([k,n])=>n>(model.fleet[k] || 0)+(inbox.fleet?.[k] || 0)))) throw conflict();
         if (sending) debitFleet(universeObj,model,dispatch,nowTs);
         const res = Object.assign({}, model.resources);
         const H = window.UniversumHangars;
@@ -469,6 +472,7 @@
           bacinoSpaziale: p.bacinoSpaziale || null,
           lastUpdated: nowTs
         };
+        if (sending && dispatch.doc.rewardRulesVersion===2) payload.lastExpeditionDispatch=dispatch.ref.id;
         if (H && (payload.fleet.mothership || payload.mothershipHangars.length)) {
           if (payload.mothershipHangars.length > Math.floor(Number(payload.fleet.mothership || 0))) throw conflict();
           const check={id:p.id,coords:p.coords,fleet:payload.fleet,mothershipHangars:payload.mothershipHangars};

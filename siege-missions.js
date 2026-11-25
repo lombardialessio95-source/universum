@@ -221,6 +221,9 @@
         planet.resources.metal -= loadM;
         planet.resources.crystal -= loadC;
         planet.resources.deuterium -= totalDeutNeeded;
+      } else if (blackHoleExtra) {
+        if (!(planet.resources.deuterium>=blackHoleExtra)) throw Error('Servono 50.000 Deuterio per il Buco Nero.');
+        planet.resources.deuterium-=blackHoleExtra;
       }
 
       // Scala le navi dal pianeta
@@ -253,6 +256,7 @@
         cargo: { metal: loadM, crystal: loadC, deuterium: loadD },
         fuelPercent,
         exploreHours,
+        ...(mission==='explore' ? {rewardRulesVersion:2, rewardTech:{...universe.researches}, blackHoleFeePaid:blackHoleExtra} : {}),
         options: { blackHole: Boolean(options.blackHole) },
         ransomDemand,
         status: 'outbound',
@@ -371,24 +375,7 @@
               `Round: ${combat.roundsPlayed}. ${SiegeMissions.combatDetails(combat)}`,
             time: now
           });
-        } else if (f.mission === 'explore' && Number(f.exploreHours || 1) > 1) {
-          // Bonus moltiplicato per le ore di esplorazione extra
-          const mult = Number(f.exploreHours || 1);
-          const bonusM = Math.floor((2500 + Math.random() * 6000) * mult * Math.sqrt(universe.speed || 1));
-          const bonusC = Math.floor((1800 + Math.random() * 4500) * mult * Math.sqrt(universe.speed || 1));
-          const bonusD = Math.floor((900 + Math.random() * 2500) * mult * Math.sqrt(universe.speed || 1));
 
-          f.cargo.metal = (f.cargo.metal || 0) + bonusM;
-          f.cargo.crystal = (f.cargo.crystal || 0) + bonusC;
-          f.cargo.deuterium = (f.cargo.deuterium || 0) + bonusD;
-          f.status = 'returning';
-
-          universe.messages.unshift({
-            id: 'msg_' + now + '_' + Math.random().toString(36).slice(2, 5),
-            title: `Spedizione Profonda (${mult}h) completata`,
-            body: `Anomalie mappate con successo! Recuperati +${bonusM.toLocaleString('it-IT')} M, +${bonusC.toLocaleString('it-IT')} C, +${bonusD.toLocaleString('it-IT')} D.`,
-            time: now
-          });
         }
       }
 

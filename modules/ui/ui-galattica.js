@@ -374,6 +374,7 @@
                 `<option value="${h}" ${h === st.fleetExploreHours ? 'selected' : ''}>${h} ${h === 1 ? 'ora' : 'ore'}</option>`).join('')}
             </select>
           </div>
+          <label class="${st.fleetMission === 'explore' ? '' : 'hidden'}"><input type="checkbox" id="gal-black-hole"> Spedizione nel Buco Nero (+50.000 Deuterio)</label>
           <p class="text-muted" style="font-size:0.82rem; margin-top:6px;">Colonizzazione e Schieramento non sono disponibili dalla Galattica.</p>
         </div>
 
@@ -526,11 +527,15 @@
         if (!mission) throw new Error('Seleziona una missione.');
         if (Object.values(selection).every((q) => !q)) throw new Error('Seleziona almeno una nave.');
 
+        if (mission==='explore' && st.isMultiplayerMode) {
+          throw Error('Lancio dalla Galattica online in attesa della persistenza multiplayer della sua stiva. Puoi spedire dal pianeta.');
+        }
         Galaxy.launchFleet(uni, 0, target, mission, selection, cargo, {
           originType: 'galattica',
           originGalatticaId: galId,
           fuelPercent,
           ...(mission === 'explore' ? {
+            blackHole: Boolean(document.getElementById('gal-black-hole')?.checked),
             exploreHours: Math.min(maxExploreHours, Math.max(1,
               Math.floor(Number(document.getElementById('gal-fleet-explore-hours')?.value) || st.fleetExploreHours || 1)))
           } : {})

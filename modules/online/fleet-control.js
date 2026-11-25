@@ -110,6 +110,7 @@
     }
 
     const specialist = window.UniversumServices?.transfer(universeObj,normalizedMission,targetCoords,cleanShips);
+    if (normalizedMission==='expedition' && cargoM+cargoC+cargoD > Object.entries(cleanShips).reduce((n,[id,q])=>n+q*(window.UniversumData.SHIPS[id]?.cargo || 0),0)) throw Error('Capacità della stiva superata.');
     if (specialist) {
       const capacity = Object.entries(cleanShips).reduce((n,[id,q])=>n + q*(window.UniversumData.SHIPS[id]?.cargo || 0),0);
       if (cargoM+cargoC+cargoD > Math.max(0,capacity-flightStats.fuelCost)) throw Error('Capacità della stiva superata.');
@@ -125,7 +126,7 @@
       throw new Error(`Lo slot [${targetCoords.g}:${targetCoords.s}:${targetCoords.p}] è già occupato!`);
     }
 
-    if (!specialist && !carrierHangars.length) {
+    if (normalizedMission!=='expedition' && !specialist && !carrierHangars.length) {
       for (const [sId, qty] of Object.entries(cleanShips)) {
         planet.fleet[sId] -= qty;
       }
@@ -185,6 +186,7 @@
       ships: cleanShips,
       carrierHangars,
       cargo: { metal: cargoM, crystal: cargoC, deuterium: cargoD },
+      ...(normalizedMission==='expedition' ? {rewardRulesVersion:2,blackHoleFeePaid:blackHoleExtra} : {}),
       blackHole: Boolean(options.blackHole),
       status: 'outbound',
       departureTime: now,
@@ -195,11 +197,11 @@
     };
 
     let ref;
-    if (specialist || carrierHangars.length) {
+    if (normalizedMission==='expedition' || specialist || carrierHangars.length) {
       ref = uniRef.collection('fleets').doc();
       await syncPlayerState(universeObj,{force:true,dispatch:{ref,doc:fleetDoc,
         carrierHangars,specialist:Boolean(specialist),
-        debit:{metal:cargoM,crystal:cargoC,deuterium:cargoD+flightStats.fuelCost}}});
+        debit:{metal:cargoM,crystal:cargoC,deuterium:cargoD+flightStats.fuelCost+blackHoleExtra}}});
     } else ref = await uniRef.collection('fleets').add(fleetDoc);
     fleetDoc.id = ref.id;
 
@@ -368,6 +370,10 @@
 
 
   async function forceCleanupOnlineFleet(uniRef, fleet, fleetRef, reason) {
+    if (['expedition','explore'].includes(fleet.mission) || fleet.rewardRulesVersion) {
+      _mpNotifyError('recupero esplorazione '+fleetRef.id,Error('Conservata per riconciliazione: '+reason));
+      return;
+    }
     const db = getDB();
     const now = Date.now();
     const creditRef = await _resolveCreditRef(uniRef, fleet.attackerUid, fleet.originCoords);

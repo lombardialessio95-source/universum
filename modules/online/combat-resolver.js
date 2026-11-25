@@ -97,7 +97,9 @@
 
     for (const { doc: fDoc, fleet: fleetNorm } of arrivedDocs) {
       const fleetRef = fDoc.ref;
+      if (fleetNorm.rewardRulesVersion===2 && fleetNorm.attackerUid!==resolverUid) continue;
       if (!fleetNorm.targetKey || !fleetNorm.originCoords) {
+        if (fleetNorm.mission==='expedition') { _mpNotifyError('esplorazione '+fDoc.id, Error('Rotta incompleta, recupero richiesto.')); continue; }
         await forceCleanupOnlineFleet(uniRef, fleetNorm, fleetRef, 'missing-route');
         continue;
       }
@@ -144,10 +146,22 @@
         await db.runTransaction(async (tx) => {
           const freshFleetSnap = await tx.get(fleetRef);
           if (!freshFleetSnap.exists || freshFleetSnap.data().resolved) return;
-          const fleet = normalizeOnlineFleet(freshFleetSnap.data(), fDoc.id);
+          const rawState=freshFleetSnap.data();
+          if (['explore','expedition'].includes(rawState.mission) &&
+              ((!rawState.ships && !rawState.fleet) || !rawState.cargo ||
+              !['outbound','returning'].includes(rawState.status) || !(rawState.returnTime>0))) {
+            throw Error('Missione '+fDoc.id+' conservata: dati storici da riconciliare.');
+          }
+          const fleet = normalizeOnlineFleet(rawState, fDoc.id);
           if ((fleet.status !== 'outbound' && fleet.status !== 'returning') || _fleetDueTime(fleet) > Date.now()) return;
 
-          const targetSnap = await tx.get(targetPlanetRef);
+          if ((fleet.mission==='expedition' || fleet.rewardRulesVersion) && (fleet.status!==fleetNorm.status ||
+              (fleet.status==='returning' && !creditRef))) return;
+          if ((fleet.mission==='expedition' || fleet.rewardRulesVersion) && fleet.status==='returning') {
+            const receiver=await tx.get(creditRef);
+            if (!receiver.exists || receiver.data().ownerUid!==fleet.attackerUid) throw Error('Destinazione di rientro da riconciliare.');
+          }
+          const targetSnap = fleet.mission==='expedition' ? {exists:false} : await tx.get(targetPlanetRef);
 
           const targetPlanet = targetSnap.exists ? (fleet.status === 'outbound'
             ? await G.combatPlanet(tx,uniRef,targetSnap,speed,Date.now()) : _effectivePlanetView(targetSnap.data(),speed)) : null;
@@ -164,6 +178,7 @@
           let siegeShips = null;
           let defenderBody;
           let defenderTitle;
+          let rewardResult;
 
           let creditEvents;
           if (fleet.status === 'returning' || fleet.mission === 'recall') {
@@ -290,27 +305,54 @@
             reportTitle = `Raccolta Detriti [${fleet.targetKey}]`;
             reportBody = `Riciclati ${takeM} M e ${takeC} C. Detriti rimasti: ${targetPlanet.debris.metal} M, ${targetPlanet.debris.crystal} C.`;
           } else if (fleet.mission === 'expedition' || fleet.mission === 'explore') {
-            const expLv = fleet.attackerTech?.expeditionTech || 0;
-            const hrs = fleet.expeditionHours || 1;
-            const mult = (1 + expLv * 0.25) * (1 + (hrs - 1) * 0.22);
-            const roll = Math.random();
-            if (roll < 0.55) {
-              const foundM = Math.floor((8000 + Math.random() * 14000) * mult);
-              const foundC = Math.floor((5000 + Math.random() * 9000) * mult);
-              const foundD = Math.floor((2000 + Math.random() * 5000) * mult);
-              returnCargo.metal += foundM;
-              returnCargo.crystal += foundC;
-              returnCargo.deuterium += foundD;
-              reportTitle = `Esplorazione Profonda [${fleet.targetKey}] (${hrs}h)`;
-              reportBody = `Relitti recuperati nello spazio profondo: +${foundM} M, +${foundC} C, +${foundD} D.`;
-            } else if (roll < 0.78) {
-              const bonusShips = Math.max(1, Math.floor((1 + Math.random() * 3) * (1 + expLv * 0.15)));
-              returnShips.lightFighter = (returnShips.lightFighter || 0) + bonusShips;
-              reportTitle = `Esplorazione Profonda [${fleet.targetKey}] (${hrs}h)`;
-              reportBody = `La spedizione ha riattivato ${bonusShips} Caccia Leggeri abbandonati alla deriva!`;
+            const raw=freshFleetSnap.data();
+            if (!Number.isFinite(Number(raw.arrivalTime || G._tsToMs(raw.arrivalAt))) || !(raw.arrivalTime>0) ||
+                !Object.keys(fleet.ships).length || !raw.cargo) throw Error('Dati esplorazione da riconciliare: '+fDoc.id);
+            if (raw.rewardRulesVersion !== undefined && raw.rewardRulesVersion !== 1) {
+              if (raw.rewardRulesVersion !== 2 || raw.rewardResult ||
+                  !(raw.explorationEndTime>0) || raw.explorationEndTime>Date.now()) throw Error('Stato/versione esplorazione da riconciliare.');
+              const rewards=window.UniversumExplorationRewards;
+              const input={version:2,id:fDoc.id,ships:returnShips,cargo:returnCargo,tech:fleet.attackerTech,
+                hours:fleet.expeditionHours,blackHole:fleet.blackHole,catalog:window.UniversumData.SHIPS,
+                combat:window.UniversumGalaxy.resolveCombat};
+              rewardResult=rewards.resolve(input);
+              if (rewardResult.event==='wreck') {
+                const origin=await tx.get(originPlanetRef);
+                const planet=origin.exists && origin.data().ownerUid===fleet.attackerUid ? origin.data() : null;
+                const balance={};
+                for (const k of ['metal','crystal']) balance[k]=(planet?.resources?.[k] || 0)+(planet?.inbox?.resources?.[k] || 0);
+                rewardResult=rewards.resolve({...input,originResources:balance});
+                if (rewardResult.cost.metal) _inboxCredit(tx,originPlanetRef,{resources:{
+                  metal:-rewardResult.cost.metal,crystal:-rewardResult.cost.crystal}},planet.inbox?.serviceEvents);
+              }
+              returnShips=rewardResult.survivors;
+              for (const k of ['metal','crystal','deuterium']) returnCargo[k]+=rewardResult.loaded[k];
+              reportTitle='Esplorazione ['+fleet.targetKey+']';
+              reportBody=rewardResult.message;
             } else {
-              reportTitle = `Esplorazione Profonda [${fleet.targetKey}] (${hrs}h)`;
-              reportBody = 'Nessuna anomalia rilevata nel settore esplorato. Flotta rientrata alla base.';
+              const legacyRandom=window.UniversumExplorationRewards.randomFor('legacy/'+fDoc.id);
+              const expLv = fleet.attackerTech?.expeditionTech || 0;
+              const hrs = fleet.expeditionHours || 1;
+              const mult = (1 + expLv * 0.25) * (1 + (hrs - 1) * 0.22);
+              const roll = legacyRandom();
+              if (roll < 0.55) {
+                const foundM = Math.floor((8000 + legacyRandom() * 14000) * mult);
+                const foundC = Math.floor((5000 + legacyRandom() * 9000) * mult);
+                const foundD = Math.floor((2000 + legacyRandom() * 5000) * mult);
+                returnCargo.metal += foundM;
+                returnCargo.crystal += foundC;
+                returnCargo.deuterium += foundD;
+                reportTitle = `Esplorazione Profonda [${fleet.targetKey}] (${hrs}h)`;
+                reportBody = `Relitti recuperati nello spazio profondo: +${foundM} M, +${foundC} C, +${foundD} D.`;
+              } else if (roll < 0.78) {
+                const bonusShips = Math.max(1, Math.floor((1 + legacyRandom() * 3) * (1 + expLv * 0.15)));
+                returnShips.lightFighter = (returnShips.lightFighter || 0) + bonusShips;
+                reportTitle = `Esplorazione Profonda [${fleet.targetKey}] (${hrs}h)`;
+                reportBody = `La spedizione ha riattivato ${bonusShips} Caccia Leggeri abbandonati alla deriva!`;
+              } else {
+                reportTitle = `Esplorazione Profonda [${fleet.targetKey}] (${hrs}h)`;
+                reportBody = 'Nessuna anomalia rilevata nel settore esplorato. Flotta rientrata alla base.';
+              }
             }
           } else if (fleet.mission === 'incursion') {
             const H=window.UniversumHangars;
@@ -603,6 +645,7 @@
             tx.update(fleetRef, {
               status: 'returning',
               phase: 'IN RITORNO',
+              ...(rewardResult ? {rewardResult} : {}),
               resolved: false,
               ships: returnShips,
               fleet: returnShips,
@@ -662,7 +705,7 @@
         // Fase 3: mai eliminare una missione con hangar dopo un errore temporaneo.
         // Senza una transazione di rientro verificata perderemmo Navi Madre e
         // caccia: conserviamo il documento e lasciamo riprovare il resolver.
-        if (!fleetNorm.carrierHangars?.length && fleetNorm.mission !== 'incursion' && Date.now() - _fleetDueTime(fleetNorm) > 60000) {
+        if (fleetNorm.mission !== 'expedition' && !fleetNorm.carrierHangars?.length && fleetNorm.mission !== 'incursion' && Date.now() - _fleetDueTime(fleetNorm) > 60000) {
           await forceCleanupOnlineFleet(uniRef, fleetNorm, fleetRef, err.message || 'resolve-failed');
         }
       }
