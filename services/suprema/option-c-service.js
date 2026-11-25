@@ -94,14 +94,14 @@ async function commandAction(db,input,clock=Date.now){
   const {uid,universeId,action,commandId}=input||{};
   if(!uid)fail('unauthenticated','Accesso richiesto.');
   requireId(universeId,'Universo');requireId(commandId,'Comando');
-  if(!['build','load','assign','deposit','queue','launch','resolve','return'].includes(action)) {
+  if(!['build','cancelBuild','load','assign','deposit','queue','launch','resolve','return'].includes(action)) {
     fail('invalid-argument','Azione Suprema non supportata.');
   }
   const base=baseFor(db,universeId),inventoryRef=privFor(base,uid),
     receipt=receiptFor(base,uid,commandId),now=clock();
   if(!Number.isSafeInteger(now)||now<0)fail('failed-precondition','Orologio non valido.');
   const fingerprintValue=fingerprint(input);
-  const originKey=['build','load','deposit','launch','return'].includes(action)?
+  const originKey=['build','cancelBuild','load','deposit','launch','return'].includes(action)?
     requireId(input.originKey,'Pianeta',COORD):null;
   const targetKey=action==='launch'?requireId(input.targetKey,'Bersaglio',COORD):null;
   const missionId=['launch','resolve','return'].includes(action)?
@@ -140,6 +140,19 @@ async function commandAction(db,input,clock=Date.now){
       if(inv.constructions.some(c=>c.originKey===originKey))fail('failed-precondition','Un progetto per Bacino.');
       inv.constructions.push({id:supremeId,originKey,startedAt:now,paidDays:0,nextPaymentAt:now+DAY,status:'building'});
       result={supremeId,nextPaymentAt:now+DAY,status:'building'};
+    }
+    if(action==='cancelBuild'){
+      const supremeId=requireId(input.supremeId,'ID Suprema');
+      const index=inv.constructions.findIndex(c=>c.id===supremeId&&c.originKey===originKey);
+      if(index<0)fail('failed-precondition','Costruzione non più annullabile.');
+      const order=inv.constructions[index];
+      const refund={};
+      for(const k of kinds){
+        refund[k]=order.paidDays*paid[k]/2;
+        originChanges['inbox.resources.'+k]=(Number(planet.inbox?.resources?.[k])||0)+refund[k];
+      }
+      inv.constructions.splice(index,1);
+      result={supremeId,cancelled:true,refund};
     }
     if(['load','assign','deposit','queue','launch'].includes(action)){
       const supremeId=requireId(input.supremeId,'ID Suprema');
