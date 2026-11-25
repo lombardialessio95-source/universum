@@ -9,6 +9,10 @@ function start(supreme,engine,ship,count,id,at,speed=1){
      supreme.shipyardQueue.some(o=>o.id===id)||!Number.isSafeInteger(at)||at<0) {
     throw Error('Ordine cantiere non valido.');
   }
+  const queuedSlots=supreme.shipyardQueue.reduce((n,o)=>n+(o.remaining||0)*(I.WEIGHTS[o.ship]||0),0);
+  if(I.inventory(supreme.hangar)+queuedSlots+count*I.WEIGHTS[ship]>I.ONLINE_CAPACITY) {
+    throw Error('La coda supera la capienza online (4000 slot).');
+  }
   const spec=engine.data.SHIPS[ship];
   if(!spec||!spec.cost||!(Number(speed)>0))throw Error('Catalogo cantiere non valido.');
   const raw=(((spec.cost.metal+spec.cost.crystal)+(spec.attack+spec.shield)*0.5+
