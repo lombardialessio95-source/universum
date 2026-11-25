@@ -52,7 +52,7 @@ service cloud.firestore {
         'ownerUid', 'ownerName', 'isNpc',
         'botLevel', 'botPersonality', 'botCreatedAt', 'growthEnabled',
         'resources', 'fleet', 'defenses',
-        'buildQueue', 'shipyardQueue', 'defenseQueue', 'lastUpdated', 'lastResolutionFleetId'];
+        'buildQueue', 'shipyardQueue', 'defenseQueue', 'lastUpdated', 'lastResolutionFleetId','services'];
     }
 
     // P-R3: campi di una flotta che chiunque autenticato può modificare (risoluzione lato client).
@@ -76,12 +76,23 @@ service cloud.firestore {
         || resource.data.defenderUid == request.auth.uid;
     }
 
+    function validOwnerCheckpoint(uniId) {
+      return !('serviceRevision' in resource.data)
+        || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['lastUpdated','serviceRevision'])
+        || (request.resource.data.serviceRevision == getAfter(/databases/$(database)/documents/online_universes/$(uniId)/players/$(request.auth.uid)).data.serviceRevision
+          && request.resource.data.serviceRevision == get(/databases/$(database)/documents/online_universes/$(uniId)/players/$(request.auth.uid)).data.get('serviceRevision',0) + 1);
+    }
+
     function validHumanFleetCreate(uniId) {
       return request.resource.data.attackerUid == request.auth.uid
         && request.resource.data.originCoords is map
         && request.resource.data.targetCoords is map
         && request.resource.data.targetKey is string
         && request.resource.data.ships is map
+        && (!request.resource.data.ships.keys().hasAny(['hephaestusForge','prometheusOracle'])
+          || (request.resource.data.mission in ['deploy','transport']
+            && request.resource.data.targetKey != request.resource.data.originKey
+            && get(/databases/$(database)/documents/online_universes/$(uniId)/planets/$(request.resource.data.targetKey)).data.ownerUid == request.auth.uid))
         && request.resource.data.cargo is map
         && request.resource.data.mission in [
           'attack', 'destroyMoon', 'spy', 'transport', 'deploy', 'colonize',
@@ -164,7 +175,11 @@ service cloud.firestore {
       match /players/{playerId} {
         allow read: if signedIn();
         allow create: if signedIn() && request.auth.uid == playerId && underServerLimit(uniId);
-        allow update, delete: if signedIn() && request.auth.uid == playerId;
+        allow update: if signedIn() && request.auth.uid == playerId
+          && (!('serviceRevision' in resource.data) ||
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastSeen','nickname']) ||
+            request.resource.data.serviceRevision == resource.data.serviceRevision + 1);
+        allow delete: if signedIn() && request.auth.uid == playerId;
       }
 
       match /planets/{planetId} {
@@ -179,9 +194,11 @@ service cloud.firestore {
         );
         allow update: if signedIn()
           && (
-            resource.data.ownerUid == request.auth.uid
-            || (
-              request.resource.data.diff(resource.data).affectedKeys().hasOnly(planetFieldsForOthers())
+            (resource.data.ownerUid == request.auth.uid && validOwnerCheckpoint(uniId))
+            || (resource.data.ownerUid != request.auth.uid
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(planetFieldsForOthers())
+              && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['services'])
+                || (request.resource.data.ownerUid != resource.data.ownerUid && !('services' in request.resource.data)))
               && (
                 request.resource.data.ownerUid == resource.data.ownerUid
                 || (request.resource.data.ownerUid == request.auth.uid

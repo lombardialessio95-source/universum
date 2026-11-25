@@ -40,6 +40,16 @@
   // RENDERERS: 14 NAVI
   // =========================================================
   const RAW_SHIP_RENDERERS = {
+    hephaestusForge(c) {
+      RAW_SHIP_RENDERERS.recycler(c);
+      c.strokeStyle = '#ffba62'; c.lineWidth = 4;
+      for (const y of [42, 82]) { c.beginPath(); c.moveTo(66,y); c.lineTo(91,y); c.lineTo(99,64); c.stroke(); }
+    },
+    prometheusOracle(c) {
+      RAW_SHIP_RENDERERS.espionageProbe(c);
+      c.strokeStyle = '#8eeafa'; c.lineWidth = 3;
+      c.beginPath(); c.ellipse(64,64,38,17,-0.42,0,Math.PI*2); c.stroke();
+    },
     smallCargo(c) {
       _drawCardBg(c, '#00d2ff');
       _drawEngineGlow(c, 26, 52, 11, '#00d2ff', Math.PI, 20);

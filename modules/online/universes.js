@@ -441,14 +441,13 @@
         .where('ownerUid', '==', user.uid)
         .get();
 
-      myPlanets = planetsSnap.docs.map((d) => calculateLiveResources(d.data(), uniData.speed || 10));
+      myPlanets = planetsSnap.docs.map((d) => d.data());
     }
 
     const activeFleetsSnap = await uniRef.collection('fleets')
       .where('attackerUid', '==', user.uid)
       .where('resolved', '==', false)
-      .get()
-      .catch(() => ({ docs: [] }));
+      .get();
 
     const fleetsInFlight = activeFleetsSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
 
@@ -478,6 +477,8 @@
 
     const output = {
       id: universeId,
+      serviceRevision: playerState.serviceRevision || 0,
+      specialistBuilt: playerState.specialistBuilt || {},
       researchModelVersion: playerState.researchModelVersion || 0,
       founderUid: uniData.founderUid || uniData.ownerUid || null,
       ownerUid: uniData.ownerUid || uniData.founderUid || null,
@@ -498,7 +499,9 @@
       spyReports: [],
       messages
     };
+    Object.defineProperty(output,'roomPasscode',{value:passcode});
     window.UniversumEngine?.normalizeResearchState(output);
+    if (playerSnap.exists) G.restoreServices(output,myPlanets,playerState);
     return output;
   }
 

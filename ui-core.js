@@ -378,6 +378,7 @@
         UI.toast('Sincronizzato', 'success');
       }
     } catch (err) {
+      if (err.code === 'service-conflict' || UI.state.currentUniverse !== uni) throw err;
       r.hadFailure = true;
       console.warn('[Sync] Sincronizzazione online non riuscita:', err);
       const code = String(err?.code || '');

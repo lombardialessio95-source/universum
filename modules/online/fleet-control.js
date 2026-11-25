@@ -104,20 +104,28 @@
       throw new Error('Risorse o Deuterio per il carburante insufficienti.');
     }
 
+    const specialist = window.UniversumServices?.transfer(universeObj,normalizedMission,targetCoords,cleanShips);
+    if (specialist) {
+      const capacity = Object.entries(cleanShips).reduce((n,[id,q])=>n + q*(window.UniversumData.SHIPS[id]?.cargo || 0),0);
+      if (cargoM+cargoC+cargoD > Math.max(0,capacity-flightStats.fuelCost)) throw Error('Capacità della stiva superata.');
+    }
     const targetKey = coordsToKey(targetCoords);
+    if (specialist && originKey === targetKey) throw Error('Scegli una colonia di destinazione diversa.');
     const targetSnap = await uniRef.collection('planets').doc(targetKey).get();
     if (normalizedMission === 'colonize' && targetSnap.exists) {
       throw new Error(`Lo slot [${targetCoords.g}:${targetCoords.s}:${targetCoords.p}] è già occupato!`);
     }
 
-    for (const [sId, qty] of Object.entries(cleanShips)) {
-      planet.fleet[sId] -= qty;
-    }
-    planet.resources.metal -= cargoM;
-    planet.resources.crystal -= cargoC;
-    planet.resources.deuterium -= (cargoD + flightStats.fuelCost + blackHoleExtra);
+    if (!specialist) {
+      for (const [sId, qty] of Object.entries(cleanShips)) {
+        planet.fleet[sId] -= qty;
+      }
+      planet.resources.metal -= cargoM;
+      planet.resources.crystal -= cargoC;
+      planet.resources.deuterium -= (cargoD + flightStats.fuelCost + blackHoleExtra);
 
-    await syncPlayerState(universeObj, { force: true });
+      await syncPlayerState(universeObj, { force: true });
+    }
 
     const defenderUid = targetSnap.exists ? (targetSnap.data().ownerUid || null) : null;
 
@@ -168,7 +176,12 @@
       resolved: false
     };
 
-    const ref = await uniRef.collection('fleets').add(fleetDoc);
+    let ref;
+    if (specialist) {
+      ref = uniRef.collection('fleets').doc();
+      await syncPlayerState(universeObj,{force:true,dispatch:{ref,doc:fleetDoc,
+        debit:{metal:cargoM,crystal:cargoC,deuterium:cargoD+flightStats.fuelCost}}});
+    } else ref = await uniRef.collection('fleets').add(fleetDoc);
     fleetDoc.id = ref.id;
 
     try {
@@ -188,7 +201,7 @@
       }
     } catch (e) { /* fallback ai tempi gia' salvati */ }
 
-    universeObj.fleetsInFlight.push(fleetDoc);
+    if (!universeObj.fleetsInFlight.some(f=>f.id===ref.id)) universeObj.fleetsInFlight.push(fleetDoc);
 
     return fleetDoc;
   }
@@ -324,7 +337,14 @@
       await db.runTransaction(async (tx) => {
         const freshSnap = await tx.get(fleetRef);
         if (!freshSnap.exists || freshSnap.data().resolved) return;
-        _inboxCredit(tx, creditRef, { resources: fleet.cargo || {}, fleet: fleet.ships || {} });
+        const fresh = freshSnap.data();
+        let previous;
+        if (window.UniversumServices?.ids.some(id=>fresh.ships?.[id])) {
+          const home = creditRef && (await tx.get(creditRef)).data();
+          if (home?.ownerUid !== fresh.attackerUid) throw Error('Colonia di rientro non disponibile.');
+          previous = home.inbox?.serviceEvents;
+        }
+        _inboxCredit(tx, creditRef, {resources:fresh.cargo || {},fleet:fresh.ships || {}},previous);
         tx.update(fleetRef, {
           status: 'completed', phase: 'COMPLETATA', resolved: true,
           completedAt: now, repaired: true, repairReason: String(reason || 'orphan')
@@ -341,7 +361,9 @@
       });
       return true;
     } catch (e) {
-      await fleetRef.update({ status: 'completed', phase: 'COMPLETATA', resolved: true, completedAt: now, repaired: true }).catch((e) => _mpNotifyError('chiusura forzata flotta', e));
+      if (!window.UniversumServices?.ids.some(id=>fleet.ships?.[id])) {
+        await fleetRef.update({ status: 'completed', phase: 'COMPLETATA', resolved: true, completedAt: now, repaired: true }).catch((e) => _mpNotifyError('chiusura forzata flotta', e));
+      }
       return false;
     }
   }

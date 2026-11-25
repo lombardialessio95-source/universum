@@ -451,7 +451,7 @@
     const galattica = findGalattica(universe, galatticaId);
     if (!galattica) throw new Error('Galattica non trovata.');
     const unit = Data.SHIPS[shipId];
-    if (!unit || unit.specialConstruction === 'bacino') throw new Error('Nave non costruibile nel Cantiere Spaziale della Galattica.');
+    if (!unit || unit.normalShipyardOnly || unit.specialConstruction === 'bacino') throw new Error('Nave non costruibile nel Cantiere Spaziale della Galattica.');
     const qty = Math.max(1, Math.floor(Number(count) || 1));
     const cost = { metal: unit.cost.metal * qty, crystal: unit.cost.crystal * qty, deuterium: unit.cost.deuterium * qty };
     if (!universe.creativeMode) {
@@ -533,21 +533,25 @@
       }
     }
 
-    let movedCount = 0;
-    for (const [shipId, qtyRaw] of Object.entries(fleetSelection || {})) {
-      const qty = Math.max(0, Math.floor(Number(qtyRaw) || 0));
-      if (qty <= 0 || shipId === 'solarSatellite') continue;
-      const avail = Number(fromP.fleet?.[shipId] || 0);
-      if (qty > avail) {
-        throw new Error(`Navi insufficienti per il salto (${shipId}).`);
-      }
-      fromP.fleet[shipId] = avail - qty;
-      toP.fleet[shipId] = (toP.fleet[shipId] || 0) + qty;
-      movedCount += qty;
+    const selected = Object.entries(fleetSelection || {}).map(([id,n])=>[id,Math.max(0,Math.floor(Number(n) || 0))])
+      .filter(([id,n])=>n > 0 && id !== 'solarSatellite');
+    if (!selected.length) throw Error('Seleziona almeno una nave da teletrasportare.');
+    if (selected.some(([id,n])=>(fromP.fleet?.[id] || 0) < n)) throw Error('Navi insufficienti per il salto.');
+    const at = Date.now();
+    const specialist = selected.some(([id])=>window.UniversumServices?.ids.includes(id));
+    if (specialist) {
+      window.UniversumServices.settlePlanet(universe,fromP,at);
+      window.UniversumServices.settlePlanet(universe,toP,at);
     }
-
-    if (movedCount === 0) {
-      throw new Error('Seleziona almeno una nave da teletrasportare.');
+    let movedCount = 0;
+    for (const [id,n] of selected) {
+      fromP.fleet[id] -= n;
+      toP.fleet[id] = (toP.fleet[id] || 0) + n;
+      movedCount += n;
+    }
+    if (specialist) {
+      window.UniversumServices.settlePlanet(universe,fromP,at);
+      window.UniversumServices.settlePlanet(universe,toP,at);
     }
 
     if (!universe.creativeMode) {

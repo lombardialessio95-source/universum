@@ -149,7 +149,8 @@
 
           const targetSnap = await tx.get(targetPlanetRef);
 
-          const targetPlanet = targetSnap.exists ? _effectivePlanetView(targetSnap.data(), speed) : null;
+          const targetPlanet = targetSnap.exists ? (fleet.status === 'outbound'
+            ? await G.combatPlanet(tx,uniRef,targetSnap,speed,Date.now()) : _effectivePlanetView(targetSnap.data(),speed)) : null;
           const targetBefore = _snapshotForDiff(targetPlanet);
           const targetWasNpc = Boolean(targetPlanet && targetPlanet.isNpc);
 
@@ -163,7 +164,13 @@
           let defenderBody;
           let defenderTitle;
 
+          let creditEvents;
           if (fleet.status === 'returning' || fleet.mission === 'recall') {
+            if (window.UniversumServices?.ids.some(id=>fleet.ships?.[id])) {
+              const receiving = creditRef && (await tx.get(creditRef)).data();
+              if (receiving?.ownerUid !== fleet.attackerUid) throw Error('Colonia di rientro non disponibile.');
+              creditEvents = receiving.inbox?.serviceEvents;
+            }
             reportTitle = `Flotta Richiamata Rientrata [${coordsToKey(fleet.originCoords)}]`;
             reportBody = 'Le navi sono rientrate alla base con il carico integro.';
           } else if (fleet.mission === 'spy' && targetPlanet) {
@@ -206,7 +213,7 @@
               completeNow = true;
               reportBody += ' Tutte le sonde sono andate perdute.';
             }
-          } else if (fleet.mission === 'transport' && targetPlanet) {
+          } else if (fleet.mission === 'transport' && targetPlanet && (targetPlanet.ownerUid === fleet.attackerUid || !window.UniversumServices?.ids.some(id=>fleet.ships?.[id]))) {
             targetPlanet.resources.metal += returnCargo.metal;
             targetPlanet.resources.crystal += returnCargo.crystal;
             targetPlanet.resources.deuterium += returnCargo.deuterium;
@@ -484,7 +491,7 @@
                 deuterium: (returnCargo.deuterium || 0) + (ransomBack.deuterium || 0)
               },
               fleet: returnShips
-            });
+            },creditEvents);
           }
 
           if (persistentStatus) {

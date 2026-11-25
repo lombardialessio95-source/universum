@@ -27,7 +27,7 @@
   // =========================================================
   // COSTRUZIONI PLANETARIE E LUNARI
   // =========================================================
-  function startBuilding(universe, planetIndex, buildingId, isMoon = false) {
+  function startBuilding(universe, planetIndex, buildingId, isMoon = false, now = Date.now()) {
     const Data = getData();
     const planet = universe.planets[planetIndex];
     if (!planet) throw new Error('Pianeta non trovato.');
@@ -68,9 +68,9 @@
       }
 
       deductResources(planet.resources, cost);
-      const durationSec = Engine.getBuildingBuildTime(universe, planet, buildingId, targetLv, true);
-      const now = Date.now();
+      const durationSec = Engine.getBuildingBuildTime(universe, planet, buildingId, targetLv, true, now);
       planet.moon.buildQueue.push({
+      workId: window.UniversumServices?.uid() || 'job-' + now,
         id: buildingId,
         targetLevel: targetLv,
         startTime: now,
@@ -122,9 +122,9 @@
     }
 
     deductResources(planet.resources, cost);
-    const durationSec = Engine.getBuildingBuildTime(universe, planet, buildingId, targetLv, false);
-    const now = Date.now();
+    const durationSec = Engine.getBuildingBuildTime(universe, planet, buildingId, targetLv, false, now);
     planet.buildQueue.push({
+      workId: window.UniversumServices?.uid() || 'job-' + now,
       id: buildingId,
       targetLevel: targetLv,
       startTime: now,
@@ -138,7 +138,7 @@
   // =========================================================
   // RICERCHE & CANTIERE NAVALE / DIFESE
   // =========================================================
-  function startResearch(universe, researchId, planetIndex = 0) {
+  function startResearch(universe, researchId, planetIndex = 0, now = Date.now()) {
     const Data = getData();
     const def = Data.RESEARCHES[researchId];
     if (!def) throw new Error('Ricerca sconosciuta.');
@@ -147,7 +147,6 @@
     normalizePlanet(planet);
     Engine.normalizeResearchState(universe);
     const local = def.scope === 'planetary';
-    const now = Date.now();
     Engine.advanceResearchQueues(universe, now);
     const current = Data.getResearchLevel(universe, planet, researchId);
     if (def.maxLevel && current >= def.maxLevel) throw new Error(`${def.name}: livello massimo ${def.maxLevel} raggiunto.`);
@@ -168,10 +167,11 @@
     }
     const cost = Data.getResearchCost(researchId, targetLevel);
     if (!canAfford(planet.resources, cost)) throw new Error('Risorse insufficienti sul pianeta attivo per questa ricerca.');
-    const durationSec = Engine.getResearchTime(universe, researchId, targetLevel, planet);
+    const durationSec = Engine.getResearchTime(universe, researchId, targetLevel, planet, now);
     if (!Number.isFinite(durationSec) || durationSec < 1) throw new Error('Impossibile calcolare il tempo di ricerca.');
     deductResources(planet.resources, cost);
-    const queue = { id: researchId, targetLevel, planetId: planet.id, startTime: now,
+    const queue = { id: researchId,
+      workId: window.UniversumServices?.uid() || 'job-' + now, targetLevel, planetId: planet.id, startTime: now,
       endTime: now + durationSec * 1000, durationSec,
       ownerUid: local ? (planet.ownerUid || null) : null };
     if (local) {
@@ -208,6 +208,9 @@
       }
     }
 
+    const service = !isDefense && window.UniversumServices?.ids.includes(unitId);
+    const reservation = service && window.UniversumServices.quote(universe,unitId,qty);
+    if (service && (!Number.isSafeInteger(qty) || qty > reservation.free)) throw Error('Limite imperiale delle navi specialistiche raggiunto.');
     if (isDefense && unit.maxCount) {
       const existing = Number(planet.defenses[unitId] || 0);
       const queued = planet.defenseQueue
@@ -222,13 +225,18 @@
       if (isDefense) {
         planet.defenses[unitId] = (planet.defenses[unitId] || 0) + qty;
       } else {
+        if (service) {
+          window.UniversumServices.settlePlanet(universe,planet);
+          window.UniversumServices.completed(universe,unitId,qty);
+        }
         planet.fleet[unitId] = (planet.fleet[unitId] || 0) + qty;
+        if (service) window.UniversumServices.settlePlanet(universe,planet);
       }
       return { instant: true, count: qty };
     }
 
     const unitCost = Engine.getUnitCostAdjusted(planet, unitId, isDefense);
-    const totalCost = {
+    const totalCost = reservation?.cost || {
       metal: unitCost.metal * qty,
       crystal: unitCost.crystal * qty,
       deuterium: unitCost.deuterium * qty
@@ -246,6 +254,8 @@
 
     queue.push({
       id: unitId,
+      workId: window.UniversumServices?.uid() || 'lot-' + now + '-' + queue.length,
+      ...(service ? {baseReservations:reservation.cheap} : {}),
       remaining: qty,
       total: qty,
       unitDurationSec,
@@ -309,6 +319,7 @@
           }
           while (p.shipyardQueue.length > 0) {
             const sq = p.shipyardQueue.shift();
+            if (window.UniversumServices?.ids.includes(sq.id)) window.UniversumServices.completed(universe,sq.id,sq.remaining,sq);
             p.fleet[sq.id] = (p.fleet[sq.id] || 0) + sq.remaining;
           }
           while (p.defenseQueue.length > 0) {

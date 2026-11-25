@@ -21,7 +21,8 @@
     const cargo = Object.assign({ metal: 0, crystal: 0, deuterium: 0 }, flt.cargo || {});
 
     if (gal) {
-      for (const [id, qty] of Object.entries(returningFleet)) {
+      window.UniversumServices?.settlePlanet(universe,homeP,now);
+        for (const [id, qty] of Object.entries(returningFleet)) {
         const q = Math.max(0, Math.floor(Number(qty) || 0));
         if (q > 0) {
           gal.orbitingFleet[id] = (gal.orbitingFleet[id] || 0) + q;
@@ -70,13 +71,13 @@
   }
 
 
-  function processFleetsAndBots(universe) {
+  function processFleetsAndBots(universe,now = Date.now(),servicesOnly = false) {
     if (!universe) return;
-    const now = Date.now();
     if (!Array.isArray(universe.fleetsInFlight)) universe.fleetsInFlight = [];
 
     for (let i = universe.fleetsInFlight.length - 1; i >= 0; i--) {
       const flt = universe.fleetsInFlight[i];
+      if (servicesOnly && !window.UniversumServices.ids.some(id=>(flt.fleet || flt.ships)?.[id])) continue;
       if (!flt.fleet && flt.ships) flt.fleet = Object.assign({}, flt.ships);
       if (!flt.ships && flt.fleet) flt.ships = Object.assign({}, flt.fleet);
 
@@ -88,7 +89,7 @@
             continue;
           }
         } else {
-          const action = handleMissionArrival(universe, flt);
+          const action = handleMissionArrival(universe, flt, now);
           if (action === 'remove') {
             universe.fleetsInFlight.splice(i, 1);
             continue;
@@ -234,11 +235,12 @@
           }
         }
         if (homeP) {
-          for (const [id, qty] of Object.entries(returningFleet)) {
+            for (const [id, qty] of Object.entries(returningFleet)) {
             if (qty > 0) {
               homeP.fleet[id] = (homeP.fleet[id] || 0) + qty;
             }
           }
+          window.UniversumServices?.settlePlanet(universe,homeP,now);
           homeP.resources.metal += flt.cargo?.metal || 0;
           homeP.resources.crystal += flt.cargo?.crystal || 0;
           homeP.resources.deuterium += flt.cargo?.deuterium || 0;
@@ -247,7 +249,7 @@
       }
     }
 
-    processBotAI(universe);
+    if (!servicesOnly) processBotAI(universe);
   }
 
   Object.assign(G, { handleGalatticaReturnArrival, processFleetsAndBots });

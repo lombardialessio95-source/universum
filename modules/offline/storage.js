@@ -289,6 +289,7 @@
 
     // Genera un nuovo ID univoco per evitare sovrascritture accidentali
     parsed.id = 'uni_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+    if (window.UniversumServices?.hasServices(parsed)) window.UniversumEngine.processOfflineProgress(parsed);
     parsed.lastSeen = Date.now();
     await save(parsed);
     return parsed;

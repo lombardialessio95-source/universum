@@ -6,6 +6,7 @@
 
 
   UI.initSciFiSelects = function () {
+    const cleanupBySelect = new WeakMap();
     let activeMenu = null;
     let activeWrap = null;
 
@@ -18,6 +19,8 @@
 
     function enhanceSelect(sel) {
       if (!sel || sel.dataset.uniEnhanced === '1') return;
+      // Il selettore nativo resta accessibile nella Panoramica stretta e scorrevole.
+      if (sel.hasAttribute('data-choice') && window.matchMedia('(max-width: 640px)').matches) return;
       sel.dataset.uniEnhanced = '1';
 
       const wrap = document.createElement('div');
@@ -93,6 +96,14 @@
 
       const optObserver = new MutationObserver(syncFromSelect);
       optObserver.observe(sel, { childList: true, subtree: true, attributes: true });
+      cleanupBySelect.set(sel, () => {
+        optObserver.disconnect();
+        if (activeMenu === menu) closeMenu();
+        menu.remove();
+        wrap.remove();
+        delete sel.dataset.uniEnhanced;
+        cleanupBySelect.delete(sel);
+      });
     }
 
     const scanAll = () => {
@@ -110,7 +121,19 @@
       if (e.key === 'Escape') closeMenu();
     });
 
-    const domObserver = new MutationObserver(() => scanAll());
+    function visitSelects(nodes, visit) {
+      for (const node of nodes) {
+        if (node.nodeType !== 1) continue;
+        if (node.matches('select')) visit(node);
+        else node.querySelectorAll('select').forEach(visit);
+      }
+    }
+    const domObserver = new MutationObserver(records => {
+      for (const record of records) {
+        visitSelects(record.removedNodes, sel => { if (!sel.isConnected) cleanupBySelect.get(sel)?.(); });
+        visitSelects(record.addedNodes, sel => { if (sel.isConnected) enhanceSelect(sel); });
+      }
+    });
     domObserver.observe(document.body, { childList: true, subtree: true });
     scanAll();
   };

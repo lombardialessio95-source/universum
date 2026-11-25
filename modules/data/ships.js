@@ -4,6 +4,18 @@
 
 
   const SHIPS = {
+    hephaestusForge: {
+      id: 'hephaestusForge', normalShipyardOnly: true, name: 'Forgia di Efesto', description: 'Nave ingegnere. Programma strutture sulla colonia in orbita.',
+      cost: { metal: 220000, crystal: 150000, deuterium: 45000 }, upkeep: { metal: 4000, crystal: 2000, deuterium: 800 },
+      hull: 20000, shield: 100, attack: 5, speed: 5000, driveType: 'impulseDrive', cargo: 0, complexity: 1,
+      requirements: { buildings: { shipyard: 6, roboticsFactory: 6 }, researches: { impulseDrive: 3 } }, rapidFire: {}
+    },
+    prometheusOracle: {
+      id: 'prometheusOracle', normalShipyardOnly: true, name: 'Oracolo di Prometeo', description: 'Nave scientifica. Programma ricerche locali e imperiali dalla colonia in orbita.',
+      cost: { metal: 160000, crystal: 220000, deuterium: 65000 }, upkeep: { metal: 3000, crystal: 4000, deuterium: 1000 },
+      hull: 15000, shield: 150, attack: 0, speed: 6000, driveType: 'impulseDrive', cargo: 0, complexity: 1,
+      requirements: { buildings: { shipyard: 6, researchLab: 7 }, researches: { computerTech: 5 } }, rapidFire: {}
+    },
     smallCargo: {
       id: 'smallCargo',
       name: 'Cargo Leggero',

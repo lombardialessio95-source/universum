@@ -31,15 +31,19 @@
   }
 
 
-  function advancePlanetResources(planet, universe, elapsedSec) {
+  function advancePlanetResources(planet, universe, elapsedSec, serviceTime = null) {
     if (!(elapsedSec > 0)) return;
     const before = getPlanetProduction(planet, universe);
+    const billService = serviceTime !== null && window.UniversumServices?.ids.some(id=>planet.fleet?.[id] > 0);
+    const opening = billService && {...planet.resources};
+    const inflow = {};
+    const caps = billService ? {metal:Infinity,crystal:Infinity,deuterium:Infinity} : before.caps;
     const fuel = Math.max(0, Number(planet.resources.deuterium) || 0);
     const depletionSec = before.fusionFuelPerHour > 0 && before.deuteriumPerHour < 0 && fuel > 0
       ? fuel * 3600 / -before.deuteriumPerHour : Infinity;
     const firstSec = Math.min(elapsedSec, depletionSec);
     addResourcesWithCap(planet, before.metalPerSec * firstSec, before.crystalPerSec * firstSec,
-      before.deuteriumPerSec * firstSec, before.caps);
+      before.deuteriumPerSec * firstSec, caps);
     if (depletionSec <= elapsedSec) {
       // Il primo intervallo usa la fusione al 100%; il resto usa la massima
       // frazione alimentabile dal sintetizzatore, senza passare sotto zero.
@@ -47,7 +51,16 @@
       const after = getPlanetProduction(planet, universe);
       const remaining = elapsedSec - firstSec;
       if (remaining > 0) addResourcesWithCap(planet, after.metalPerSec * remaining,
-        after.crystalPerSec * remaining, after.deuteriumPerSec * remaining, after.caps);
+        after.crystalPerSec * remaining, after.deuteriumPerSec * remaining, billService ? caps : after.caps);
+    }
+    if (billService) {
+      // La produzione continua a coprire il consumo anche a deposito pieno.
+      for (const k of ['metal','crystal','deuterium']) inflow[k] = planet.resources[k];
+      window.UniversumServices.settlePlanet(universe,planet,serviceTime);
+      for (const k of Object.keys(inflow)) {
+        const spent = inflow[k] - planet.resources[k];
+        planet.resources[k] = Math.min(planet.resources[k],Math.max(before.caps[k],opening[k]-spent));
+      }
     }
   }
 
@@ -56,13 +69,15 @@
   // =========================================================
   function advanceQueuesAtTimestamp(universe, nowTs, summary = null) {
     const Data = getData();
+    const services = window.UniversumServices;
+    for (const p of universe.planets || []) services?.settlePlanet(universe,p,nowTs);
     let queueCompleted = false;
 
     // Ricerca imperiale + ricerche locali; evento in ordine cronologico.
     queueCompleted = G.advanceResearchQueues(universe, nowTs, summary);
 
     // Helper istanziato una sola volta per tick, non una volta per pianeta.
-    function advanceUnitQueue(queue, stock, catalog) {
+    function advanceUnitQueue(queue, stock, catalog, planet = null) {
       while (queue.length > 0) {
         const item = queue[0];
         if (!(nowTs >= item.nextUnitEndTime)) break;
@@ -71,7 +86,8 @@
         const owned = stock[item.id];
         const name = catalog[item.id]?.name || item.id;
         const previousSummary = summary?.completedUnits?.[name];
-        const canAggregate = Number.isSafeInteger(nowTs) &&
+        const specialist = planet && services?.ids.includes(item.id);
+        const canAggregate = !specialist && Number.isSafeInteger(nowTs) &&
           Number.isSafeInteger(item.nextUnitEndTime) &&
           Number.isSafeInteger(step) && step > 0 &&
           Number.isSafeInteger(remaining) && remaining > 0 &&
@@ -92,7 +108,13 @@
           }
         } else {
           // Compatibilita' rigorosa con queue legacy/non-intere: unita' per unita'.
+          if (specialist) services.settle(universe, planet, item.id, item.nextUnitEndTime);
           stock[item.id] = (stock[item.id] || 0) + 1;
+          if (specialist) {
+            services.completed(universe, item.id, 1, item);
+            services.settle(universe, planet, item.id, item.nextUnitEndTime);
+            queueCompleted = true;
+          }
           item.remaining -= 1;
           if (summary) summary.completedUnits[name] = (summary.completedUnits[name] || 0) + 1;
           if (item.remaining <= 0) {
@@ -138,19 +160,45 @@
 
       // Cantiere e difese: aggregazione soltanto se la somma in millisecondi
       // e' intera e sicura; per vecchi dati anomali resta il percorso originale.
-      if (planet.shipyardQueue.length) advanceUnitQueue(planet.shipyardQueue, planet.fleet, Data.SHIPS);
+      if (planet.shipyardQueue.length) advanceUnitQueue(planet.shipyardQueue, planet.fleet, Data.SHIPS, planet);
       if (planet.defenseQueue.length) advanceUnitQueue(planet.defenseQueue, planet.defenses, Data.DEFENSES);
 
     }
-    return queueCompleted;
+    return Boolean(services?.advance(universe,nowTs)) || queueCompleted;
   }
 
 
   // =========================================================
   // CALCOLO PROGRESSI OFFLINE & TICK IN TEMPO REALE
   // =========================================================
-  function processOfflineProgress(universe) {
-    const now = Date.now();
+  function processOfflineProgress(universe, now = Date.now()) {
+    const services = window.UniversumServices;
+    const fleetEvents = services && !Number.isSafeInteger(universe.serviceRevision) &&
+      universe.fleetsInFlight?.some(f=>services.ids.some(id=>(f.fleet || f.ships)?.[id]));
+    if (!(fleetEvents || services?.hasServices(universe)) || !universe.lastSeen || universe.lastSeen >= now || universe.creativeMode) {
+      return processOfflineInterval(universe,now);
+    }
+    const start = universe.lastSeen;
+    const report = processOfflineInterval(universe,start,true);
+    while (universe.lastSeen < now) {
+      let boundary = services.nextBoundary(universe,universe.lastSeen,now);
+      if (fleetEvents) for (const f of universe.fleetsInFlight) {
+        if (!services.ids.some(id=>(f.fleet || f.ships)?.[id])) continue;
+        const at = f.status==='returning' ? f.returnTime : f.arrivalTime;
+        if (at > universe.lastSeen && at < boundary) boundary = at;
+      }
+      const part = processOfflineInterval(universe,boundary,true);
+      if (fleetEvents) window.__UniversumGalaxyModules.processFleetsAndBots(universe,boundary,true);
+      for (const k of Object.keys(report.gained)) report.gained[k] += part.gained[k];
+      report.completedResearches.push(...part.completedResearches);
+      report.completedBuildings.push(...part.completedBuildings);
+      for (const [key,count] of Object.entries(part.completedUnits)) report.completedUnits[key] = (report.completedUnits[key] || 0) + count;
+    }
+    report.offlineSeconds = Math.floor((now-start)/1000);
+    return report;
+  }
+
+  function processOfflineInterval(universe, now, exact = false) {
     const lastSeen = Number(universe.lastSeen) || now;
     const deltaSec = Math.max(0, (now - lastSeen) / 1000);
 
@@ -174,7 +222,7 @@
       return report;
     }
 
-    if (deltaSec < 5) {
+    if (deltaSec < 5 && !exact) {
       for (const planet of universe.planets || []) settleBacinoDue(planet, now, report);
       advanceQueuesAtTimestamp(universe, now, report);
       checkCrepuscoloLimbo(universe, now);
@@ -193,7 +241,7 @@
       } else if (planet.bacinoSpaziale && ((Array.isArray(planet.bacinoSpaziale.invictusConstructions) && planet.bacinoSpaziale.invictusConstructions.length > 0) || (planet.bacinoSpaziale.crepuscolo && planet.bacinoSpaziale.crepuscolo.status !== 'active') || planet.bacinoSpaziale.galatticaConstruction)) {
         settleInvictusOffline(planet, universe, lastSeen, now, report);
       } else {
-        advancePlanetResources(planet, universe, deltaSec);
+        advancePlanetResources(planet, universe, deltaSec,now);
       }
 
       report.gained.metal += Math.max(0, Math.floor(planet.resources.metal - beforeM));
@@ -225,7 +273,7 @@
     }
 
     for (const planet of universe.planets || []) {
-      advancePlanetResources(planet, universe, deltaSec);
+      advancePlanetResources(planet, universe, deltaSec,now);
       settleBacinoDue(planet, now, null);
     }
     addGalatticaProduction(universe, deltaSec);

@@ -364,5 +364,60 @@ function ok(name, fn) { return Promise.resolve().then(fn).then(() => { passed++;
     }
   });
 
+  const game = require('./helpers/game');
+  win.UniversumServices = game.win.UniversumServices;
+  win.UniversumData = game.D;
+  win.UniversumEngine = game.E;
+  win.__UniversumEngineModules = game.win.__UniversumEngineModules;
+  const [forge,oracle] = win.UniversumServices.ids;
+  function checkpointWorld(key) {
+    const u=game.uni(2);
+    Object.assign(u,{id:key,serviceRevision:0,specialistBuilt:{},lastSeen:Date.now()});
+    for (const p of u.planets) {
+      Object.assign(p,{ownerUid:'u1',fieldsMax:250,maxTemp:30,lastUpdated:Date.now()});
+      store.set('online_universes/'+key+'/planets/'+[p.coords.g,p.coords.s,p.coords.p].join('_'),clone(p));
+    }
+    return u;
+  }
+  await ok('Due sessioni prenotano l’ultimo posto: una sola transazione, un solo costo',async()=>{
+    const a=checkpointWorld('concurrent');a.planets[0].fleet[forge]=4;a.researches.impulseDrive=3;
+    const b=clone(a);
+    game.E.buildUnits(a,0,forge,1);game.E.buildUnits(b,1,forge,1);
+    const results=await Promise.allSettled([MP.syncPlayerState(a,{force:true}),MP.syncPlayerState(b,{force:true})]);
+    assert.equal(results.filter(r=>r.status==='fulfilled').length,1);
+    assert.equal(results.filter(r=>r.reason?.code==='service-conflict').length,1);
+    const state=store.get('online_universes/concurrent/players/u1');assert.equal(state.serviceRevision,1);
+    const planets=[...store].filter(([key])=>key.includes('concurrent/planets/')).map(([,p])=>p);
+    assert.equal(planets.reduce((n,p)=>n+p.shipyardQueue.length,0),1);
+    assert.equal(planets.reduce((n,p)=>n+p.resources.metal,0),2e11-220000);
+  });
+  await ok('Trasferimento atomico, rifiuto a destinazione persa e conteggio voli anche con listener in ritardo',async()=>{
+    const u=checkpointWorld('flight');const p=u.planets[0];p.fleet[forge]=1;p.services={};
+    u.researches.computerTech=10;u.researches.impulseDrive=3;
+    win.UniversumServices.queue(u,p,forge,'metalStorage',Date.now());
+    const origin='online_universes/flight/planets/1_1_2',target='online_universes/flight/planets/1_2_2';
+    const dispatch={ref:docRef('online_universes/flight/fleets/tr1'),doc:{ships:{[forge]:1},originKey:'1_1_2',targetKey:'1_2_2',resolved:false},debit:{metal:0,crystal:0,deuterium:17}};
+    store.get(target).ownerUid='other';await assert.rejects(MP.syncPlayerState(u,{force:true,dispatch}),e=>e.code==='service-conflict');
+    assert(!store.has(dispatch.ref.path));assert.equal(p.fleet[forge],1);
+    store.get(target).ownerUid='u1';await MP.syncPlayerState(u,{force:true,dispatch});
+    assert.equal(store.get(origin).fleet[forge],0);assert.equal(store.get(origin).services[forge].queue.length,0);
+    assert.equal(p.fleet[forge],0);assert.deepEqual(store.get(dispatch.ref.path).ships,{[forge]:1});
+    game.E.buildUnits(u,1,forge,5);
+    await assert.rejects(MP.syncPlayerState(u,{force:true}),e=>e.code==='service-conflict');
+    assert.equal(store.get(target).shipyardQueue.length,0);
+  });
+  await ok('Eventi in assenza: perdita ultima Oracolo poi ritorno, stessa inbox a somma zero, nessuna resurrezione della coda',async()=>{
+    const u=checkpointWorld('replay'),p=u.planets[0];const day=86400000,t=Date.now()-day;
+    p.fleet[oracle]=1;u.researches.computerTech=6;p.lastUpdated=t;
+    win.UniversumServices.queue(u,p,oracle,'energyTech',t);p.resources.deuterium=0;
+    const key='online_universes/replay/planets/1_1_2';
+    p.inbox={fleet:{[oracle]:0},serviceEvents:{a:{at:t+1,fleet:{[oracle]:-1}},b:{at:t+day/2,fleet:{[oracle]:1}}}};
+    store.set(key,clone(p));win.__UniversumMPModules.restoreServices(u,u.planets,{serviceCheckpoint:t});
+    assert.equal(p.services[oracle].queue.length,0);assert.equal(p.fleet[oracle],1);
+    const snapshot=clone(p.resources);await MP.syncPlayerState(u,{force:true});await MP.syncPlayerState(u,{force:true});
+    assert.equal(store.get(key).inbox,undefined);assert.equal(store.get(key).fleet[oracle],1);
+    assert.deepEqual(snapshot,p.resources);assert.equal(store.get(key).services[oracle].queue.length,0);
+  });
+
   console.log(`\nTutti i test superati: ${passed}`);
 })().catch((e) => { console.error('\nTEST FALLITO:', e); process.exit(1); });

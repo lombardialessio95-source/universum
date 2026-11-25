@@ -47,8 +47,7 @@
   }
 
 
-  function handleMissionArrival(universe, flt) {
-    const now = Date.now();
+  function handleMissionArrival(universe, flt, now = Date.now()) {
     const key = coordKey(flt.targetCoords.g, flt.targetCoords.s, flt.targetCoords.p);
     if (!universe.galaxyDeltas) universe.galaxyDeltas = {};
 
@@ -178,6 +177,7 @@
         (p) => p.coords.g === flt.targetCoords.g && p.coords.s === flt.targetCoords.s && p.coords.p === flt.targetCoords.p
       );
       if (destPlanet) {
+        window.UniversumServices?.settlePlanet(universe,destPlanet,now);
         destPlanet.resources.metal += flt.cargo.metal;
         destPlanet.resources.crystal += flt.cargo.crystal;
         destPlanet.resources.deuterium += flt.cargo.deuterium;
@@ -187,6 +187,7 @@
           for (const [id, qty] of Object.entries(flt.fleet)) {
             destPlanet.fleet[id] = (destPlanet.fleet[id] || 0) + qty;
           }
+          window.UniversumServices?.settlePlanet(universe,destPlanet,now);
           addMessage(universe, 'fleet', `Flotta Schierata su ${destPlanet.name}`, 'Navi e risorse trasferite con successo.');
           return 'remove';
         }
@@ -323,7 +324,9 @@
       addMessage(universe, 'combat', `Rapporto Difesa [${key}] — ${combat.result.toUpperCase()} (${siegeType === 'embargo' ? 'Embargo' : 'Occupazione'})`,
         `Il pianeta attaccato ha affrontato la flotta ${siegeType === 'embargo' ? 'da embargo' : 'di occupazione'}. Round: ${combat.roundsPlayed}. ${formatCombatDetails(combat)}`);
       if (ownPlanet) {
+        window.UniversumServices?.settlePlanet(universe,ownPlanet,now);
         ownPlanet.fleet = { ...combat.defenderFleetSurvivors };
+        window.UniversumServices?.settlePlanet(universe,ownPlanet,now);
         ownPlanet.defenses = { ...combat.repairedDefenses };
       } else {
         universe.galaxyDeltas[key] = Object.assign({}, universe.galaxyDeltas[key], {

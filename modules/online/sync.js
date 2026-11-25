@@ -78,9 +78,84 @@
   }
 
 
+  const clone = value => JSON.parse(JSON.stringify(value));
+  const appliedEvents = new WeakMap();
+  const checkpoints = new WeakMap();
+  function recordServiceEvent(upd, before, fleet, resources = {}, defenses = {}, previous = {}) {
+    const services = window.UniversumServices;
+    if (!services?.ids.some(id=>before?.[id] || fleet[id])) return;
+    if (![fleet,resources,defenses].some(map=>Object.values(map).some(Number))) return;
+    const events = Object.values(previous || {});
+    const at = Math.max(Date.now(),...events.map(e=>e.at));
+    const order = 1+events.reduce((n,e)=>Math.max(n,e.order || 0),0);
+    upd['inbox.serviceEvents.' + services.uid()] = {at,order,fleet,resources,defenses};
+  }
+  function restoreServices(u, planets, player, now = Date.now()) {
+    const engine = window.UniversumEngine;
+    const services = window.UniversumServices;
+    const events = planets.flatMap(p=>Object.entries(p.inbox?.serviceEvents || {}).map(([key,event])=>({p,key,event})));
+    if (!engine || !services || (!events.length && !services.hasServices({planets}))) {
+      u.planets = planets.map(p=>calculateLiveResources(p,u.speed));
+      return;
+    }
+    u.planets = planets;
+    u.lastSeen = player.serviceCheckpoint || Math.min(now,...planets.map(p=>Number(p.lastUpdated) || now));
+    for (const {p,key,event} of events.sort((a,b)=>a.event.at-b.event.at || (a.event.order || 0)-(b.event.order || 0) || a.key.localeCompare(b.key))) {
+      const at = Math.min(now,Math.max(u.lastSeen,event.at));
+      engine.processOfflineProgress(u,at);
+      for (const part of ['fleet','defenses']) p[part] = _applyUnitDelta(p[part],event[part]);
+      for (const [k,n] of Object.entries(event.resources || {})) p.resources[k] = Math.max(0,(p.resources[k] || 0)+n);
+      services.settlePlanet(u,p,at);
+      const applied = appliedEvents.get(p) || {};
+      applied[key] = event;
+      appliedEvents.set(p,applied);
+    }
+    engine.processOfflineProgress(u,now);
+  }
+  // Una battaglia vede anche le unità completate e i costi sostenuti durante
+  // l’assenza. La lettura nella stessa transazione protegge da checkpoint concorrenti.
+  async function combatPlanet(tx,uniRef,targetSnap,speed,now) {
+    const target = targetSnap.data();
+    const services = window.UniversumServices;
+    if (!services || target.isNpc || !target.ownerUid ||
+        (!services.hasServices({planets:[target]}) && !Object.keys(target.inbox?.serviceEvents || {}).length)) {
+      return _effectivePlanetView(target,speed);
+    }
+    const profile = (await tx.get(uniRef.collection('players').doc(target.ownerUid))).data() || {};
+    const keys = profile.checkpointPlanets || [targetSnap.id];
+    const others = await Promise.all(keys.filter(key=>key!==targetSnap.id).map(key=>tx.get(uniRef.collection('planets').doc(key))));
+    const byKey = new Map([targetSnap,...others].filter(d=>d.exists && d.data().ownerUid===target.ownerUid).map(d=>[d.id,d.data()]));
+    const planets = [...new Set([...keys,targetSnap.id])].map(key=>byKey.get(key)).filter(Boolean);
+    const u = {speed,planets,researches:profile.researches || {},researchQueue:profile.researchQueue || null,
+      researchModelVersion:profile.researchModelVersion || 0,specialistBuilt:profile.specialistBuilt || {},
+      serviceRevision:profile.serviceRevision || 0};
+    restoreServices(u,planets,profile,now);
+    const p = byKey.get(targetSnap.id);
+    const inbox = pendingInbox(p,target);
+    for (const key of ['resources','fleet','defenses']) p[key] = _applyUnitDelta(p[key],inbox[key]);
+    return p;
+  }
+  function pendingInbox(p,data) {
+    const inbox = clone(data.inbox || {});
+    const applied = appliedEvents.get(p) || {};
+    if (Object.keys(inbox.serviceEvents || {}).some(key=>!applied[key])) throw conflict();
+    for (const key of Object.keys(inbox.serviceEvents || {})) {
+      for (const part of ['resources','fleet','defenses']) {
+        for (const [id,n] of Object.entries(applied[key][part] || {})) {
+          inbox[part] ||= {};
+          inbox[part][id] = (inbox[part][id] || 0) - n;
+        }
+      }
+    }
+    return inbox;
+  }
+  function conflict() {
+    return Object.assign(new Error('Lo stato sul server è cambiato. Ricaricamento della partita in corso.'), {code:'service-conflict'});
+  }
   function _hasInbox(data) {
     const ib = data && data.inbox;
     if (!ib || typeof ib !== 'object') return false;
+    if (Object.keys(ib.serviceEvents || {}).length) return true;
     for (const part of ['resources', 'fleet', 'defenses']) {
       const m = ib[part];
       if (m && Object.values(m).some((v) => Number(v) !== 0)) return true;
@@ -109,6 +184,8 @@
   function _snapshotForDiff(p) {
     if (!p) return null;
     return JSON.parse(JSON.stringify({
+      serviceEvents: p.inbox?.serviceEvents || {},
+      hadServices: Boolean(p.services),
       resources: p.resources || {},
       fleet: p.fleet || {},
       defenses: p.defenses || {},
@@ -148,6 +225,7 @@
       upd.resources = floorMap(after.resources);
       upd.fleet = floorMap(after.fleet);
       upd.defenses = floorMap(after.defenses);
+      if (before.hadServices) upd.services = FV.delete();
       upd.buildQueue = [];
       upd.shipyardQueue = [];
       upd.defenseQueue = [];
@@ -160,23 +238,25 @@
       upd.lastUpdated = Date.now();
       upd.inbox = FV.delete();
     } else {
+      const delta = {resources:{},fleet:{},defenses:{}};
       for (const k of _INBOX_RES_KEYS) {
         const d = Math.round(Number(after.resources?.[k] || 0) - Number(before.resources?.[k] || 0));
-        if (d) upd[`inbox.resources.${k}`] = FV.increment(d);
+        if (d) { delta.resources[k] = d; upd[`inbox.resources.${k}`] = FV.increment(d); }
       }
       for (const part of ['fleet', 'defenses']) {
         const ids = new Set([...Object.keys(before[part] || {}), ...Object.keys(after[part] || {})]);
         for (const id of ids) {
           const d = Math.round(Number(after[part]?.[id] || 0) - Number(before[part]?.[id] || 0));
-          if (d) upd[`inbox.${part}.${id}`] = FV.increment(d);
+          if (d) { delta[part][id] = d; upd[`inbox.${part}.${id}`] = FV.increment(d); }
         }
       }
+      recordServiceEvent(upd,before.fleet,delta.fleet,delta.resources,delta.defenses,before.serviceEvents);
     }
     if (Object.keys(upd).length > 0) tx.update(ref, upd);
   }
 
 
-  function _inboxCredit(tx, ref, { resources = {}, fleet = {}, defenses = {} } = {}) {
+  function _inboxCredit(tx, ref, { resources = {}, fleet = {}, defenses = {} } = {}, previous = {}) {
     if (!ref) return;
     const FV = firebase.firestore.FieldValue;
     const upd = {};
@@ -188,6 +268,7 @@
       const v = Math.floor(Number(q || 0));
       if (v) upd[`inbox.fleet.${id}`] = FV.increment(v);
     }
+    recordServiceEvent(upd,null,fleet,resources,defenses,previous);
     for (const [id, q] of Object.entries(defenses || {})) {
       const v = Math.floor(Number(q || 0));
       if (v) upd[`inbox.defenses.${id}`] = FV.increment(v);
@@ -213,7 +294,40 @@
   }
 
 
-  async function syncPlayerState(universeObj, { force = false } = {}) {
+  async function syncPlayerState(u, options = {}) {
+    if (!u) return;
+    const previous = checkpoints.get(u);
+    const operation = (previous || Promise.resolve()).catch(()=>{}).then(()=>saveCheckpoint(u,options));
+    checkpoints.set(u,operation);
+    try { return await operation; }
+    catch (error) {
+      // Le regole possono osservare il commit concorrente prima del retry SDK.
+      if (error.code === 'permission-denied' && Number.isSafeInteger(u.serviceRevision)) {
+        const user = getAuth().currentUser;
+        const ref = user && getDB().collection('online_universes').doc(u.id).collection('players').doc(user.uid);
+        const fresh = ref && await ref.get({source:'server'}).catch(()=>null);
+        if (fresh?.exists && fresh.data().serviceRevision !== u.serviceRevision) error = conflict();
+      }
+      if (error.code === 'service-conflict' && window.UniversumUI?.state?.currentUniverse === u) {
+        const ui = window.UniversumUI;
+        ui.toast(error.message,'error');
+        await ui.exitToLobbyAfterServerRemoval();
+        try { ui.startOnlineGame(await G.joinOnlineUniverse(u.id,u.roomPasscode)); }
+        catch (reloadError) { ui.toast(reloadError.message,'error'); }
+      }
+      throw error;
+    } finally { if (checkpoints.get(u) === operation) checkpoints.delete(u); }
+  }
+  function debitFleet(u,p,dispatch,now,validate = true) {
+    window.UniversumServices.settlePlanet(u,p,now);
+    const ships = dispatch.doc.ships;
+    if (validate && (Object.entries(ships).some(([id,n])=>(p.fleet[id] || 0)<n) ||
+        Object.entries(dispatch.debit).some(([k,n])=>p.resources[k]<n))) throw conflict();
+    for (const [id,n] of Object.entries(ships)) p.fleet[id] = Math.max(0,(p.fleet[id] || 0)-n);
+    for (const [k,n] of Object.entries(dispatch.debit)) p.resources[k] = Math.max(0,p.resources[k]-n);
+    window.UniversumServices.settlePlanet(u,p,now);
+  }
+  async function saveCheckpoint(universeObj, { force = false, dispatch = null } = {}) {
     const auth = getAuth();
     const db = getDB();
     const user = auth.currentUser;
@@ -232,6 +346,9 @@
     const playerRef = uniRef.collection('players').doc(user.uid);
     const planets = (universeObj.planets || []).slice();
 
+    const versioned = Number.isSafeInteger(universeObj.serviceRevision);
+    const expected = universeObj.serviceRevision;
+    const services = window.UniversumServices;
     let reconciled = [];
     let lost = [];
     let moonUpdates = [];
@@ -242,7 +359,29 @@
       moonUpdates = [];
       const entries = planets.map((p) => ({ p, ref: planetsCol.doc(coordsToKey(p.coords)) }));
       const snaps = await Promise.all(entries.map((e) => tx.get(e.ref)));
+      const playerSnap = versioned ? await tx.get(playerRef) : null;
+      const player = playerSnap?.data() || {};
+      if (versioned && (player.serviceRevision || 0) !== expected) throw conflict();
       const nowTs = Date.now();
+      const flightRefs = player.specialistFlights || [];
+      const checkCapacity = versioned && services && (dispatch || planets.some(p=>p.shipyardQueue?.some(lot=>services.ids.includes(lot.id))));
+      let activeRefs = flightRefs;
+      const totals = {};
+      if (checkCapacity) {
+        const flights = await Promise.all(flightRefs.map(id=>tx.get(uniRef.collection('fleets').doc(id))));
+        activeRefs = [];
+        for (const flight of flights) if (flight.exists && !flight.data().resolved) {
+          activeRefs.push(flight.id);
+          for (const id of services.ids) totals[id] = (totals[id] || 0) + (flight.data().ships?.[id] || 0);
+        }
+      }
+      if (dispatch) {
+        for (const key of [dispatch.doc.targetKey,dispatch.doc.originKey]) {
+          const i = entries.findIndex(e=>e.ref.id===key);
+          if (i < 0 || snaps[i].data()?.ownerUid !== user.uid) throw conflict();
+        }
+        activeRefs = [...activeRefs,dispatch.ref.id];
+      }
 
       entries.forEach((e, i) => {
         const snap = snaps[i];
@@ -254,10 +393,13 @@
           return;
         }
 
-        const inbox = data.inbox || {};
-        const res = Object.assign({}, p.resources);
+        const inbox = pendingInbox(p,data);
+        const sending = dispatch && e.ref.id === dispatch.doc.originKey;
+        const model = sending ? clone(p) : p;
+        if (sending) debitFleet(universeObj,model,dispatch,nowTs);
+        const res = Object.assign({}, model.resources);
         for (const k of _INBOX_RES_KEYS) {
-          res[k] = Math.max(0, Math.floor(Number(p.resources?.[k] || 0) + Number(inbox.resources?.[k] || 0)));
+          res[k] = Math.max(0, Math.floor(Number(model.resources?.[k] || 0) + Number(inbox.resources?.[k] || 0)));
         }
         const payload = {
           name: p.name,
@@ -265,7 +407,9 @@
           resources: res,
           buildings: p.buildings,
           defenses: _applyUnitDelta(p.defenses, inbox.defenses),
-          fleet: _applyUnitDelta(p.fleet, inbox.fleet),
+          fleet: _applyUnitDelta(model.fleet, inbox.fleet),
+          ...(model.services ? {services:model.services} : {}),
+          ...(versioned ? {serviceRevision:expected+1} : {}),
           buildQueue: p.buildQueue || [],
           shipyardQueue: p.shipyardQueue || [],
           defenseQueue: p.defenseQueue || [],
@@ -274,11 +418,16 @@
           bacinoSpaziale: p.bacinoSpaziale || null,
           lastUpdated: nowTs
         };
+        if (checkCapacity) for (const id of services.ids) {
+          const reserved = payload.shipyardQueue.reduce((n,lot)=>n+(lot.id===id ? lot.remaining : 0),0);
+          totals[id] = (totals[id] || 0) + (payload.fleet[id] || 0) + reserved + (sending ? dispatch.doc.ships[id] || 0 : 0);
+        }
         if (data.inbox !== undefined) payload.inbox = FV.delete();
         // Parità con l'offline: costruzioni/upgrade lunari devono essere salvati.
         // Una Luna nuova non può nascere qui: la crea solo la transazione del Mercante.
         if (data.moon && p.moon) payload.moon = p.moon;
-        tx.set(e.ref, payload, { merge: true });
+        if (versioned) tx.update(e.ref,payload);
+        else tx.set(e.ref, payload, { merge: true });
         // La Luna è gestita nel documento condiviso: recepisci modifiche
         // create da un altro client, non solo i delta della inbox.
         if (Boolean(p.moon) !== Boolean(data.moon)) {
@@ -287,7 +436,12 @@
         if (_hasInbox(data)) reconciled.push({ planet: p, inbox });
       });
 
-      tx.set(playerRef, {
+      if (checkCapacity && (totals[services.forge] > 5 || totals[services.oracle] > 3)) throw conflict();
+      if (dispatch) tx.set(dispatch.ref,dispatch.doc);
+      const playerPayload = {
+        ...(versioned ? {serviceRevision:expected+1,serviceCheckpoint:nowTs,
+          checkpointPlanets:entries.filter((e,i)=>snaps[i].data()?.ownerUid===user.uid).map(e=>e.ref.id),
+          specialistBuilt:universeObj.specialistBuilt || {}, specialistFlights:activeRefs} : {}),
         nickname: universeObj.emperor || user.displayName || 'Comandante',
         researches: universeObj.researches || {},
         researchQueue: universeObj.researchQueue || null,
@@ -295,8 +449,13 @@
         points: computePlayerPoints(universeObj),
         planetCount: planets.length - lost.length,
         lastSeen: nowTs
-      }, { merge: true });
+      };
+      if (playerSnap?.exists) tx.update(playerRef,playerPayload);
+      else tx.set(playerRef,playerPayload,{merge:true});
     });
+    if (versioned) universeObj.serviceRevision = expected+1;
+    if (dispatch) debitFleet(universeObj,planets.find(p=>coordsToKey(p.coords)===dispatch.doc.originKey),dispatch,Date.now(),false);
+    for (const p of planets) appliedEvents.delete(p);
     _syncLastByUni.set(syncKey, Date.now());
 
     for (const { planet, inbox } of reconciled) {
@@ -455,6 +614,6 @@
     };
   }
 
-  Object.assign(G, { calculateLiveResources, computePlayerPoints, _applyUnitDelta, _hasInbox, _effectivePlanetView, _snapshotForDiff, _writePlanetResult, _inboxCredit, _resolveCreditRef, syncPlayerState, listenOwnPlanets, renameOnlinePlanet, renameOnlineMoon, getOnlineSystem, fetchOnlineSystem });
+  Object.assign(G, { combatPlanet, restoreServices, calculateLiveResources, computePlayerPoints, _applyUnitDelta, _hasInbox, _effectivePlanetView, _snapshotForDiff, _writePlanetResult, _inboxCredit, _resolveCreditRef, syncPlayerState, listenOwnPlanets, renameOnlinePlanet, renameOnlineMoon, getOnlineSystem, fetchOnlineSystem });
 
 })();

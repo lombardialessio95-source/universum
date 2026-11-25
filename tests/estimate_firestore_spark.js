@@ -20,7 +20,8 @@ function estimate(s) {
   const writes = saves * (s.planets + 1) + s.fleets * 5 + s.otherWrites;
   // Una lettura per pianeta nella transazione + la notifica listener; esclusi
   // i read da listener complessi, aggiunti nei margini otherReads/baseReads.
-  const reads = saves * s.planets * 2 + s.fleets * 8 +
+  // Il checkpoint confronta anche la revisione del giocatore.
+  const reads = saves * (s.planets * 2 + 1) + s.fleets * 8 +
     s.systems * Math.max(1, s.avgOccupied) + s.reports + s.otherReads +
     s.baseReads + Math.ceil(saves * 0.25);
   const theoretical = Math.floor(Math.min(READS_PER_DAY / reads, WRITES_PER_DAY / writes));

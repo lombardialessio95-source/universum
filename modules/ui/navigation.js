@@ -177,53 +177,6 @@
     const flights = uni.fleetsInFlight || [];
     const messages = (uni.messages || []).slice(0, 6);
 
-    const queueRows = [];
-    if (planet.buildQueue && planet.buildQueue.length > 0) {
-      const b = planet.buildQueue[0];
-      const name = Data.BUILDINGS[b.id]?.name || b.id;
-      queueRows.push(`
-        <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(0,0,0,0.35); padding:10px; border-radius:8px;">
-          <span style="display:inline-flex; align-items:center; gap:8px;">${artTag(b.id, 'unit-art-sm', name)} <strong>${escapeHTML(name)}</strong> → Lv.${b.targetLevel}</span>
-          <span class="font-display text-metal live-timer" data-end="${b.endTime}">${formatDuration((b.endTime - Date.now()) / 1000)}</span>
-        </div>
-      `);
-    }
-    if (planet.localResearchQueue) {
-      const r = planet.localResearchQueue;
-      const name = Data.RESEARCHES[r.id]?.name || r.id;
-      queueRows.push(`<div class="glass-panel" style="padding:10px"><strong>${escapeHTML(name)}</strong> · ricerca planetaria Lv.${r.targetLevel} · <span class="live-timer" data-end="${r.endTime}">${formatDuration((r.endTime - Date.now()) / 1000)}</span></div>`);
-    }
-    if (uni.researchQueue) {
-      const r = uni.researchQueue;
-      const name = Data.RESEARCHES[r.id]?.name || r.id;
-      queueRows.push(`
-        <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(0,0,0,0.35); padding:10px; border-radius:8px;">
-          <span style="display:inline-flex; align-items:center; gap:8px;">${artTag(r.id, 'unit-art-sm', name)} <strong>${escapeHTML(name)}</strong> → Lv.${r.targetLevel}</span>
-          ${r.endTime ? `<span class="font-display text-crystal live-timer" data-end="${r.endTime}">${formatDuration((r.endTime - Date.now()) / 1000)}</span>` : '<span class="text-muted">In pausa: laboratori occupati</span>'}
-        </div>
-      `);
-    }
-    if (planet.shipyardQueue && planet.shipyardQueue.length > 0) {
-      const sq = planet.shipyardQueue[0];
-      const name = Data.SHIPS[sq.id]?.name || sq.id;
-      queueRows.push(`
-        <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(0,0,0,0.35); padding:10px; border-radius:8px;">
-          <span style="display:inline-flex; align-items:center; gap:8px;">${artTag(sq.id, 'unit-art-sm', name)} <strong>${escapeHTML(name)}</strong> (Rimanenti: ${sq.remaining})</span>
-          <span class="font-display text-energy live-timer" data-end="${sq.endTime}">${formatDuration((sq.endTime - Date.now()) / 1000)}</span>
-        </div>
-      `);
-    }
-    if (planet.defenseQueue && planet.defenseQueue.length > 0) {
-      const dq = planet.defenseQueue[0];
-      const name = Data.DEFENSES[dq.id]?.name || dq.id;
-      queueRows.push(`
-        <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(0,0,0,0.35); padding:10px; border-radius:8px;">
-          <span style="display:inline-flex; align-items:center; gap:8px;">${artTag(dq.id, 'unit-art-sm', name)} <strong>${escapeHTML(name)}</strong> (Rimanenti: ${dq.remaining})</span>
-          <span class="font-display text-energy live-timer" data-end="${dq.endTime}">${formatDuration((dq.endTime - Date.now()) / 1000)}</span>
-        </div>
-      `);
-    }
-
     viewport.innerHTML = `
       <div style="display:flex; flex-direction:column; gap:14px;">
         ${incoming.length > 0 ? `
@@ -284,9 +237,7 @@
 
         <div class="glass-panel" style="padding:14px;">
           <h3 style="font-size:0.95rem; color:var(--res-crystal); margin-bottom:10px;">CODE DI PRODUZIONE & RICERCA</h3>
-          <div style="display:flex; flex-direction:column; gap:8px;">
-            ${queueRows.length > 0 ? queueRows.join('') : '<p class="text-muted">Nessuna costruzione o ricerca in corso.</p>'}
-          </div>
+          <div id="work-orders"><div data-controls></div><div data-orders></div></div>
         </div>
 
         <div class="glass-panel" style="padding:14px;">
@@ -325,6 +276,7 @@
       </div>
     `;
 
+    UI.bindWorkOrders(viewport.querySelector('#work-orders'),uni,planet);
     UI.startPlanetCanvas(planet);
 
     document.getElementById('btn-rename-active-planet')?.addEventListener('click', () => UI.openRenamePlanetModal(pIdx));

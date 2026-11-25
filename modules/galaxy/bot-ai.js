@@ -62,7 +62,9 @@
             beginCrepuscoloBattleRepair(targetPlanet);
           }
         }
+        window.UniversumServices?.settlePlanet(universe,targetPlanet,now);
         targetPlanet.fleet = fleetSurvivors;
+        window.UniversumServices?.settlePlanet(universe,targetPlanet,now);
         targetPlanet.defenses = combat.repairedDefenses;
         if (combat.invictusLost > 0 && !targetPlanet.moon && !targetPlanet.bacinoSpaziale) {
           const moonChance = Math.min(1, combat.invictusLost * window.UniversumData.INVICTUS.moonChancePerLost);

@@ -89,6 +89,7 @@
     const st = UI.state;
     let mpTickCounter = 0;
     let pendingCompletionRender = false;
+    let lastTick = Date.now();
 
     st.gameLoopTimer = setInterval(async () => {
       const uni = st.currentUniverse;
@@ -101,7 +102,17 @@
         (uni.researchQueue ? 1 : 0) +
         ((uni.planets || []).filter(p => p.localResearchQueue).length);
 
-      const queueCompleted = window.UniversumEngine.tick(uni, 1);
+      const now = Date.now();
+      const elapsed = Math.max(0,now-lastTick);
+      let queueCompleted;
+      if (elapsed > 2000 && window.UniversumServices?.hasServices(uni)) {
+        uni.lastSeen = lastTick;
+        const report = window.UniversumEngine.processOfflineProgress(uni,now);
+        queueCompleted = report.completedBuildings.length || report.completedResearches.length || Object.keys(report.completedUnits).length;
+      } else {
+        queueCompleted = window.UniversumEngine.tick(uni, 1);
+      }
+      lastTick = now;
 
       if (st.isMultiplayerMode) {
         mpTickCounter++;
@@ -134,7 +145,7 @@
 
       if (newQueueCount < prevQueueCount) {
         UI.playSound('complete');
-        if (['overview', 'buildings', 'research', 'shipyard'].includes(st.currentView)) {
+        if (['buildings', 'research', 'shipyard'].includes(st.currentView)) {
           if (document.hidden) pendingCompletionRender = true;
           else UI.renderCurrentView();
         }
@@ -150,14 +161,15 @@
       if (document.hidden) return; // Mantieni la simulazione, evita soltanto il lavoro DOM.
       if (pendingCompletionRender) {
         pendingCompletionRender = false;
-        if (['overview', 'buildings', 'research', 'shipyard'].includes(st.currentView)) UI.renderCurrentView();
+        if (['buildings', 'research', 'shipyard'].includes(st.currentView)) UI.renderCurrentView();
       }
+      if (st.currentView === 'overview') UI.refreshWorkOrders();
       UI.updateTopBarNumbers();
       if (!st.isMultiplayerMode) window.UniversumTutorial?.check();
       UI.refreshAffordabilityButtons?.();
       document.querySelectorAll('.live-timer').forEach((el) => {
         const endTs = Number(el.dataset.end || 0);
-        const remSec = Math.max(0, Math.ceil((endTs - Date.now()) / 1000));
+        const remSec = Math.max(0, Math.ceil((endTs - now) / 1000));
         const value = UI.formatDuration(remSec);
         if (el.textContent !== value) el.textContent = value;
       });

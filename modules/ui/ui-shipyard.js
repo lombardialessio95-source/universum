@@ -24,15 +24,21 @@
 
     const cards = Object.values(dict).filter((u) => isDef || (u.id !== 'invictus' && u.id !== 'crepuscolo')).map((u) => {
       const owned = Number(ownedMap[u.id] || 0);
-      const cost = Engine.getUnitCostAdjusted(planet, u.id, isDef);
+      const specialist = window.UniversumServices?.ids.includes(u.id);
+      const cost = specialist ? window.UniversumServices.quote(uni,u.id,1).cost : Engine.getUnitCostAdjusted(planet, u.id, isDef);
       const req = Data.checkRequirements(u.requirements, planet, uni, false);
       const unitSec = Engine.getSingleUnitTime(uni, planet, u.id, isDef);
 
       const maxByM = cost.metal > 0 ? Math.floor(planet.resources.metal / cost.metal) : 999999;
       const maxByC = cost.crystal > 0 ? Math.floor(planet.resources.crystal / cost.crystal) : 999999;
       const maxByD = cost.deuterium > 0 ? Math.floor(planet.resources.deuterium / cost.deuterium) : 999999;
-      const maxAffordable = isCreative ? 100 : Math.max(0, Math.min(maxByM, maxByC, maxByD, u.maxCount ? 1 : 99999));
+      let maxAffordable = isCreative ? 100 : Math.max(0, Math.min(maxByM, maxByC, maxByD, u.maxCount ? 1 : 99999));
 
+      if (specialist) {
+        maxAffordable = window.UniversumServices.quote(uni,u.id,1).free;
+        while (maxAffordable && !isCreative && Object.entries(window.UniversumServices.quote(uni,u.id,maxAffordable).cost)
+          .some(([k,v])=>planet.resources[k]<v)) maxAffordable--;
+      }
       return `
         <div class="glass-panel" style="padding:14px; display:flex; flex-direction:column; gap:10px;">
           <div style="display:flex; gap:12px; align-items:flex-start;">
@@ -105,7 +111,12 @@
       btn.addEventListener('click', () => {
         const inp = viewport.querySelector(`.unit-qty-input[data-uid="${btn.dataset.uid}"]`);
         if (!inp) return;
-        inp.value = Math.max(1, Number(btn.dataset.max) || 1);
+        const id = btn.dataset.uid;
+        if (window.UniversumServices?.ids.includes(id)) {
+          let qty = window.UniversumServices.quote(uni,id,1).free;
+          while (!isCreative && qty && Object.entries(window.UniversumServices.quote(uni,id,qty).cost).some(([k,n])=>planet.resources[k]<n)) qty--;
+          inp.value = Math.max(1,qty);
+        } else inp.value = Math.max(1, Number(btn.dataset.max) || 1);
       });
     });
 
@@ -176,6 +187,7 @@
     document.querySelectorAll('.btn-qty-max').forEach((btn) => {
       const u = dict[btn.dataset.uid];
       if (!u) return;
+      if (window.UniversumServices?.ids.includes(u.id)) return;
       const cost = Engine.getUnitCostAdjusted(planet, u.id, isDef);
       const maxBy = (v, c) => (c > 0 ? Math.floor(v / c) : 999999);
       btn.dataset.max = isCreative ? 100 : Math.max(0, Math.min(maxBy(res.metal, cost.metal), maxBy(res.crystal, cost.crystal), maxBy(res.deuterium, cost.deuterium), u.maxCount ? 1 : 99999));

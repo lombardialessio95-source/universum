@@ -75,7 +75,9 @@ const goldenCosts = {};
 for (const id of Object.keys(D.BUILDINGS)) goldenCosts['b:'+id] = Array.from({length:35}, (_,i) => D.getBuildingCost(id,i+1));
 for (const id of Object.keys(D.MOON_BUILDINGS)) goldenCosts['moon:'+id] = Array.from({length:35}, (_,i) => D.getBuildingCost(id,i+1,true));
 for (const id of Object.keys(D.RESEARCHES)) goldenCosts['r:'+id] = Array.from({length:35}, (_,i) => D.getResearchCost(id,i+1));
-for (const id of Object.keys(D.SHIPS)) goldenCosts['s:'+id] = D.SHIPS[id].cost;
+for (const id of Object.keys(D.SHIPS)) {
+  if (!['hephaestusForge','prometheusOracle'].includes(id)) goldenCosts['s:'+id] = D.SHIPS[id].cost;
+}
 for (const id of Object.keys(D.DEFENSES)) goldenCosts['d:'+id] = D.DEFENSES[id].cost;
 check(Object.keys(goldenCosts).length,71,'Numero cataloghi costi confronto baseline');
 const costDigest=crypto.createHash('sha256').update(JSON.stringify(goldenCosts)).digest('hex');

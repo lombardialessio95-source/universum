@@ -111,6 +111,8 @@
       throw new Error(`Slot flotta esauriti (${maxSlots} max). Potenzia Tecnologia Informatica.`);
     }
 
+    const specialistTransfer = window.UniversumServices?.transfer(universe,mission,targetCoords,fleetSelection);
+    if (specialistTransfer && !originP) throw Error('Le specialiste partono da una colonia propria.');
     const cleanFleet = {};
     let totalShips = 0;
     let totalCargoCap = 0;
@@ -173,7 +175,10 @@
 
     const blackHoleFee = (!universe.creativeMode && mission === 'explore' && options.blackHole) ? 50000 : 0;
 
-    if (loadM + loadC + loadD + fuelCost > totalCargoCap && !universe.creativeMode) {
+    // Una specialista a stiva zero può partire scarica, pagando comunque il viaggio.
+    if (specialistTransfer) window.UniversumServices.settlePlanet(universe,originP);
+    const emptyTransfer = specialistTransfer && loadM+loadC+loadD===0;
+    if (!emptyTransfer && loadM + loadC + loadD + fuelCost > totalCargoCap && !universe.creativeMode) {
       throw new Error('Capacità di carico delle navi insufficiente per risorse + carburante.');
     }
 
@@ -203,6 +208,7 @@
     }
 
     const now = Date.now();
+    if (specialistTransfer) window.UniversumServices.settlePlanet(universe,originP);
     const missionObj = {
       id: 'flt_' + now + '_' + Math.random().toString(36).substring(2, 6),
       mission,

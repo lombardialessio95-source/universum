@@ -5,9 +5,9 @@
   const getData = (...args) => G.getData(...args);
 
 
-  function getEffectiveSpeed(universe) {
+  function getEffectiveSpeed(universe, now = Date.now()) {
     const baseSpeed = Math.max(1, Number(universe.speed) || 1);
-    const isTurbo = (universe.turboUntil || 0) > Date.now();
+    const isTurbo = (universe.turboUntil || 0) > now;
     return isTurbo ? baseSpeed * 2 : baseSpeed;
   }
 
@@ -15,11 +15,11 @@
   // =========================================================
   // CALCOLO TEMPI PROGRESSIVI
   // =========================================================
-  function getBuildingBuildTime(universe, planet, buildingId, targetLevel, isMoon = false) {
+  function getBuildingBuildTime(universe, planet, buildingId, targetLevel, isMoon = false, now = Date.now()) {
     if (universe.creativeMode) return 0;
     const Data = getData();
     const cost = Data.getBuildingCost(buildingId, targetLevel, isMoon);
-    const effectiveSpeed = getEffectiveSpeed(universe);
+    const effectiveSpeed = getEffectiveSpeed(universe, now);
 
     const roboticsLv = isMoon
       ? Number(planet.moon?.buildings?.lunarBase || 0)
@@ -38,15 +38,15 @@
   }
 
 
-  function getResearchTime(universe, researchId, targetLevel, planet = null) {
+  function getResearchTime(universe, researchId, targetLevel, planet = null, now = Date.now()) {
     if (universe.creativeMode) return 0;
     const Data = getData();
     const cost = Data.getResearchCost(researchId, targetLevel);
-    const effectiveSpeed = getEffectiveSpeed(universe);
+    const effectiveSpeed = getEffectiveSpeed(universe, now);
     const local = Data.RESEARCHES[researchId]?.scope === 'planetary';
     const source = typeof planet === 'number' ? universe.planets?.[planet] : planet;
     if (local && !source) return 0;
-    const totalLabLv = local ? Math.max(0, Number(source.buildings?.researchLab) || 0) : getTotalLabLevel(universe);
+    const totalLabLv = local ? Math.max(0, Number(source.buildings?.researchLab) || 0) : getTotalLabLevel(universe, now);
 
     const rawSeconds = ((cost.metal + cost.crystal) /
       (1000 * (1 + totalLabLv) * effectiveSpeed)) * 3600;

@@ -29,7 +29,7 @@
     const gDef = Data.GALATTICA;
     const prod = Engine.getGalatticaProduction(galHere, uni);
 
-    const galShips = Object.values(Data.SHIPS).filter((sh) => sh.id !== 'solarSatellite' && !sh.specialConstruction);
+    const galShips = Object.values(Data.SHIPS).filter((sh) => sh.id !== 'solarSatellite' && !sh.specialConstruction && !sh.normalShipyardOnly);
     const galDefenses = Object.values(Data.DEFENSES);
 
     const headerPlanetLabel = options && options.headerLabel ? options.headerLabel : `GALATTICA su ${escapeHTML(planet.name)}`;
@@ -304,7 +304,7 @@
       .filter(([id, q]) => Number(q) > 0 && id !== 'solarSatellite')
       .filter(([id]) => {
         const spec = Data.SHIPS[id];
-        return spec && !spec.specialConstruction;
+        return spec && !spec.specialConstruction && !spec.normalShipyardOnly;
       });
 
     const missions = [

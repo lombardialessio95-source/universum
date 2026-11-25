@@ -154,6 +154,7 @@
         throw new Error(`Rotta bloccata! [${targetCoords.g}:${targetCoords.s}:${targetCoords.p}] Ã¨ isolato da un Embargo Planetario.`);
       }
 
+      const specialistTransfer = window.UniversumServices?.transfer(universe,mission,targetCoords,fleetSelection);
       // 3. Validazione navi selezionate
       const ships = {};
       let totalShips = 0;
@@ -199,7 +200,8 @@
       const loadD = Math.max(0, Math.floor(Number(cargo.deuterium) || 0));
       const totalLoad = loadM + loadC + loadD;
 
-      if (totalLoad > totalCargoCapacity) {
+      if (specialistTransfer) window.UniversumServices.settlePlanet(universe,planet);
+      if (totalLoad > (specialistTransfer ? Math.max(0,totalCargoCapacity-stats.fuelCost) : totalCargoCapacity)) {
         throw new Error(`CapacitÃ  stiva superata (${totalLoad.toLocaleString('it-IT')} / ${totalCargoCapacity.toLocaleString('it-IT')}).`);
       }
 
@@ -227,6 +229,7 @@
       }
 
       const now = Date.now();
+      if (specialistTransfer) window.UniversumServices.settlePlanet(universe,planet);
       const totalOutboundSec = stats.durationSec + (stats.holdDurationSec || 0);
       const arrivalTime = now + totalOutboundSec * 1000;
       const returnTime = arrivalTime + stats.durationSec * 1000;

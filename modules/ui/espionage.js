@@ -15,7 +15,7 @@
     const reports = uni.spyReports || [];
     const selectedReport = reports.find((r) => r.id === st.selectedSpyReportId) || null;
     const planet = UI.getActivePlanet();
-    const combatShips = Object.values(Data.SHIPS).filter((s) => s.attack > 0 && s.id !== 'solarSatellite');
+    const combatShips = Object.values(Data.SHIPS).filter((s) => s.attack > 0 && !s.normalShipyardOnly && s.id !== 'solarSatellite');
 
     viewport.innerHTML = `
       <div style="display:flex; flex-direction:column; gap:14px;">
