@@ -66,7 +66,8 @@
     let html='<p>ONLINE: <strong>4.000 slot</strong> per Suprema; assedio persistente disattivato. OFFLINE invariato.</p>'+
       '<p class="text-muted">Staging di prova, non pubblicato in produzione.</p>';
     html+=form('build','<label>Costruisci (40 rate giornaliere reali) sul pianeta</label>'+
-      '<select class="form-control" name="originKey" required>'+homeOpts+'</select>','Avvia costruzione');
+      '<select class="form-control" name="originKey" required>'+homeOpts+'</select>'+ 
+      '<input type="hidden" name="supremeId" value="'+id()+'">','Avvia costruzione');
     for(const o of orders)html+='<div class="glass-panel" style="padding:9px;margin:7px 0;">'+
       '<strong>Suprema '+esc(o.id)+'</strong>: '+esc(o.paidDays)+'/40 rate, '+esc(o.status)+
       ' — prossimo controllo '+new Date(o.nextPaymentAt).toLocaleString('it-IT')+'</div>';
@@ -122,7 +123,6 @@
         const formData=new FormData(formEl), params=Object.fromEntries(formData.entries());
         const action=formEl.dataset.supAction;
         for(const n of ['count','amount'])if(params[n]!==undefined)params[n]=Number(params[n]);
-        if(action==='build')params.supremeId=id();
         if(action==='launch'){
           params.targetKey=[params.g,params.s,params.p].join('_');
           delete params.g;delete params.s;delete params.p;
@@ -153,7 +153,7 @@
       if(m.status==='outbound')return [m.arrivalAt];
       if(m.status==='returning'&&m.attackerUid===myUid)return [m.returnAt];
       return [];
-    }).filter(t=>Number.isFinite(t));
+    }).filter(t=>Number.isFinite(t)&&t>Date.now());
     if(!upcoming.length)return;
     const due=Math.min(...upcoming);
     timer=setTimeout(()=>{timer=null;if(UI().state.currentUniverse===uni)onJoin(uni).catch(()=>{});},
