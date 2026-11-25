@@ -230,9 +230,12 @@
 
       const now = Date.now();
       if (specialistTransfer) window.UniversumServices.settlePlanet(universe,planet);
+      const timeline = mission === 'explore' && MCore?.buildExplorationTimeline
+        ? MCore.buildExplorationTimeline(now, stats.durationSec, stats.holdDurationSec || 0)
+        : null;
       const totalOutboundSec = stats.durationSec + (stats.holdDurationSec || 0);
-      const arrivalTime = now + totalOutboundSec * 1000;
-      const returnTime = arrivalTime + stats.durationSec * 1000;
+      const arrivalTime = timeline ? timeline.arrivalTime : now + totalOutboundSec * 1000;
+      const returnTime = timeline ? timeline.returnTime : arrivalTime + stats.durationSec * 1000;
 
       const ransomDemand = mission === 'occupy' ? {
         metal: Math.max(0, Math.floor(Number(options.ransom?.metal) || 0)),
@@ -255,7 +258,8 @@
         status: 'outbound',
         departureTime: now,
         arrivalTime,
-        returnTime
+        returnTime,
+        ...(timeline || {})
       };
 
       if (!Array.isArray(universe.fleetsInFlight)) universe.fleetsInFlight = [];
