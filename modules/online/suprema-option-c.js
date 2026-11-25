@@ -86,6 +86,13 @@
           '<label>Carica navi dal pianeta</label><select class="form-control" name="ship">'+shipOpts+'</select>'+
           '<input class="form-control" type="number" name="count" min="1" step="1" value="1" required>',
           'Carica nella riserva');
+        html+=form('queue',hidden+
+          '<label>Cantiere interno Lv.12: produci navi</label>'+
+          '<select class="form-control" name="ship">'+shipOpts+'</select>'+
+          '<input class="form-control" type="number" name="count" min="1" max="4000" value="1" required>',
+          'Metti in coda');
+        if(s.shipyardQueue?.length)html+='<p class="text-muted">Coda interna: '+esc(s.shipyardQueue.map(o=>
+          names[o.ship]+' x'+o.remaining).join(', '))+'</p>';
         html+=form('assign',hidden+
           '<label>Sposta navi fra ruoli</label><select class="form-control" name="ship">'+shipOpts+'</select>'+
           '<select class="form-control" name="from">'+options([['reserve','Riserva'],['escort','Scorta'],['invasion','Invasione']])+'</select>'+
