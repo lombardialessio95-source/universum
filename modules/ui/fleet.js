@@ -260,6 +260,13 @@
       </div>
     `;
 
+    if (st.isMultiplayerMode && uni.supremaOptionCStaging) {
+      viewport.insertAdjacentHTML('afterbegin', '<div class="glass-panel" style="padding:12px;margin-bottom:12px;">'+
+        '<strong>Nave Madre Suprema online — Fortezza Volante</strong><p class="text-muted">4.000 slot per nave, un attacco per missione.</p>'+
+        '<button type="button" class="btn btn-blue btn-sm" id="btn-online-suprema">GESTISCI SUPREME</button></div>');
+      viewport.querySelector('#btn-online-suprema')?.addEventListener('click', () => window.UniversumOptionC?.open());
+    }
+
     viewport.querySelectorAll('.mother-hangar-select').forEach(box => box.addEventListener('change', () => {
       st.fleetHangarIds = [...viewport.querySelectorAll('.mother-hangar-select:checked')].map(n=>n.dataset.id);
       st.fleetSelection.mothership = st.fleetHangarIds.length;
