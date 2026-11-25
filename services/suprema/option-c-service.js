@@ -26,7 +26,9 @@ const paid={metal:500000,crystal:300000,deuterium:200000};
 function eligibility(planet) {
   const dock=planet?.bacinoSpaziale;
   if (dock?.status!=='active'||dock.crepuscolo||dock.galatticaConstruction||
-    dock.supremaConstruction||dock.invictusConstruction||Number(dock.invictusActive||0)>0) {
+    dock.supremaConstruction||dock.invictusConstruction||
+    (Array.isArray(dock.invictusConstructions)&&dock.invictusConstructions.length>0)||
+    Number(dock.invictusActive||0)>0) {
     fail('failed-precondition','Bacino non disponibile per costruire la Suprema.');
   }
   for (const [id,lv] of Object.entries(Engine.core.requirements)) {
