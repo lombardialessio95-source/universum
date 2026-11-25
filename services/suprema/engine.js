@@ -28,5 +28,6 @@ module.exports = Object.freeze({
   resolveCombat: window.__UniversumGalaxyModules.resolveCombat,
   calculateDistance: window.__UniversumGalaxyModules.calculateDistance,
   getFleetSpeedAndFuel: window.__UniversumGalaxyModules.getFleetSpeedAndFuel,
+  makeMoon: window.__UniversumGalaxyModules.makeMoon,
   data: window.UniversumData
 });
