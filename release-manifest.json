@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "version": "ra2710814460c988d70d6",
+  "version": "r1a0c955329e14b9a8e66",
   "workerHash": "e6113328911026127c7b936a2bc671e2eddf4a68cf7f6168b1138fb7daa1e923",
   "files": {
     "app.html": "c642cfa7e6c344cd7dafd3193868c2f0eaf97f6c6b6b86492ccf530c30dbf74d",
@@ -50,7 +50,7 @@
     "modules/online/fleet-control.js": "0019a0549d4253f97f144338c90ea8d4e3991c3176e62314b39a449dc10f6cf7",
     "modules/online/foundation.js": "4ceee7ac4455d69118352aaa462d350d8aef4fe888f05df792a4c43ff4222371",
     "modules/online/sieges.js": "6c3406dbd081fe58a3cc986267730e9b7a22f436f12882b9bf5cf4e05d5fcf19",
-    "modules/online/suprema-staging-client.js": "31a9166385be74ace00676b47889a85b89b8b16e442905f60b2d37f04cd34787",
+    "modules/online/suprema-staging-client.js": "9d5c8d7cf3bacef39ff1a32a596c4ab72b2ea6e3b3300703eb009d5de68e72a9",
     "modules/online/sync.js": "5b317cfd2a0eeeaf66e59d4b04d3daf3bc73d26cf9ede4ac3ee3de73491bf618",
     "modules/online/universes.js": "5f286f3566175f83e528e20066a2dfaa51b70d7535450d02fee7f648ab266429",
     "modules/ui/diplomacy.js": "dda2751c3677322e6a22c498d818e9ad59706372e7cdd1ed3ed2d8e4cee6690f",

@@ -37,7 +37,7 @@ async function run() {
   const initial=await recoverAtLogin(db,{...options,uid:roster[1]},()=>T);
   assert.equal(initial.applied,1);
   assert.equal(initial.nextWaveAt,T+hour);
-  assert.deepEqual(Object.keys(initial).sort(),['applied','needsMore','nextWaveAt','ships']);
+  assert.deepEqual(Object.keys(initial).sort(),['applied','needsMore','nextEventAt','nextWaveAt','ships']);
   const raced=await Promise.all(roster.map(uid=>recoverAtLogin(db,{...options,uid},()=>T+hour)));
   assert.equal(raced.reduce((n,x)=>n+x.applied,0),1);
   assert.equal((await privateDoc.collection('receipts').get()).size,2);
@@ -66,6 +66,46 @@ async function run() {
     assert.equal((await asClient(member,privateDoc.path)).status,403);
     assert.equal((await asClient(member,publicDoc.path,'{"fields":{}}')).status,403);
   }
+  const {startStagingSiege} = require('./launch');
+  const base=db.doc(path);
+  const home=base.collection('planets').doc('1_1_1');
+  const destination=base.collection('planets').doc('1_1_2');
+  const inventory=base.collection('supremaInventoryPrivate').doc('attacker');
+  const nextShip={...ship,id:'second',status:'docked',operatingFuel:14000};
+  delete nextShip.siegeId;
+  delete nextShip.returnReserve;
+  await base.set({supremaRecoveryStaging:true,militarySpeed:1000});
+  await home.set({ownerUid:'attacker',id:'home',coords:{g:1,s:1,p:1},resources:{deuterium:1000000}});
+  await destination.set({ownerUid:'defender',id:'enemy',coords:{g:1,s:1,p:2},
+    resources:{metal:1000000,crystal:0,deuterium:0},fleet:{},defenses:{}});
+  await base.collection('players').doc('attacker').set({researches:{hyperspaceDrive:3}});
+  await inventory.set({ownerUid:'attacker',ships:[nextShip]});
+  const command={uid:'attacker',universeId:'suprema-smoke',originKey:'1_1_1',targetKey:'1_1_2',
+    siegeId:'live-launch',selection:[{id:'second',whenFull:'return'}],mode:'offensiva',hours:1};
+  await assert.rejects(()=>startStagingSiege(db,{...command,uid:'outsider'},()=>T),{code:'permission-denied'});
+  const launched=await startStagingSiege(db,command,()=>T);
+  const afterLaunch=(await home.get()).data().inbox.resources.deuterium;
+  assert(afterLaunch<0);
+  assert.equal((await inventory.get()).data().ships.length,0);
+  assert.deepEqual(await startStagingSiege(db,command,()=>T+1000),launched);
+  assert.equal((await home.get()).data().inbox.resources.deuterium,afterLaunch);
+  await assert.rejects(()=>startStagingSiege(db,{...command,siegeId:'duplicate'},()=>T),{code:'failed-precondition'});
+  const live={...options,siegeId:launched.siegeId};
+  assert.equal((await recoverAtLogin(db,{...live,uid:'defender'},()=>launched.arrivalAt)).applied,1);
+  assert.equal((await destination.get()).data().inbox.resources.metal,-8000);
+  const afterWave=await recoverAtLogin(db,{...live,uid:'defender'},()=>launched.arrivalAt+hour);
+  assert.equal(afterWave.applied,1);
+  assert.equal(afterWave.nextWaveAt,null);
+  assert(afterWave.nextEventAt>launched.arrivalAt+hour);
+  assert.equal((await recoverAtLogin(db,{...live,uid:'attacker'},()=>afterWave.nextEventAt)).applied,1);
+  assert.equal((await recoverAtLogin(db,{...live,uid:'attacker'},()=>afterWave.nextEventAt)).applied,0);
+  const returned=(await inventory.get()).data().ships[0];
+  assert.equal(returned.status,'docked');
+  assert.equal(returned.id,'second');
+  assert.equal(returned.returnReserve,undefined);
+  assert.equal(returned.resources.metal,8000);
+  assert.equal((await destination.get()).data().inbox.resources.metal,-8000);
+  console.log('Emulatore Firestore: lancio, addebito, ondata sul pianeta, ritorno e replay verificati.');
   console.log('Emulatore Firestore: recupero con il solo difensore, concorrenza, due ricevute e riservatezza verificati.');
 }
 

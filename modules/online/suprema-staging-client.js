@@ -16,7 +16,8 @@
     const token = await user.getIdToken();
     const results = [];
     for (const doc of publicSieges.docs) {
-      if (!doc.data().nextWaveAt) continue;
+      const pending=doc.data().nextEventAt ?? doc.data().nextWaveAt;
+      if (!pending) continue;
       let result;
       do {
         if (auth.currentUser?.uid!==user.uid || window.UniversumUI?.state?.currentUniverse!==universe) return results;

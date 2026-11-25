@@ -13,3 +13,9 @@ Il client esegue una query per gli assedi del partecipante al join di un univers
 ## Ambito della candidata
 
 Il recupero collaudato risolve ondate su istantanee di prova create da un contesto amministrativo. È assente il collegamento al lancio multiplayer e ai documenti canonici di pianeti, flotte, hangar e inventari. Restano aperti il ritorno dopo la fine dell'assedio, controffensive, intercettazioni, spionaggio, compatibilità con le mutazioni ordinarie e la prova end-to-end del callable con browser reali. Il repository contiene il codice e le regole candidate. Non è stato eseguito un deploy su Firebase.
+
+## Aggiornamento del collaudo di lancio e rientro
+
+Sono stati aggiunti il lancio privilegiato con idempotenza per ID, il trasferimento dall’inventario privato alla flotta in viaggio e l’addebito di andata e ritorno protetto nell’inbox canonica della colonia. Il test rilegge il pianeta assediato prima dell’ondata e verifica il delta di bottino nel suo documento. Il rientro restituisce la nave all’inventario, consuma la riserva di viaggio e ha una ricevuta distinta. Rilancio della stessa richiesta e replay del rientro lasciano invariati navi e saldo. L’esito è stato verificato con Firestore Emulator.
+
+Ambito restante per il multiplayer reale: produzione del difensore a ogni scadenza, ordinamento con tutti i comandi ordinari, costruzione e carico online, intercettazioni e controffensive, destinazioni di rientro alternative, interfaccia di lancio e deploy con due account. La sequenza esercitata si svolge in un universo di prova con inventario iniziale predisposto, colonia originaria disponibile e guarnigione senza altri arrivi.
