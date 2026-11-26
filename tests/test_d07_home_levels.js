@@ -9,7 +9,12 @@ const root=path.resolve(__dirname,'..');
 const offline=fs.readFileSync(path.join(root,'modules/offline/storage.js'),'utf8');
 const online=fs.readFileSync(path.join(root,'modules/online/universes.js'),'utf8');
 let checks=0;
-function eq(actual,expected,label){assert.deepEqual(actual,expected,label);checks++;}
+// Normalizza gli oggetti VM nello stesso realm senza eliminare proprietà o
+// cambiare i valori: deepStrictEqual continua a controllare tutta la struttura.
+function eq(actual,expected,label){
+  assert.deepStrictEqual(structuredClone(actual),structuredClone(expected),label);
+  checks++;
+}
 function ok(value,label){assert.ok(value,label);checks++;}
 const offlineBuildingsMatch=offline.match(/buildings:\s*\{([\s\S]*?)\}\s*,\s*defenses:\s*\{\}/);
 ok(offlineBuildingsMatch,'edifici del pianeta madre offline individuati');
