@@ -1,6 +1,6 @@
 # UNIVERSUM — STATO DEL PROGETTO E PASSAGGIO DI CONSEGNE
 
-**Revisione:** 1.2 — 26 novembre 2026  
+**Revisione:** 1.3 — 26 novembre 2026  
 **Tipo:** documento di continuità per ChatGPT, Codex e il proprietario del progetto  
 **Repository:** https://github.com/lombardialessio95-source/universum  
 **Riferimento verificato:** branch `main`, commit `67f71b7f2662ad2c345b0e3e8f2ba4ab4202c099` (25 novembre 2026, 21:24 UTC)  
@@ -195,7 +195,7 @@ Questa sezione prevale sui riferimenti storici incompatibili delle sezioni prece
 | TEST-FIX-01 confronto VM rigoroso | Integrato | 8847c1350d254ced4415b9443caf1b9608373edf |
 | D26 edifici colonie online zero | Integrato | b0eecb037b6049c4f76fac9e66668bdc77d050ba |
 | AT02-I01 chiusura forzata senza accredito | Integrato | 8c13541b33ebd1b5d7b98c9dfa02267100f28ff4 |
-| AT21 chiusura missioni dopo errore | Aperto, verificare sovrapposizione AT02 | — |
+| AT21 chiusura missioni dopo errore | Candidata approvata, attende integrazione | ca38720f144993a805f84790e15519b7340525cc |
 | AT05 atomicità partenze | Aperto | — |
 | AT03/AT04 validazione creazione/modifica flotte | Aperti | — |
 
@@ -219,3 +219,7 @@ Revocati assedi persistenti, invasioni, ondate, supporto/controffensiva orbitale
 Slot: sonda 1, caccia leggero 1, cargo leggero 2, caccia pesante 3, cargo pesante 5, incrociatore 8, riciclatrice 10, colonizzatrice 16, nave battaglia 18, incrociatore battaglia 20, bombardiere 22, Forgia di Efesto 25, Oracolo di Prometeo 25, Morte Nera 1000. Esclusi Madre normale, Suprema, satellite solare, Invictus, Crepuscolo. Verificare catalogo completo. Caricamento/scaricamento su pianeti amici atomico, identità individuale e nessuna duplicazione. Riutilizzare missioni ordinarie Madre normale, carico non combattente salvo regola esistente verificata; Morte Nera imbarcata non attiva distruzione luna.
 S00 revisione parziale: engine/suprema.js attuale 600 slot, tre ruoli e cantiere; galaxy/hangars.js Madre normale 50 caccia, incursione esclusiva Madre normale; fleet-dispatch.js manifest Madre normale; vecchi servizi staging separati. Costruzione largamente riutilizzabile. Da decidere con proprietario: Incursione esclusa o solo caccia leggeri; migrazione risorse/carburante e unità pagate, rientro sicuro missioni esistenti. Non cancellare beni o salvataggi. Nessuna implementazione Suprema autorizzata ora.
 Micropassi proposti S01 migrazione, S02 disattivazione missioni, S03 cantiere, S04 depositi/carburante, S05 inventario, S06 slot, S07/S08 carico/scarico offline, S09/S10 online, S11 partenze, S12 arrivi, S13 rientri, S14 perdite, S15 missioni, S16 UI, S17 dismissione codice esclusivo, S18 parità finale. Rivedere ordine per mantenere ogni candidata funzionante; non eliminare meccaniche condivise di embargo/riscatto. Priorità attuale AT21, non Suprema.
+
+
+### Aggiornamento AT21-I01 — 26 novembre 2026
+Main verificato 8c13541b33ebd1b5d7b98c9dfa02267100f28ff4. Candidata ca38720f144993a805f84790e15519b7340525cc, PR #7 in bozza, un solo commit, backup pre-AT21-I01-2026-11-26 verificato sul main. Diff verificato: in modules/online/combat-resolver.js rimosso il cleanup automatico nel catch generico per missioni scadute oltre 60 secondi; recupero esplicito AT02 invariato. Test AT21 quattro scenari, Firestore simulato, Actions 45894409372 verde, manifest/SW verificati; nessun collaudo Firebase reale. Checkout completo locale indisponibile per script Python pre-push. Rules e workflow invariati. Candidata approvata, non integrata. Prossimo AT21-I02: fast-forward da main verificato, verifica Actions e Pages, poi AT05. Eventuali errori persistenti possono lasciare missioni aperte e richiedono diagnosi, non chiusura automatica. Direttiva Firebase ribadita: avvertire il proprietario prima di qualsiasi modifica Rules, fornire regole complete e ordine di pubblicazione manuale; niente deploy automatico.
