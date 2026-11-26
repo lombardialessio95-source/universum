@@ -1,6 +1,6 @@
 # UNIVERSUM — STATO DEL PROGETTO E PASSAGGIO DI CONSEGNE
 
-**Revisione:** 1.6 — 26 novembre 2026  
+**Revisione:** 1.7 — 26 novembre 2026  
 **Tipo:** documento di continuità per ChatGPT, Codex e il proprietario del progetto  
 **Repository:** https://github.com/lombardialessio95-source/universum  
 **Riferimento verificato:** branch `main`, commit `67f71b7f2662ad2c345b0e3e8f2ba4ab4202c099` (25 novembre 2026, 21:24 UTC)  
@@ -196,7 +196,7 @@ Questa sezione prevale sui riferimenti storici incompatibili delle sezioni prece
 | D26 edifici colonie online zero | Integrato | b0eecb037b6049c4f76fac9e66668bdc77d050ba |
 | AT02-I01 chiusura forzata senza accredito | Integrato | 8c13541b33ebd1b5d7b98c9dfa02267100f28ff4 |
 | AT21 chiusura missioni dopo errore | Integrato | ca38720f144993a805f84790e15519b7340525cc |
-| AT05 atomicità partenze | Diagnosi avviata, implementazione e collaudi incompleti | — |
+| AT05 atomicità partenze | Diagnosi approvata, implementazione A–E autorizzata | — |
 | AT03/AT04 validazione creazione/modifica flotte | Aperti | — |
 
 AT02: diff in modules/online/fleet-control.js, impedisce chiusura se manca destinazione valida o se transazione fallisce; verifica proprietà del pianeta in transazione; elimina fallback di chiusura autonoma. Cinque scenari dichiarati superati con Firestore simulato, pipeline verde verificata; non collaudato Firebase reale. AT02-I02: integrazione confermata dal controllo HEAD main. Actions candidata verde; pipeline post-merge e Pages non verificate indipendentemente in questo controllo. Prossimo incarico AT21-I01: prima riproduzione e verifica sovrapposizioni con AT02, senza correzioni ridondanti.
@@ -235,3 +235,7 @@ Main verificato: ca38720f144993a805f84790e15519b7340525cc. Ordinaria riferisce v
 
 ### Aggiornamento AT05-R01 — analisi statica Rules
 Main verificato: ca38720f144993a805f84790e15519b7340525cc. Ordinaria riferisce compatibilità statica di validHumanFleetCreate, validOwnerCheckpoint, aggiornamento pianeta proprietario, revisione giocatore e creazione flotta nella stessa transazione; getAfter già previsto; timestamp e percorsi speciali invariati. Nessuna modifica alle Rules del repository individuata nell'analisi riferita. Non verificati indipendentemente tutti i risultati statici, Rules pubblicate, limiti letture Rules o emulatore. Rapporto parziale: manca esito test riproduzione e proposta tecnica precisa per dispatch; richiedere completamento AT05-R01 prima di autorizzare implementazione. Nessuna candidata approvata, nessun deploy. Avvertire proprietario se emergono modifiche Rules.
+
+
+### AT05-R01 — diagnosi conclusa, 26 novembre 2026
+Main e backup/AT05-I01-ca38720 verificati entrambi a ca38720f144993a805f84790e15519b7340525cc. Riproduzione riferita con mock: 10 caccia, M/C/D 1000 ciascuno, partenza 3 caccia, M100 C50 D20 + carburante40. Creazione fallita lascia 7 caccia, 900/950/940 e zero flotte; retry lascia 4 caccia, 800/900/880 e una flotta. Sync fallita lascia addebito locale ma database invariato. CONTROLLO ha verificato staticamente i punti dispatch in sync.js, non rieseguito il test. Autorizzato AT05-I02 su candidata: A rimuovere addebito e sync anticipati; B usare dispatch anche per ordinarie con flag interno ordinary, costo identico incl. buco nero; C escludere ordinary dall'attivazione autonoma checkCapacity, mantenendo trigger code/speciali; D escludere ordinary dalla validazione destinazione propria riservata ai percorsi speciali; E non aggiungere ordinary a specialistFlights, preservando registro e controlli esistenti. Nessuna modifica schema o formule. Test atomici, retry transazione, destinazioni valide e regressioni speciali; separare collaudo risposta persa dopo commit e concorrenza client se non risolti, non dichiarare AT05 completo né integrare prima di approvazione. Rules repository compatibili secondo analisi Ordinaria; Rules pubblicate non verificate, emulatore e limiti letture ancora aperti. Client legacy rischio separato. Nessun deploy Firebase. Prossimo AT05-I02, poi collaudo residuo se necessario. AT03/AT04 e Suprema invariati.
