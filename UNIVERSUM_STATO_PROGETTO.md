@@ -1,10 +1,10 @@
 # UNIVERSUM — STATO DEL PROGETTO E PASSAGGIO DI CONSEGNE
 
-**Revisione:** 1.0 — 26 novembre 2026  
+**Revisione:** 1.1 — 26 novembre 2026  
 **Tipo:** documento di continuità per ChatGPT, Codex e il proprietario del progetto  
 **Repository:** https://github.com/lombardialessio95-source/universum  
 **Riferimento verificato:** branch `main`, commit `67f71b7f2662ad2c345b0e3e8f2ba4ab4202c099` (25 novembre 2026, 21:24 UTC)  
-**Stato del documento:** proposta di documentazione; i dati tecnici devono essere riverificati prima di ogni nuovo incarico.
+**Stato del documento:** registro permanente CONTROLLO autorizzato dal proprietario; sezione 11 aggiornata, sezioni precedenti conservate come storico. I dati tecnici devono essere riverificati.
 
 > **IMPORTANTE:** questo documento è una fotografia del progetto al 26/11/2026, non la prova che tutte le funzioni descritte siano complete o collaudate. Ogni nuova sessione deve controllare per prima cosa l'HEAD di `main` e le PR aperte. Le decisioni del proprietario non sono modificabili autonomamente da una chat.
 
@@ -175,3 +175,47 @@ Quando questa conversazione diventa troppo lunga:
 - Decisioni esplicite del proprietario raccolte nelle conversazioni del progetto fino al 26 novembre 2026.
 
 **Regola finale:** non dichiarare alcuna modifica conclusa se non è stata verificata. In caso di dubbi, indicare «da verificare» e preservare il gioco funzionante.
+
+
+---
+
+## 11. Registro operativo permanente — aggiornamento 26 novembre 2026
+
+Questa sezione prevale sui riferimenti storici incompatibili delle sezioni precedenti. Il ramo documentale dedicato è la memoria di CONTROLLO; non è il ramo di gioco. Consultarlo direttamente anche se la PR #3 resta in bozza. Non spostare main per aggiornamenti documentali durante una candidata in corso.
+
+**Main verificato:** `b0eecb037b6049c4f76fac9e66668bdc77d050ba` (D26).
+**Candidata approvata, NON ancora integrata:** AT02-I01, `8c13541b33ebd1b5d7b98c9dfa02267100f28ff4`, PR #6, Actions 45890267403 verde. Backup `backup/pre-AT02-I01-2026-11-26` verificato sul main D26.
+
+| Micropasso | Stato | SHA / evidenza |
+|---|---|---|
+| D05-D06-I01 | Integrato, residui aperti | 7e33137e40b56d06d82402eaccb6afeb23edec42 |
+| D07 pianeta madre online, 14 edifici zero | Integrato | 9fc3ee5df79ef12f1f3cdcff5e2d3862a800cde1 |
+| D25 risorse colonia 1000/1000/500 + carico | Integrato | 1012b2d6b59b951feb2755706bf0447166d8b79e |
+| RELEASE-FIX-01 manifest/SW | Integrato | 51200529c2ef07b5df39936549bb265ac2cb17f8 |
+| TEST-FIX-01 confronto VM rigoroso | Integrato | 8847c1350d254ced4415b9443caf1b9608373edf |
+| D26 edifici colonie online zero | Integrato | b0eecb037b6049c4f76fac9e66668bdc77d050ba |
+| AT02-I01 chiusura forzata senza accredito | Approvato, attende integrazione | 8c13541b33ebd1b5d7b98c9dfa02267100f28ff4 |
+| AT21 chiusura missioni dopo errore | Aperto, verificare sovrapposizione AT02 | — |
+| AT05 atomicità partenze | Aperto | — |
+| AT03/AT04 validazione creazione/modifica flotte | Aperti | — |
+
+AT02: diff in modules/online/fleet-control.js, impedisce chiusura se manca destinazione valida o se transazione fallisce; verifica proprietà del pianeta in transazione; elimina fallback di chiusura autonoma. Cinque scenari dichiarati superati con Firestore simulato, pipeline verde verificata; non collaudato Firebase reale. Prossimo incarico: AT02-I02, integrazione da parte di Ordinaria dopo verifica main e candidata, poi Actions e Pages. Successivamente AT21, prima riproduzione e verifica di sovrapposizioni.
+
+Backup storici: 67f71b7f2662ad2c345b0e3e8f2ba4ab4202c099 (pre D05/D06); backup/pre-ripresa-d05-d06-2026-11-26; backup/pre-D07-I01-2026-11-26; backup/pre-D25-I01-2026-11-26; backup/pre-RELEASE-FIX-01-2026-11-26; backup/pre-TEST-FIX-01-2026-11-26; backup/pre-D26-R01-2026-11-26. D05/D06 residui: distruzione orbitale tra imperi, concorrenza riscatto/liberazione/carburante embargo, recupero client legacy. Rules pubblicate manualmente secondo rapporto del reparto, non verificate direttamente in console.
+
+### Piano e regole permanenti
+
+I 31 macro-punti e le cinque fasi originali restano immutati; si aggiornano stati e micropassi, non si rinumerano. Fase 0 e 1 parzialmente svolte; Fase 2 in corso (economia iniziale 2.2: D07/D25/D26; flotte 2.4: D05/D06 e AT02); Fasi 3 e 4 non concluse. Nessuna percentuale certificata. La numerazione integrale dei 31 punti va recuperata dal piano originale di passaggio consegne, non ricostruita a memoria. Audit originali: UNIVERSUM_formule_e_divergenze_AUDIT_26-11-2026.xlsx e UNIVERSUM_Report_Collegamenti_2026-11-26.docx. Consultare prima di assegnare nuovi ID.
+
+Ordinaria è reparto principale; Profonda riserva per problemi non ragionevolmente scomponibili. CONTROLLO analizza, prepara prompt, verifica e aggiorna questo ramo documentale; non modifica gameplay. Formule, Divergenze, Tecnico, Collegamenti, Salvataggi e Idee conservano i rispettivi compiti. Un micropasso alla volta, test proporzionati al rischio (ambiente pubblico di test), backup/ZIP/report/SHA, niente modifiche estranee o deploy Firebase automatico. Rules solo pubblicazione manuale del proprietario, se necessaria.
+
+Protocollo di pubblicazione: verificare main, backup, ramo separato, modifiche minime, rigenerare manifest e SW con python3 tools/build_release.py PRIMA del push, test locali se disponibili, evitare push intermedi incompleti, CI candidata verde, approvazione CONTROLLO, integrazione, CI main e Pages. Dichiarare se test locali indisponibili. Non disabilitare test, notifiche o modificare workflow autonomamente; segnalare eventuali pubblicazioni Pages premature. Aggiornare questo documento dopo ogni rapporto rilevante distinguendo candidata e integrazione.
+
+**Direttiva proprietario:** al punto formule di velocità flotte usare formule originali OGame (verificare fonte/versione, bonus propulsione, nave più lenta, durata e parità online/offline). Non cambiare automaticamente consumo carburante. **STOP obbligatorio prima delle migliorie grafiche:** avvertire il proprietario e raccogliere modifiche grafiche obbligatorie prima di assegnare incarichi.
+
+### Nuova Suprema (decisione progettuale del proprietario, sostituisce il vecchio punto 2.8)
+
+Revocati assedi persistenti, invasioni, ondate, supporto/controffensiva orbitale speciale, cattura, cantiere interno, depositi e carburante operativo dedicati. Non riprendere PR #1 di vecchio staging come implementazione attiva; preservare storia/backup. Suprema diventa supertrasporto con inventario unico, 4000 slot, max 4 Morti Nere (1000 slot ciascuna), max 3 Supreme per impero. Attacco 350000, scudi 50000, integrità 9000000, velocità 125, propulsore iperspaziale, consumo base 50000 D. Costruzione Bacino idoneo, 40 giorni/rate, 20M M/12M C/8M D, requisiti locali invariati.
+Slot: sonda 1, caccia leggero 1, cargo leggero 2, caccia pesante 3, cargo pesante 5, incrociatore 8, riciclatrice 10, colonizzatrice 16, nave battaglia 18, incrociatore battaglia 20, bombardiere 22, Forgia di Efesto 25, Oracolo di Prometeo 25, Morte Nera 1000. Esclusi Madre normale, Suprema, satellite solare, Invictus, Crepuscolo. Verificare catalogo completo. Caricamento/scaricamento su pianeti amici atomico, identità individuale e nessuna duplicazione. Riutilizzare missioni ordinarie Madre normale, carico non combattente salvo regola esistente verificata; Morte Nera imbarcata non attiva distruzione luna.
+S00 revisione parziale: engine/suprema.js attuale 600 slot, tre ruoli e cantiere; galaxy/hangars.js Madre normale 50 caccia, incursione esclusiva Madre normale; fleet-dispatch.js manifest Madre normale; vecchi servizi staging separati. Costruzione largamente riutilizzabile. Da decidere con proprietario: Incursione esclusa o solo caccia leggeri; migrazione risorse/carburante e unità pagate, rientro sicuro missioni esistenti. Non cancellare beni o salvataggi. Nessuna implementazione Suprema autorizzata ora.
+Micropassi proposti S01 migrazione, S02 disattivazione missioni, S03 cantiere, S04 depositi/carburante, S05 inventario, S06 slot, S07/S08 carico/scarico offline, S09/S10 online, S11 partenze, S12 arrivi, S13 rientri, S14 perdite, S15 missioni, S16 UI, S17 dismissione codice esclusivo, S18 parità finale. Rivedere ordine per mantenere ogni candidata funzionante; non eliminare meccaniche condivise di embargo/riscatto. Priorità attuale AT02, non Suprema.
