@@ -352,6 +352,10 @@
       remaining[shipId] = qty - Math.floor(qty / 2);
     }
     const now = Date.now();
+    const survivingHangars = window.UniversumHangars && galattica.orbitingFleet?.mothership
+      ? window.UniversumHangars.normalizePlanet({id:galattica.id,fleet:galattica.orbitingFleet,
+        mothershipHangars:galattica.mothershipHangars}).slice(0,remaining.mothership || 0) : [];
+    galattica.mothershipHangars = originSlot.ownerType === 'bot' ? survivingHangars : [];
     if (originSlot.ownerType === 'bot') {
       galattica.orbitingFleet = remaining;
     } else {
@@ -366,7 +370,7 @@
         const stats = getFleetSpeedAndFuel(universe, remaining, nearestDist);
         if (!Array.isArray(universe.fleetsInFlight)) universe.fleetsInFlight = [];
         universe.fleetsInFlight.push({
-          id: 'flt_galreturn_' + now, mission: 'deploy', status: 'returning',
+          id: 'flt_galreturn_' + galattica.id + '_' + now, carrierHangars:survivingHangars, mission: 'deploy', status: 'returning',
           originPlanetId: nearest.id, originCoords: Object.assign({}, galattica.coords),
           targetCoords: Object.assign({}, nearest.coords), fleet: Object.assign({}, remaining), ships: Object.assign({}, remaining),
           cargo: { metal: 0, crystal: 0, deuterium: 0 }, departureTime: now,

@@ -493,6 +493,8 @@
       creativeMode: false,
       planets: myPlanets,
       activePlanetId: myPlanets[0]?.id,
+      crepuscoloLimbo: playerState.crepuscoloLimbo || null,
+      galaxyDeltas:playerState.orbitalDeltas || {},
       researches: playerState.researches || {},
       researchQueue: playerState.researchQueue || null,
       fleetsInFlight,
@@ -500,6 +502,7 @@
       spyReports: [],
       messages
     };
+    await G.restoreGalattiche(output,user.uid);
     Object.defineProperty(output,'roomPasscode',{value:passcode});
     window.UniversumEngine?.normalizeResearchState(output);
     if (playerSnap.exists) G.restoreServices(output,myPlanets,playerState);

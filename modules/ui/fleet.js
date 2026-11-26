@@ -169,10 +169,12 @@
               <option value="deploy" ${st.fleetMission === 'deploy' ? 'selected' : ''}>Schiera Flotta su Tuo Pianeta</option>
               <option value="explore" ${st.fleetMission === 'explore' ? 'selected' : ''}>Esplora Spazio Profondo (Pos. 16)</option>
               <option value="recycle" ${st.fleetMission === 'recycle' ? 'selected' : ''}>Ricicla Campo Detriti</option>
+              ${st.isMultiplayerMode ? `<option value="destroyGalattica" ${st.fleetMission === 'destroyGalattica' ? 'selected' : ''}>Distruggi Galattica (Morte Nera)</option>` : ''}
               <option value="destroyMoon" ${st.fleetMission === 'destroyMoon' ? 'selected' : ''}>Distruggi Luna/Bacino (Morte Nera)</option>
             </select>
           </div>
 
+          ${st.isMultiplayerMode && st.fleetMission === 'destroyGalattica' ? '<label>Galattica bersaglio <select id="gal-target" class="form-control"><option value="">Seleziona nome e proprietario</option></select></label><button type="button" id="gal-target-load" class="btn btn-blue">Cerca alle coordinate</button>' : ''}
           <div id="explore-options-box" class="${st.fleetMission === 'explore' ? '' : 'hidden'}" style="background:rgba(0,210,255,0.08); border:1px solid rgba(0,210,255,0.25); padding:10px; border-radius:8px; margin-bottom:12px;">
             <div class="form-group" style="margin-bottom:8px;">
               <label>Durata Stazionamento Esplorativo (Max ${maxExpHours}h con Esplorazione Profonda Lv.${Number(uni.researches?.expeditionTech || 0)})</label>
@@ -405,11 +407,21 @@
       });
     });
 
+    viewport.querySelector('#gal-target-load')?.addEventListener('click', async () => {
+      syncTarget();
+      const select = viewport.querySelector('#gal-target');
+      try {
+        const targets = await window.__UniversumMPModules.listGalatticaTargets(uni.id, { ...st.fleetTarget });
+        select.replaceChildren(new Option(targets.length ? 'Seleziona nome e proprietario' : 'Nessuna Galattica nemica', ''));
+        for (const target of targets) select.add(new Option(target.name + ' — ' + target.owner, target.id));
+      } catch (error) { UI.toast(error.message, 'error'); }
+    });
     document.getElementById('btn-launch-fleet')?.addEventListener('click', async () => {
       syncTarget();
       try {
         let missionObj;
         const opts = {
+          targetGalatticaId: viewport.querySelector('#gal-target')?.value,
           blackHole: st.fleetBlackHole,
           fuelPercent: st.fleetFuelPercent,
           exploreHours: st.fleetExploreHours,

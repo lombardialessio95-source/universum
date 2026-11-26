@@ -47,6 +47,16 @@
   }
 
 
+  function deployOrdinaryShips(inventory, ships) {
+    const returning = {};
+    for (const [id, qty] of Object.entries(ships)) {
+      if (!(qty > 0)) continue;
+      if (id === 'invictus' || id === 'crepuscolo') returning[id] = qty;
+      else inventory[id] = (inventory[id] || 0) + qty;
+    }
+    return returning;
+  }
+
   function handleMissionArrival(universe, flt, now = Date.now()) {
     const key = coordKey(flt.targetCoords.g, flt.targetCoords.s, flt.targetCoords.p);
     if (!universe.galaxyDeltas) universe.galaxyDeltas = {};
@@ -183,10 +193,14 @@
 
         if (flt.mission === 'deploy') {
           if (flt.carrierHangars?.length) window.UniversumHangars.restore(destPlanet,flt.carrierHangars);
-          for (const [id, qty] of Object.entries(flt.fleet)) {
-            destPlanet.fleet[id] = (destPlanet.fleet[id] || 0) + qty;
-          }
+          const returning = deployOrdinaryShips(destPlanet.fleet,flt.fleet);
+          flt.carrierHangars=[];
           window.UniversumServices?.settlePlanet(universe,destPlanet,now);
+          if (Object.keys(returning).length) {
+            flt.ships={...returning}; flt.fleet=returning; flt.status='returning';
+            addMessage(universe,'fleet','Schieramento completato','Carico e unità ordinarie consegnati. Le unità speciali rientrano al Bacino.');
+            return;
+          }
           addMessage(universe, 'fleet', `Flotta Schierata su ${destPlanet.name}`, 'Navi e risorse trasferite con successo.');
           return 'remove';
         }
@@ -613,6 +627,6 @@
     }
   }
 
-  Object.assign(G, { formatUnitList, formatCombatDetails, addMessage, handleMissionArrival });
+  Object.assign(G, { deployOrdinaryShips, formatUnitList, formatCombatDetails, addMessage, handleMissionArrival });
 
 })();

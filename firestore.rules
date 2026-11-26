@@ -62,11 +62,11 @@ service cloud.firestore {
     // Include 'schemaVersion' perché migrateOnlineFleets aggiorna lo schema.
     function fleetFieldsForUpdate() {
       return ['status', 'phase', 'resolved', 'completedAt',
-        'ships', 'fleet', 'cargo',
+        'ships', 'fleet', 'cargo', 'galatticaReturn', 'galReturnCoords', 'fallbackPlanetKey',
         'arrivalTime', 'returnTime',
         'siegeDeuterium', 'lastSiegeTickAt', 'siegeStartedAt',
         'pendingRansom', 'repaired', 'repairReason',
-        'mission', 'schemaVersion', 'departureTime', 'carrierHangars',
+        'mission', 'schemaVersion', 'departureTime', 'carrierHangars', 'crepuscoloDamaged',
         // Solo per correggere i due orari al timestamp di partenza Firebase.
         'zoneArrivalTime', 'explorationEndTime'];
     }
@@ -143,8 +143,16 @@ service cloud.firestore {
         && request.resource.data.arrivalTime > request.resource.data.departureTime
         && request.resource.data.arrivalTime > request.time.toMillis()
         && request.resource.data.originKey is string
-        && exists(/databases/$(database)/documents/online_universes/$(uniId)/planets/$(request.resource.data.originKey))
-        && get(/databases/$(database)/documents/online_universes/$(uniId)/planets/$(request.resource.data.originKey)).data.ownerUid == request.auth.uid;
+        && (('originGalatticaKey' in request.resource.data)
+          ? (request.resource.data.originGalatticaKey == request.auth.uid + '~' + request.resource.data.originGalatticaId
+            && !getAfter(/databases/$(database)/documents/online_universes/$(uniId)/galattiche/$(request.resource.data.originGalatticaKey)).data.destroyed
+            && (getAfter(/databases/$(database)/documents/online_universes/$(uniId)/galattiche/$(request.resource.data.originGalatticaKey)).data.coordKey == request.resource.data.originKey
+              || (request.resource.data.mission == 'deploy' && request.resource.data.defenderUid == request.auth.uid
+                && get(/databases/$(database)/documents/online_universes/$(uniId)/galattiche/$(request.resource.data.originGalatticaKey)).data.coordKey == request.resource.data.originKey
+                && get(/databases/$(database)/documents/online_universes/$(uniId)/planets/$(request.resource.data.targetKey)).data.ownerUid == request.auth.uid))
+            && getAfter(/databases/$(database)/documents/online_universes/$(uniId)/galattiche/$(request.resource.data.originGalatticaKey)).data.ownerUid == request.auth.uid)
+          : (exists(/databases/$(database)/documents/online_universes/$(uniId)/planets/$(request.resource.data.originKey))
+        && get(/databases/$(database)/documents/online_universes/$(uniId)/planets/$(request.resource.data.originKey)).data.ownerUid == request.auth.uid));
     }
 
     function validNpcRaidCreate(uniId, fleetId) {
@@ -235,6 +243,8 @@ service cloud.firestore {
             (resource.data.ownerUid == request.auth.uid && validOwnerCheckpoint(uniId))
             || (resource.data.ownerUid != request.auth.uid
               && request.resource.data.diff(resource.data).affectedKeys().hasOnly(planetFieldsForOthers())
+              && (request.resource.data.get('inbox', {}).get('dockReturns', {}) == resource.data.get('inbox', {}).get('dockReturns', {})
+                || (request.resource.data.ownerUid == request.auth.uid && hasArrivalEvidence(uniId, planetId)))
               // Hangar del giocatore sono modificabili solo dal proprietario:
               // i combattimenti esterni registrano gli ID persi nell'inbox.
               && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['mothershipHangars'])
@@ -264,6 +274,45 @@ service cloud.firestore {
         allow read, write: if false;
       }
 
+      function validGalStrike(galId) {
+        let path=/databases/$(database)/documents/online_universes/$(uniId)/fleets/$(request.resource.data.destroyedBy);
+        let f=get(path).data;
+        return signedIn() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['destroyed','destroyedBy'])
+          && request.resource.data.destroyed && !resource.data.destroyed && f.defenderUid == resource.data.ownerUid
+          && f.attackerUid != f.defenderUid && request.auth.uid in [f.attackerUid,f.defenderUid]
+          && f.targetGalatticaId == galId && f.targetKey == resource.data.coordKey
+          && f.mission == 'destroyMoon' && f.status == 'outbound' && !f.resolved && f.ships.deathStar > 0
+          && f.arrivalTime <= request.time.toMillis() && getAfter(path).data.status == 'returning';
+      }
+      match /galatticheMap/{galId} {
+        function validMarker() {
+          let g=getAfter(/databases/$(database)/documents/online_universes/$(uniId)/galattiche/$(galId)).data;
+          let d=request.resource.data;
+          return signedIn() && g.ownerUid == request.auth.uid && d.ownerUid == g.ownerUid
+            && d.keys().hasOnly(['ownerUid','ownerName','name','coordKey','systemKey','defenses','destroyed'])
+            && d.coordKey == g.coordKey && d.systemKey == g.systemKey && d.destroyed == g.destroyed
+            && d.defenses == g.state.get('defenses',{});
+        }
+        allow read: if signedIn();
+        allow create, update: if validMarker();
+        allow update: if validGalStrike(galId)
+          && getAfter(/databases/$(database)/documents/online_universes/$(uniId)/galattiche/$(galId)).data.destroyed;
+      }
+      match /galattiche/{galId} {
+        allow get: if signedIn() && (resource == null || resource.data.ownerUid == request.auth.uid);
+        allow list: if signedIn() && resource.data.ownerUid == request.auth.uid;
+        function ownGalattica() {
+          let d=request.resource.data;
+          return signedIn() && d.ownerUid == request.auth.uid && galId == d.ownerUid+'~'+d.state.id
+            && d.coordKey == string(d.state.coords.g)+'_'+string(d.state.coords.s)+'_'+string(d.state.coords.p);
+        }
+        allow update: if validGalStrike(galId)
+          && getAfter(/databases/$(database)/documents/online_universes/$(uniId)/galatticheMap/$(galId)).data.destroyed;
+        allow create: if ownGalattica() && request.resource.data.version == 1;
+        allow update: if ownGalattica() && resource.data.ownerUid == request.auth.uid && !resource.data.destroyed
+          && request.resource.data.version == resource.data.version+1;
+      }
+
       match /fleets/{fleetId} {
         allow read: if signedIn();
         allow create: if signedIn()
@@ -273,6 +322,13 @@ service cloud.firestore {
         // o di riscrivere ships/cargo con valori inventati durante il volo.
         allow update: if signedIn() && fleetParty()
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(fleetFieldsForUpdate())
+          && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['crepuscoloDamaged'])
+            || (resource.data.status == 'outbound' && request.resource.data.status in ['returning','embargo','occupy']
+              && resource.data.ships.crepuscolo == 1 && request.resource.data.crepuscoloDamaged == true))
+          && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['galatticaReturn','galReturnCoords','fallbackPlanetKey'])
+            || ('originGalatticaKey' in resource.data && resource.data.attackerUid == request.auth.uid
+              && resource.data.status == 'returning' && request.resource.data.status == 'returning'
+              && resource.data.returnTime <= request.time.toMillis()))
           && validExplorationClockCorrection()
           && (
             request.resource.data.mission == resource.data.mission

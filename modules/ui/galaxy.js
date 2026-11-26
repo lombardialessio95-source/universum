@@ -119,6 +119,7 @@
                   <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
                     <strong class="font-display text-crystal">[${slot.coords.p}]</strong>
                     <strong style="font-size:1.05rem;">${escapeHTML(slot.planetName || slot.name || 'Slot Colonizzabile')}</strong>
+                    ${(slot.galattiche || []).map(gal => `<span class="text-muted"> · ${escapeHTML(gal.name)} (${escapeHTML(gal.ownerName)})</span>`).join('')}
                     ${slot.moon ? `<span class="badge badge-blue" title="${escapeHTML(slot.moon.name || 'Luna')}">${svgIcon('moon')} LUNA</span>` : ''}
                     ${slot.bacinoSpaziale ? '<span class="badge badge-creative">BACINO</span>' : ''}
                     ${slot.galattica ? `<button type="button" class="badge badge-creative btn-gal-open-viewer" data-gal-id="${escapeHTML(slot.galattica.id)}" data-gal-own="${slot.ownerType === 'player' ? '1' : '0'}" data-gal-planet-id="${escapeHTML(slot.planetId || '')}" style="cursor:pointer; border:none;">GALATTICA</button>` : ''}

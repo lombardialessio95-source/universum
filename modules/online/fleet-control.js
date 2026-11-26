@@ -48,10 +48,19 @@
     const planet = universeObj.planets[originPlanetIndex];
     if (!planet) throw new Error('Pianeta di partenza non valido.');
 
-    const normalizedMission = mission === 'explore' ? 'expedition' : mission;
+    const targeted = mission === 'destroyGalattica';
+    const normalizedMission = targeted ? 'destroyMoon' : mission === 'explore' ? 'expedition' : mission;
 
     const originKey = coordsToKey(planet.coords);
     const uniRef = db.collection('online_universes').doc(universeObj.id);
+    let selected = null;
+    if (targeted) {
+      if (!options.targetGalatticaId || !Number(shipsSelected?.deathStar)) throw new Error('Seleziona una Galattica e una Morte Nera.');
+      selected = await G.galatticaMarkers(universeObj.id).doc(options.targetGalatticaId).get();
+      if (!selected.exists || selected.data().ownerUid === user.uid || !G.atGalatticaTarget(selected, {
+        targetGalatticaId: selected.id, targetKey: coordsToKey(targetCoords), defenderUid: selected.data().ownerUid
+      })) throw new Error('Galattica non più disponibile alle coordinate.');
+    }
     const freshOriginSnap = await uniRef.collection('planets').doc(originKey).get();
     if (freshOriginSnap.exists) {
       const freshOrigin = freshOriginSnap.data();
@@ -75,7 +84,9 @@
     for (const [sId, count] of Object.entries(shipsSelected || {})) {
       const qty = Math.max(0, Math.floor(Number(count) || 0));
       if (qty > 0 && sId !== 'solarSatellite') {
-        if ((planet.fleet[sId] || 0) < qty) {
+        const available=sId==='invictus' ? planet.bacinoSpaziale?.invictusActive || 0 :
+          sId==='crepuscolo' ? Number(planet.bacinoSpaziale?.crepuscolo?.status==='active') : planet.fleet[sId] || 0;
+        if (available < qty) {
           throw new Error(`Navi insufficienti (${sId}).`);
         }
         cleanShips[sId] = qty;
@@ -100,6 +111,11 @@
     const dist = window.UniversumGalaxy.calculateDistance(planet.coords, targetCoords);
     const flightStats = window.UniversumGalaxy.getFleetSpeedAndFuel(universeObj, cleanShips, dist, speedPct);
 
+    const dockDispatch=Boolean(cleanShips.invictus || cleanShips.crepuscolo);
+    if (cleanShips.invictus) {
+      if (+planet.coords.g!==+targetCoords.g) throw Error('Invictus: salto tra galassie vietato.');
+      flightStats.fuelCost+=window.UniversumGalaxy.getInvictusJumpCost(planet.coords,targetCoords,cleanShips.invictus);
+    }
     const cargoM = Math.max(0, Math.floor(Number(cargo.metal) || 0));
     const cargoC = Math.max(0, Math.floor(Number(cargo.crystal) || 0));
     const cargoD = Math.max(0, Math.floor(Number(cargo.deuterium) || 0));
@@ -125,7 +141,7 @@
       throw new Error(`Lo slot [${targetCoords.g}:${targetCoords.s}:${targetCoords.p}] è già occupato!`);
     }
 
-    if (!specialist && !carrierHangars.length) {
+    if (!targeted && !dockDispatch && !specialist && !carrierHangars.length) {
       for (const [sId, qty] of Object.entries(cleanShips)) {
         planet.fleet[sId] -= qty;
       }
@@ -136,8 +152,8 @@
       await syncPlayerState(universeObj, { force: true });
     }
 
-    const defenderUid = targetSnap.exists ? (targetSnap.data().ownerUid || null) : null;
-    if (carrierHangars.length) {
+    const defenderUid = targeted ? selected.data().ownerUid : targetSnap.exists ? (targetSnap.data().ownerUid || null) : null;
+    if (dockDispatch || carrierHangars.length) {
       const cap=Object.entries(cleanShips).reduce((s,[id,n])=>s+n*(window.UniversumData.SHIPS[id]?.cargo || 0),0);
       if (cargoM+cargoC+cargoD+flightStats.fuelCost > cap) throw Error('Stiva Nave Madre insufficiente per carico e carburante.');
     }
@@ -174,6 +190,8 @@
         espionageTech: universeObj.researches?.espionageTech || 0
       },
       defenderUid,
+      ...(targeted ? {targetGalatticaId:selected.id} : {}),
+      ...(dockDispatch ? {originPlanetId:planet.id,birthBacinoAt:planet.bacinoSpaziale.startedAt ?? null} : {}),
       originCoords: Object.assign({}, planet.coords),
       originKey,
       targetCoords: { g: Number(targetCoords.g), s: Number(targetCoords.s), p: Number(targetCoords.p) },
@@ -195,11 +213,11 @@
     };
 
     let ref;
-    if (specialist || carrierHangars.length) {
+    if (targeted || dockDispatch || specialist || carrierHangars.length) {
       ref = uniRef.collection('fleets').doc();
       await syncPlayerState(universeObj,{force:true,dispatch:{ref,doc:fleetDoc,
         carrierHangars,specialist:Boolean(specialist),
-        debit:{metal:cargoM,crystal:cargoC,deuterium:cargoD+flightStats.fuelCost}}});
+        debit:{metal:cargoM,crystal:cargoC,deuterium:cargoD+flightStats.fuelCost+blackHoleExtra}}});
     } else ref = await uniRef.collection('fleets').add(fleetDoc);
     fleetDoc.id = ref.id;
 
@@ -368,6 +386,7 @@
 
 
   async function forceCleanupOnlineFleet(uniRef, fleet, fleetRef, reason) {
+    if (fleet.targetGalatticaId || fleet.originGalatticaKey || fleet.birthBacinoAt!==undefined || fleet.carrierHangars?.length) return false;
     const db = getDB();
     const now = Date.now();
     const creditRef = await _resolveCreditRef(uniRef, fleet.attackerUid, fleet.originCoords);

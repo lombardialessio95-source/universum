@@ -21,6 +21,15 @@
 
 
 
+  G.returnCargoWithRansom = function(fleet) {
+    const cargo={...fleet.cargo};
+    if (fleet.siegeStartedAt && ['blockade','embargo'].includes(fleet.mission)) {
+      cargo.deuterium=Math.min(cargo.deuterium || 0,Math.max(0,Math.floor(fleet.siegeDeuterium || 0)));
+    }
+    for (const key of ['metal','crystal','deuterium']) cargo[key]=(cargo[key] || 0)+(fleet.pendingRansom?.[key] || 0);
+    return cargo;
+  };
+
   const _resolutionInFlight = new Map();
   // Piano B solo quando i listener falliscono: una query per account e non
   // il vecchio scan globale eseguito ogni 3 secondi.
@@ -88,7 +97,8 @@
 
     const arrivedDocs = authorizedDocs
       .map((d) => ({ doc: d, fleet: normalizeOnlineFleet(d.data(), d.id) }))
-      .filter(({ fleet }) => !fleet.resolved && (fleet.status === 'outbound' || fleet.status === 'returning') && _fleetDueTime(fleet) <= now)
+      .filter(({ fleet }) => !fleet.resolved && (fleet.status === 'outbound' || fleet.status === 'returning') && _fleetDueTime(fleet) <= now
+        && !(fleet.status==='returning' && (fleet.originGalatticaKey || fleet.originPlanetId) && fleet.attackerUid!==resolverUid))
       .sort((a, b) => _fleetDueTime(a.fleet) - _fleetDueTime(b.fleet))
       .slice(0, 10);
     if (arrivedDocs.length === 0) return;
@@ -135,21 +145,33 @@
         }
       }
       let newlyColonizedPlanet = null;
-      const creditRef = fleetNorm.status === 'returning'
+      const creditRef = fleetNorm.status === 'returning' && !fleetNorm.originGalatticaKey
         ? await _resolveCreditRef(uniRef, fleetNorm.attackerUid, fleetNorm.originCoords)
         : null;
-      let localReturning = null;
+      let localReturning = null,galCredit=null;
 
       try {
         await db.runTransaction(async (tx) => {
+          galCredit=null; localReturning=null;
           const freshFleetSnap = await tx.get(fleetRef);
           if (!freshFleetSnap.exists || freshFleetSnap.data().resolved) return;
           const fleet = normalizeOnlineFleet(freshFleetSnap.data(), fDoc.id);
+          if (fleet.status!==fleetNorm.status) return;
+          if (fleet.status==='returning' && fleet.originGalatticaKey) {
+            fleet.cargo = G.returnCargoWithRansom(fleet);
+            const eta = _fleetDueTime(fleet)>now ? _fleetDueTime(fleet) : await G.returnGalattica(tx,uniRef,fleetRef,fleet,now,speed);
+            if (typeof eta==='number') localReturning={...fleet,arrivalTime:eta};
+            else galCredit=eta;
+            return;
+          }
+          if (fleet.status==='returning' && !creditRef) throw Error('Destinazione di rientro indisponibile.');
           if ((fleet.status !== 'outbound' && fleet.status !== 'returning') || _fleetDueTime(fleet) > Date.now()) return;
 
-          const targetSnap = await tx.get(targetPlanetRef);
+          const targeted = fleet.status==='outbound' && fleet.targetGalatticaId;
+          const selected = targeted ? await tx.get(G.galatticaMarkers(uniId).doc(fleet.targetGalatticaId)) : null;
+          const targetSnap = targeted && !G.atGalatticaTarget(selected,fleet) ? {exists:false} : await tx.get(targetPlanetRef);
 
-          const targetPlanet = targetSnap.exists ? (fleet.status === 'outbound'
+          const targetPlanet = !targeted && targetSnap.exists ? (fleet.status === 'outbound'
             ? await G.combatPlanet(tx,uniRef,targetSnap,speed,Date.now()) : _effectivePlanetView(targetSnap.data(),speed)) : null;
           const targetBefore = _snapshotForDiff(targetPlanet);
           const targetWasNpc = Boolean(targetPlanet && targetPlanet.isNpc);
@@ -157,6 +179,7 @@
           let reportTitle = `Missione ${fleet.mission.toUpperCase()} [${fleet.targetKey}]`;
           let reportBody = 'Missione completata.';
           let returnShips = Object.assign({}, fleet.ships || {});
+          let crepuscoloDamaged=Boolean(fleet.crepuscoloDamaged);
           let returnHangars = Array.isArray(fleet.carrierHangars) ? fleet.carrierHangars.slice() : [];
           let returnCargo = Object.assign({ metal: 0, crystal: 0, deuterium: 0 }, fleet.cargo || {});
           let completeNow = fleet.status === 'returning';
@@ -167,13 +190,36 @@
 
           let creditEvents;
           if (fleet.status === 'returning' || fleet.mission === 'recall') {
-            if (window.UniversumServices?.ids.some(id=>fleet.ships?.[id])) {
+            if (fleet.ships?.invictus || fleet.ships?.crepuscolo || fleet.carrierHangars?.length || window.UniversumServices?.ids.some(id=>fleet.ships?.[id])) {
               const receiving = creditRef && (await tx.get(creditRef)).data();
               if (receiving?.ownerUid !== fleet.attackerUid) throw Error('Colonia di rientro non disponibile.');
               creditEvents = receiving.inbox?.serviceEvents;
             }
             reportTitle = `Flotta Richiamata Rientrata [${coordsToKey(fleet.originCoords)}]`;
             reportBody = 'Le navi sono rientrate alla base con il carico integro.';
+          } else if (targeted) {
+            if (!G.atGalatticaTarget(selected,fleet)) {
+              reportBody='La Galattica selezionata non si trova alle coordinate previste. La flotta rientra senza rimborso del carburante.';
+            } else {
+              const combat=window.UniversumGalaxy.resolveCombat(fleet.ships,fleet.attackerTech,{
+                fleet:{},defenses:selected.data().defenses || {},tech:{},resources:{metal:0,crystal:0,deuterium:0},
+                buildings:{},moon:null,bacinoSpaziale:null
+              },returnHangars.length ? {attackerTags:{mothership:returnHangars.map(h=>h.id)}} : {});
+              returnShips=combat.attackerSurvivors;
+              const alive=new Set(combat.attackerTagsAlive?.mothership || []);
+              returnHangars=returnHangars.filter(h=>alive.has(h.id));
+              if (combat.attackerCrepuscoloDamaged && returnShips.crepuscolo) crepuscoloDamaged=true;
+              const stars=returnShips.deathStar || 0;
+              if (combat.result==='attacker_win' && stars && Math.random()<1-Math.pow(0.90,stars)) {
+                const loss={destroyed:true,destroyedBy:fDoc.id};
+                tx.update(selected.ref,loss);
+                tx.update(uniRef.collection('galattiche').doc(selected.id),loss);
+                if (Math.random()<0.75 && targetSnap.exists && !targetSnap.data().moon && !targetSnap.data().bacinoSpaziale) {
+                  tx.update(targetPlanetRef,{moon:window.__UniversumGalaxyModules.makeMoon('Luna')});
+                }
+                reportBody='Galattica selezionata distrutta.';
+              } else reportBody='La Galattica selezionata ha resistito.';
+            }
           } else if (fleet.mission === 'spy' && targetPlanet) {
             const Data = window.UniversumData;
             const probes = Math.max(0, Number(fleet.ships?.espionageProbe || 0));
@@ -223,9 +269,7 @@
             reportTitle = `Consegna Risorse su ${targetPlanet.name}`;
             reportBody = `Consegnati ${fleet.cargo.metal} M, ${fleet.cargo.crystal} C, ${fleet.cargo.deuterium} D.`;
           } else if (fleet.mission === 'deploy' && targetPlanet && targetPlanet.ownerUid === fleet.attackerUid) {
-            for (const [sId, qty] of Object.entries(returnShips)) {
-              targetPlanet.fleet[sId] = (targetPlanet.fleet[sId] || 0) + qty;
-            }
+            const special=window.__UniversumGalaxyModules.deployOrdinaryShips(targetPlanet.fleet,returnShips);
             targetPlanet.resources.metal += returnCargo.metal;
             targetPlanet.resources.crystal += returnCargo.crystal;
             targetPlanet.resources.deuterium += returnCargo.deuterium;
@@ -237,12 +281,12 @@
               tx.update(targetPlanetRef,{[`inbox.hangarReturns.${fDoc.id}`]:returnHangars});
               returnHangars=[];
             }
-            returnShips = {};
+            returnShips = special;
             returnCargo = { metal: 0, crystal: 0, deuterium: 0 };
-            completeNow = true;
+            completeNow = !Object.keys(special).length;
             _writePlanetResult(tx, targetPlanetRef, targetBefore, targetPlanet, fDoc.id);
             reportTitle = `Schieramento Completato su ${targetPlanet.name}`;
-            reportBody = 'La flotta si è unita alla guarnigione locale.';
+            reportBody = completeNow ? 'La flotta si è unita alla guarnigione locale.' : 'Carico e unità ordinarie consegnati. Le speciali rientrano al Bacino.';
           } else if (fleet.mission === 'colonize') {
             if (!targetPlanet && (returnShips.colonyShip || 0) >= 1) {
               const newColony = createStarterPlanetDoc(
@@ -395,6 +439,7 @@
                 ...(defendingHangars.length ? {defenderTags:{mothership:defendingHangars.map(h=>h.id)}} : {})
               }
             );
+            if (combat.attackerCrepuscoloDamaged && combat.attackerSurvivors.crepuscolo) crepuscoloDamaged=true;
             if (defendingHangars.length) {
               const alive=new Set(combat.defenderTagsAlive?.mothership || []);
               targetPlanet.mothershipHangars=defendingHangars.filter(h=>alive.has(h.id));
@@ -551,24 +596,28 @@
 
           // Riduzione di Nave Madre per eventi non bellici: nessun hangar
           // può tornare senza il proprio vettore fisico.
-          if (returnHangars.length > Number(returnShips.mothership || 0)) {
+          if (!persistentStatus && returnHangars.length > Number(returnShips.mothership || 0)) {
             returnHangars=returnHangars.slice(0,Math.max(0,Math.floor(Number(returnShips.mothership || 0))));
           }
           if (completeNow && fleet.status === 'returning' && creditRef) {
+            const dockReturn=fleet.originPlanetId && (returnShips.invictus || returnShips.crepuscolo);
+            if (dockReturn || returnHangars.length) {
+              const receiving=await tx.get(creditRef);
+              if (!receiving.exists || receiving.data().ownerUid!==fleet.attackerUid) throw Error('Destinazione di rientro non più disponibile.');
+              if (dockReturn) {
+                tx.update(creditRef,{[`inbox.dockReturns.${fDoc.id}`]:{originPlanetId:fleet.originPlanetId,
+                  originCoords:fleet.originCoords,birthBacinoAt:fleet.birthBacinoAt ?? null,arrivedAt:now,
+                  crepuscoloDamaged:Boolean(fleet.crepuscoloDamaged),ships:{invictus:returnShips.invictus || 0,crepuscolo:returnShips.crepuscolo || 0}}});
+                delete returnShips.invictus; delete returnShips.crepuscolo;
+              }
+            }
             if (returnHangars.length) {
               if (Number(returnShips.mothership || 0)!==returnHangars.length) throw Error('Rientro Nave Madre inconsistente.');
-              const receiving=await tx.get(creditRef);
-              if (!receiving.exists || receiving.data().ownerUid!==fleet.attackerUid) throw Error('Pianeta d’origine non più disponibile.');
-              if (receiving.data().inbox?.hangarReturns?.[fDoc.id]) throw Error('Rientro Nave Madre duplicato.');
               tx.update(creditRef,{[`inbox.hangarReturns.${fDoc.id}`]:returnHangars});
             }
-            const ransomBack = fleet.pendingRansom || {};
+            const delivery = G.returnCargoWithRansom({...fleet,cargo:returnCargo});
             _inboxCredit(tx, creditRef, {
-              resources: {
-                metal: (returnCargo.metal || 0) + (ransomBack.metal || 0),
-                crystal: (returnCargo.crystal || 0) + (ransomBack.crystal || 0),
-                deuterium: (returnCargo.deuterium || 0) + (ransomBack.deuterium || 0)
-              },
+              resources: delivery,
               fleet: returnShips
             },creditEvents);
           }
@@ -579,6 +628,8 @@
               phase: persistentStatus === 'embargo' ? 'IN EMBARGO' : 'IN OCCUPAZIONE',
               resolved: false,
               ships: siegeShips || {},
+              carrierHangars:returnHangars,
+              ...(crepuscoloDamaged ? {crepuscoloDamaged:true} : {}),
               fleet: siegeShips || {},
               siegeDeuterium: persistentStatus === 'embargo' ? Number(fleet.cargo?.deuterium || 0) : 0,
               siegeStartedAt: now,
@@ -608,6 +659,7 @@
               fleet: returnShips,
               cargo: returnCargo,
               carrierHangars:returnHangars,
+              ...(crepuscoloDamaged ? {crepuscoloDamaged:true} : {}),
               arrivalTime: dueReturnAt,
               returnTime: dueReturnAt,
               schemaVersion: FLEET_SCHEMA_VERSION
@@ -635,6 +687,15 @@
         });
 
         const localUni = window.UniversumUI?.state?.currentUniverse;
+        if (localUni?.id===uniId && galCredit && localUni.galatticaVersions?.[galCredit.key]===galCredit.previous) {
+          const gal=localUni.galattiche.find(g=>g.id===galCredit.id);
+          if (gal) {
+            window.UniversumHangars.restore(gal,galCredit.manifest);
+            for (const [id,n] of Object.entries(galCredit.ships)) gal.orbitingFleet[id]=(gal.orbitingFleet[id] || 0)+n;
+            for (const k of ['metal','crystal','deuterium']) gal.resources[k]+=galCredit.cargo[k] || 0;
+            localUni.galatticaVersions[galCredit.key]++;
+          }
+        }
         if (localUni && fleetNorm.attackerUid === currentUid) {
           if (localReturning) {
             const localFleet = (localUni.fleetsInFlight || []).find((f) => f.id === fDoc.id);
@@ -662,7 +723,7 @@
         // Fase 3: mai eliminare una missione con hangar dopo un errore temporaneo.
         // Senza una transazione di rientro verificata perderemmo Navi Madre e
         // caccia: conserviamo il documento e lasciamo riprovare il resolver.
-        if (!fleetNorm.carrierHangars?.length && fleetNorm.mission !== 'incursion' && Date.now() - _fleetDueTime(fleetNorm) > 60000) {
+        if (!fleetNorm.originGalatticaKey && !fleetNorm.originPlanetId && !fleetNorm.carrierHangars?.length && fleetNorm.mission !== 'incursion' && Date.now() - _fleetDueTime(fleetNorm) > 60000) {
           await forceCleanupOnlineFleet(uniRef, fleetNorm, fleetRef, err.message || 'resolve-failed');
         }
       }

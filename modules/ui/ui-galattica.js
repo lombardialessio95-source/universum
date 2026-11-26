@@ -193,12 +193,14 @@
     }));
     document.getElementById('btn-gal-jump')?.addEventListener('click', async () => {
       try {
-        const res = Galaxy.jumpGalattica(uni, galHere.id, {
+        const target = {
           g: Number(document.getElementById('gal-jump-g').value),
           s: Number(document.getElementById('gal-jump-s').value),
           p: Number(document.getElementById('gal-jump-p').value)
-        });
-        await UI.persistUniverseState();
+        };
+        const online=UI.state.isMultiplayerMode;
+        const res=online ? await window.__UniversumMPModules.jumpOnlineGalattica(uni,galHere.id,target) : Galaxy.jumpGalattica(uni,galHere.id,target);
+        if (!online) await UI.persistUniverseState();
         UI.refreshPlanetSelector();
         UI.renderCurrentView();
         UI.playSound('complete');
@@ -526,7 +528,7 @@
         if (!mission) throw new Error('Seleziona una missione.');
         if (Object.values(selection).every((q) => !q)) throw new Error('Seleziona almeno una nave.');
 
-        Galaxy.launchFleet(uni, 0, target, mission, selection, cargo, {
+        const options = {
           originType: 'galattica',
           originGalatticaId: galId,
           fuelPercent,
@@ -534,9 +536,12 @@
             exploreHours: Math.min(maxExploreHours, Math.max(1,
               Math.floor(Number(document.getElementById('gal-fleet-explore-hours')?.value) || st.fleetExploreHours || 1)))
           } : {})
-        });
-
-        await UI.persistUniverseState();
+        };
+        if (st.isMultiplayerMode) await window.__UniversumMPModules.launchGalattica(uni,galId,target,mission,selection,cargo,options);
+        else {
+          Galaxy.launchFleet(uni,0,target,mission,selection,cargo,options);
+          await UI.persistUniverseState();
+        }
         UI.playSound('success');
         UI.toast('Flotta lanciata dalla Galattica!', 'success');
 

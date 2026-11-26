@@ -165,7 +165,7 @@
   function _hasInbox(data) {
     const ib = data && data.inbox;
     if (!ib || typeof ib !== 'object') return false;
-    if (Object.keys(ib.serviceEvents || {}).length || Object.keys(ib.hangarReturns || {}).length || Object.keys(ib.hangarLosses || {}).length) return true;
+    if (Object.keys(ib.dockReturns || {}).length || Object.keys(ib.serviceEvents || {}).length || Object.keys(ib.hangarReturns || {}).length || Object.keys(ib.hangarLosses || {}).length) return true;
     for (const part of ['resources', 'fleet', 'defenses']) {
       const m = ib[part];
       if (m && Object.values(m).some((v) => Number(v) !== 0)) return true;
@@ -341,19 +341,31 @@
     } finally { if (checkpoints.get(u) === operation) checkpoints.delete(u); }
   }
   function debitFleet(u,p,dispatch,now,validate = true) {
-    window.UniversumServices.settlePlanet(u,p,now);
+    window.UniversumServices?.settlePlanet(u,p,now);
     if (dispatch.carrierHangars?.length) {
       if (!window.UniversumHangars) throw conflict();
       window.UniversumHangars.take(p,dispatch.carrierHangars);
     }
-    const ships = dispatch.doc.ships;
+    const ships = {...dispatch.doc.ships};
+    if (dispatch.doc.originPlanetId && (ships.invictus || ships.crepuscolo)) {
+      const dock=p.bacinoSpaziale;
+      if (dock?.status!=='active' || (dispatch.doc.birthBacinoAt!=null && dock.startedAt!==dispatch.doc.birthBacinoAt)) throw conflict();
+      if (ships.invictus) {
+        if (!(dock.invictusActive>=ships.invictus)) throw conflict();
+        dock.invictusActive-=ships.invictus; delete ships.invictus;
+      }
+      if (ships.crepuscolo) {
+        if (ships.crepuscolo!==1 || dock.crepuscolo?.status!=='active') throw conflict();
+        dock.crepuscolo.status='inMission'; delete ships.crepuscolo;
+      }
+    }
     if (validate && (Object.entries(ships).some(([id,n])=>(p.fleet[id] || 0)<n) ||
         Object.entries(dispatch.debit).some(([k,n])=>p.resources[k]<n))) throw conflict();
     for (const [id,n] of Object.entries(ships)) p.fleet[id] = Math.max(0,(p.fleet[id] || 0)-n);
     for (const [k,n] of Object.entries(dispatch.debit)) p.resources[k] = Math.max(0,p.resources[k]-n);
-    window.UniversumServices.settlePlanet(u,p,now);
+    window.UniversumServices?.settlePlanet(u,p,now);
   }
-  async function saveCheckpoint(universeObj, { force = false, dispatch = null } = {}) {
+  async function saveCheckpoint(universeObj, { force = false, dispatch = null, galLaunch = null } = {}) {
     const auth = getAuth();
     const db = getDB();
     const user = auth.currentUser;
@@ -378,6 +390,7 @@
     let reconciled = [];
     let lost = [];
     let moonUpdates = [];
+    let dockState,galWrites;
 
     await db.runTransaction(async (tx) => {
       reconciled = [];
@@ -388,6 +401,16 @@
       const playerSnap = versioned ? await tx.get(playerRef) : null;
       const player = playerSnap?.data() || {};
       if (versioned && (player.serviceRevision || 0) !== expected) throw conflict();
+      if (galLaunch && ((universeObj.galatticaVersions?.[galLaunch.key] || 0)!==galLaunch.expected ||
+          JSON.stringify({...universeObj.galattiche.find(g=>g.id===galLaunch.state.id),resources:null})!==JSON.stringify({...JSON.parse(galLaunch.before),resources:null}))) throw conflict();
+      galWrites=(universeObj.galattiche?.length || Object.keys(universeObj.galatticaVersions || {}).length) ? await G.prepareGalattiche(tx,universeObj,user.uid,galLaunch) : [];
+      const receipts=snaps.flatMap(s=>s.data()?.ownerUid===user.uid ? Object.values(s.data().inbox?.dockReturns || {}) : []);
+      dockState=null;
+      if (receipts.length) {
+        dockState={...universeObj,messages:[],galaxyDeltas:clone(universeObj.galaxyDeltas || {}),
+          planets:planets.filter((p,i)=>snaps[i].data()?.ownerUid===user.uid).map(p=>({...p,bacinoSpaziale:clone(p.bacinoSpaziale || null)}))};
+        for (const r of receipts) window.__UniversumGalaxyModules.dockSpecialShips(dockState,r,{...r.ships},r.arrivedAt);
+      }
       const nowTs = Date.now();
       const flightRefs = player.specialistFlights || [];
       const checkCapacity = versioned && services && (dispatch || planets.some(p=>p.shipyardQueue?.some(lot=>services.ids.includes(lot.id))));
@@ -410,11 +433,11 @@
               (!dest.data().isNpc && !dest.data().ownerUid)) throw conflict();
           if (dispatch.doc.defenderUid !== (dest.data().ownerUid || null)) throw conflict();
           window.UniversumHangars.validateMission(dispatch.doc.ships,dispatch.carrierHangars);
-        } else if (dispatch.specialist || !dispatch.carrierHangars?.length) {
+        } else if (!dispatch.doc.targetGalatticaId && (dispatch.specialist || (!dispatch.doc.originPlanetId && !dispatch.carrierHangars?.length))) {
           const i = entries.findIndex(e=>e.ref.id===dispatch.doc.targetKey);
           if (i < 0 || snaps[i].data()?.ownerUid !== user.uid) throw conflict();
         }
-        if (dispatch.specialist || !dispatch.carrierHangars?.length) activeRefs = [...activeRefs,dispatch.ref.id];
+        if (!dispatch.doc.targetGalatticaId && (dispatch.specialist || (!dispatch.doc.originPlanetId && !dispatch.carrierHangars?.length))) activeRefs = [...activeRefs,dispatch.ref.id];
       }
 
       entries.forEach((e, i) => {
@@ -429,7 +452,8 @@
 
         const inbox = pendingInbox(p,data);
         const sending = dispatch && e.ref.id === dispatch.doc.originKey;
-        const model = sending ? clone(p) : p;
+        const dockPlanet=dockState?.planets.find(item=>item.id===p.id);
+        const model = sending ? clone(dockPlanet || p) : dockPlanet || p;
         if (sending) debitFleet(universeObj,model,dispatch,nowTs);
         const res = Object.assign({}, model.resources);
         const H = window.UniversumHangars;
@@ -466,7 +490,8 @@
           defenseQueue: p.defenseQueue || [],
           localResearches: p.localResearches || {},
           localResearchQueue: p.localResearchQueue || null,
-          bacinoSpaziale: p.bacinoSpaziale || null,
+          bacinoSpaziale: model.bacinoSpaziale || null,
+          galatticaOrigin:Boolean((galLaunch?.jump?.planets.find(pl=>pl.id===p.id) || p).galatticaOrigin),
           lastUpdated: nowTs
         };
         if (H && (payload.fleet.mothership || payload.mothershipHangars.length)) {
@@ -494,11 +519,19 @@
       });
 
       if (checkCapacity && (totals[services.forge] > 5 || totals[services.oracle] > 3)) throw conflict();
+      for (const write of galWrites) {
+        tx.set(write.ref,write.data);
+        if (write.marker) tx.set(write.mapRef,write.marker);
+      }
+      if (galLaunch?.ref) tx.set(galLaunch.ref,galLaunch.doc);
       if (dispatch) tx.set(dispatch.ref,dispatch.doc);
       const playerPayload = {
         ...(versioned ? {serviceRevision:expected+1,serviceCheckpoint:nowTs,
           checkpointPlanets:entries.filter((e,i)=>snaps[i].data()?.ownerUid===user.uid).map(e=>e.ref.id),
           specialistBuilt:universeObj.specialistBuilt || {}, specialistFlights:activeRefs} : {}),
+        ...(dockState || universeObj.crepuscoloLimbo || player.orbitalDeltas ? {
+          crepuscoloLimbo:(dockState || universeObj).crepuscoloLimbo || null,
+          orbitalDeltas:(dockState || universeObj).galaxyDeltas || {}} : {}),
         nickname: universeObj.emperor || user.displayName || 'Comandante',
         researches: universeObj.researches || {},
         researchQueue: universeObj.researchQueue || null,
@@ -511,6 +544,30 @@
       else tx.set(playerRef,playerPayload,{merge:true});
     });
     if (versioned) universeObj.serviceRevision = expected+1;
+    for (const write of galWrites) {
+      universeObj.galatticaVersions ||= {};
+      (universeObj.galatticaSignatures ||= {})[write.ref.id]=JSON.stringify(write.data.state);
+      if (write.marker) (universeObj.galatticaMapSignatures ||= {})[write.ref.id]=JSON.stringify(write.marker);
+      if (write.data.destroyed) delete universeObj.galatticaVersions[write.ref.id];
+      else universeObj.galatticaVersions[write.ref.id]=write.data.version;
+    }
+    if (galLaunch) {
+      const live=universeObj.galattiche.find(g=>g.id===galLaunch.state.id);
+      if (galLaunch.jump) {
+        live.coords=galLaunch.state.coords;
+        universeObj.galaxyDeltas=galLaunch.jump.galaxyDeltas;
+        for (const p of planets) p.galatticaOrigin=galLaunch.jump.planets.find(pl=>pl.id===p.id)?.galatticaOrigin || false;
+      }
+      live.orbitingFleet=galLaunch.state.orbitingFleet;
+      live.mothershipHangars=galLaunch.state.mothershipHangars || [];
+      for (const key of ['metal','crystal','deuterium']) live.resources[key]+=galLaunch.state.resources[key]-JSON.parse(galLaunch.before).resources[key];
+    }
+    if (dockState) {
+      for (const p of dockState.planets) planets.find(home=>home.id===p.id).bacinoSpaziale=p.bacinoSpaziale;
+      universeObj.crepuscoloLimbo=dockState.crepuscoloLimbo || null;
+      universeObj.galaxyDeltas=dockState.galaxyDeltas;
+      if (dockState.messages.length) (universeObj.messages ||= []).unshift(...dockState.messages);
+    }
     if (dispatch) debitFleet(universeObj,planets.find(p=>coordsToKey(p.coords)===dispatch.doc.originKey),dispatch,Date.now(),false);
     for (const p of planets) appliedEvents.delete(p);
     _syncLastByUni.set(syncKey, Date.now());
@@ -632,6 +689,17 @@
       .where('coords.s', '==', Number(system))
       .get();
 
+    const byPosition = new Map();
+    if (activeUni?.galatticaVersions) {
+      const docs=await G.galatticaMarkers(uniId).where('systemKey','==',galaxy+'_'+system).get();
+      for (const d of docs.docs) {
+        const item=d.data();
+        if (item.destroyed) continue;
+        const pos=Number(item.coordKey.split('_')[2]);
+        if (!byPosition.has(pos)) byPosition.set(pos,[]);
+        byPosition.get(pos).push({id:d.id,name:item.name,ownerName:item.ownerName});
+      }
+    }
     const occupiedByPos = new Map();
     snap.docs.forEach((doc) => {
       const liveData = _effectivePlanetView(doc.data(), speed);
@@ -670,7 +738,7 @@
     return {
       galaxy: Number(galaxy),
       system: Number(system),
-      slots
+      slots:slots.map(slot=>({...slot,galattiche:byPosition.get(slot.coords.p) || []}))
     };
   }
 

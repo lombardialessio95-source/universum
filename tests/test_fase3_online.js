@@ -114,7 +114,7 @@ const db = {
 // ---------- Carica il multiplayer modulare ----------
 const path = require('path');
 const base = path.resolve(__dirname, '..');
-const modulesOnline = ['context.js', 'foundation.js', 'universes.js', 'sync.js', 'fleet-control.js', 'combat-resolver.js', 'sieges.js', 'communications.js', 'bots.js'];
+const modulesOnline = ['context.js', 'foundation.js', 'galattiche.js', 'universes.js', 'sync.js', 'fleet-control.js', 'combat-resolver.js', 'sieges.js', 'communications.js', 'bots.js'];
 
 const reconcileCalls = [];
 const win = {
@@ -140,6 +140,7 @@ function ok(name, fn) { return Promise.resolve().then(fn).then(() => { passed++;
 
 const game = require('./helpers/game');
 win.UniversumGalaxy=game.G;
+win.__UniversumGalaxyModules=game.win.__UniversumGalaxyModules;
 win.UniversumData=game.D;
 win.UniversumEngine=game.E;
 win.UniversumServices=game.win.UniversumServices;
@@ -322,6 +323,36 @@ function setup(){
      assert.strictEqual(store.get(t+'/planets/1_1_2').mothershipHangars.length,1);
      assert.strictEqual(store.get(t+'/planets/1_2_2').inbox,undefined);
    }finally{win.__UniversumMPModules.getLiveFleetDocs=oldLive;win.__UniversumMPModules.processEmbargoFleets=oldEmbargo;}
+ });
+ await ok('D05 online: lancio, salto, tratta lenta, ripetizione del rientro',async()=>{
+   const {uni}=setup(), api=win.__UniversumMPModules;
+   const gal={id:'g1',name:'Galattica',coords:{g:1,s:5,p:1},resources:{metal:500,crystal:0,deuterium:1e8},
+     orbitingFleet:{mothership:1},mothershipHangars:[{id:'mother_gal',fighters:9}]};
+   uni.galattiche=[gal];
+   const flight=await api.launchGalattica(uni,'g1',{g:1,s:6,p:3},'transport',{mothership:1},{metal:50},{});
+   const gref=docRef(t+'/galattiche/u1~g1'), fref=docRef(t+'/fleets/'+flight.id);
+   assert.equal(store.get(gref.path).state.resources.metal,450);
+   assert.equal(store.get(gref.path).state.orbitingFleet.mothership,0);
+   const old=api.getLiveFleetDocs, process=api.processEmbargoFleets;
+   api.getLiveFleetDocs=()=>[{id:flight.id,ref:fref,data:()=>clone(store.get(fref.path))}];
+   api.processEmbargoFleets=async()=>{};
+   try {
+     gal.coords.s=9;
+     await MP.syncPlayerState(uni,{force:true});
+     await fref.update({status:'returning',returnTime:1,arrivalTime:1});
+     await MP.resolveArrivedOnlineFleets('F3',1);
+     assert.equal(store.get(fref.path).galatticaReturn,true);
+     assert.equal(store.get(gref.path).state.orbitingFleet.mothership,0);
+     await fref.update({returnTime:1,arrivalTime:1});
+     await MP.resolveArrivedOnlineFleets('F3',1);
+     await MP.resolveArrivedOnlineFleets('F3',1);
+     assert.equal(store.get(fref.path).status,'completed');
+     const state=store.get(gref.path).state;
+     assert.equal(state.resources.metal,500);
+     assert.equal(state.orbitingFleet.mothership,1);
+     assert.deepEqual(state.mothershipHangars,[{id:'mother_gal',fighters:9}]);
+     await assert.rejects(MP.syncPlayerState(uni,{force:true}),/sessione/);
+   } finally { api.getLiveFleetDocs=old; api.processEmbargoFleets=process; }
  });
  console.log('FASE 3 online',passed,'test superati');
 })().catch(e=>{console.error('F3 ONLINE FAIL',e.stack);process.exit(1)});

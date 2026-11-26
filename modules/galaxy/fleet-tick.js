@@ -15,14 +15,63 @@
 
 
   // *** MODIFICA C: arrivo della missione galattica-return ***
+  function sameBacino(bacino, fleet) {
+    return bacino?.status === 'active' && (fleet.birthBacinoAt == null || bacino.startedAt === fleet.birthBacinoAt);
+  }
+
+  function dockSpecialShips(universe, flt, returningFleet, now) {
+    const returningCrepuscolo = Math.max(0, Math.floor(Number(returningFleet.crepuscolo || 0)));
+    if (returningCrepuscolo > 0) {
+      delete returningFleet.crepuscolo;
+      const exactHome = universe.planets.find((p) => p.id === flt.originPlanetId);
+      const homeBacino = exactHome && exactHome.bacinoSpaziale;
+      if (flt.crepuscoloDamaged) {
+        if (sameBacino(homeBacino, flt) && homeBacino.crepuscolo) {
+          beginCrepuscoloBattleRepair(exactHome, now);
+          addMessage(universe, 'fleet', `Crepuscolo in Riparazione [${flt.originCoords.g}:${flt.originCoords.s}:${flt.originCoords.p}]`,
+            'La Crepuscolo degli Dei è tornata danneggiata al suo Bacino: riparazioni per 10 giorni reali.');
+        } else {
+          addMessage(universe, 'fleet', `Crepuscolo Distrutta al Rientro [${flt.originCoords.g}:${flt.originCoords.s}:${flt.originCoords.p}]`,
+            'La Crepuscolo danneggiata stava tornando per le riparazioni, ma il suo Bacino era distrutto: nave perduta definitivamente.');
+        }
+      } else if (sameBacino(homeBacino, flt) && homeBacino.crepuscolo) {
+        homeBacino.crepuscolo.status = 'active';
+      } else {
+        const home = (universe.planets || [])[0];
+        if (home) {
+          const dist = calculateDistance(flt.originCoords, home.coords);
+          const stats = getFleetSpeedAndFuel(universe, { crepuscolo: 1 }, dist);
+          universe.crepuscoloLimbo = {
+            status: 'travelling', homePlanetId: home.id,
+            arrivalAt: now + Math.max(1, stats.durationSec) * 100 * 1000
+          };
+          addMessage(universe, 'fleet', `Crepuscolo in Viaggio verso il Pianeta Madre [${flt.originCoords.g}:${flt.originCoords.s}:${flt.originCoords.p}]`,
+            'Il suo Bacino è distrutto: la Crepuscolo si sposta all\'1% della velocità verso il pianeta madre ed entrerà in stato LIMBO.');
+        }
+      }
+    }
+    const returningInvictus = Math.max(0, Math.floor(Number(returningFleet.invictus || 0)));
+    if (returningInvictus > 0) {
+      delete returningFleet.invictus;
+      const exactHome = universe.planets.find((p) => p.id === flt.originPlanetId);
+      if (sameBacino(exactHome?.bacinoSpaziale, flt)) {
+        exactHome.bacinoSpaziale.invictusActive = (Number(exactHome.bacinoSpaziale.invictusActive) || 0) + returningInvictus;
+      } else {
+        addInvictusDebris(universe, flt.originCoords, returningInvictus);
+        addMessage(universe, 'fleet', `Invictus Persa al Rientro [${flt.originCoords.g}:${flt.originCoords.s}:${flt.originCoords.p}]`,
+          `${returningInvictus} Invictus non ha trovato il suo Bacino (distrutto) ed è diventata detriti spaziali attorno al pianeta.`);
+      }
+    }
+  }
+
   function handleGalatticaReturnArrival(universe, flt, now) {
     const gal = findGalattica(universe, flt.originGalatticaId);
     const returningFleet = Object.assign({}, flt.fleet || flt.ships || {});
     const cargo = Object.assign({ metal: 0, crystal: 0, deuterium: 0 }, flt.cargo || {});
 
     if (gal) {
-      window.UniversumServices?.settlePlanet(universe,homeP,now);
-        for (const [id, qty] of Object.entries(returningFleet)) {
+      window.UniversumHangars?.restore(gal,flt.carrierHangars?.slice(0,returningFleet.mothership || 0));
+      for (const [id, qty] of Object.entries(returningFleet)) {
         const q = Math.max(0, Math.floor(Number(qty) || 0));
         if (q > 0) {
           gal.orbitingFleet[id] = (gal.orbitingFleet[id] || 0) + q;
@@ -48,12 +97,13 @@
         const stats = getFleetSpeedAndFuel(universe, returningFleet, nearestDist);
         const durationSec = Math.max(1, stats.durationSec) * 20;
         universe.fleetsInFlight.push({
-          id: 'flt_galret_fallback_' + now,
+          id: 'flt_galret_fallback_' + flt.id,
           mission: 'deploy',
           status: 'returning',
           originPlanetId: nearest.id,
           originCoords: Object.assign({}, flt.targetCoords),
           targetCoords: Object.assign({}, nearest.coords),
+          carrierHangars: flt.carrierHangars || [],
           fleet: Object.assign({}, returningFleet),
           ships: Object.assign({}, returningFleet),
           cargo: Object.assign({}, cargo),
@@ -116,12 +166,13 @@
                 const stats = getFleetSpeedAndFuel(universe, returningFleet, nearestDist);
                 const durationSec = Math.max(1, stats.durationSec) * 20;
                 universe.fleetsInFlight.push({
-                  id: 'flt_galret_fallback_' + now,
+                  id: 'flt_galret_fallback_' + flt.id,
                   mission: 'deploy',
                   status: 'returning',
                   originPlanetId: nearest.id,
                   originCoords: Object.assign({}, flt.targetCoords),
                   targetCoords: Object.assign({}, nearest.coords),
+                  carrierHangars: flt.carrierHangars || [],
                   fleet: Object.assign({}, returningFleet),
                   ships: Object.assign({}, returningFleet),
                   cargo: Object.assign({}, flt.cargo || { metal: 0, crystal: 0, deuterium: 0 }),
@@ -144,6 +195,7 @@
               gal.coords.s === flt.originCoords.s &&
               gal.coords.p === flt.originCoords.p) {
             const returningFleet = Object.assign({}, flt.fleet || flt.ships || {});
+            window.UniversumHangars?.restore(gal,flt.carrierHangars?.slice(0,returningFleet.mothership || 0));
             for (const [id, qty] of Object.entries(returningFleet)) {
               const q = Math.max(0, Math.floor(Number(qty) || 0));
               if (q > 0) {
@@ -172,6 +224,7 @@
             originPlanetId: null,
             originCoords: Object.assign({}, flt.targetCoords),
             targetCoords: Object.assign({}, gal.coords),
+            carrierHangars: flt.carrierHangars || [],
             fleet: Object.assign({}, returningFleet),
             ships: Object.assign({}, returningFleet),
             cargo: Object.assign({}, flt.cargo || { metal: 0, crystal: 0, deuterium: 0 }),
@@ -192,48 +245,7 @@
 
         const homeP = universe.planets.find((p) => p.id === flt.originPlanetId) || universe.planets[0];
         const returningFleet = Object.assign({}, flt.fleet || flt.ships || {});
-        const returningCrepuscolo = Math.max(0, Math.floor(Number(returningFleet.crepuscolo || 0)));
-        if (returningCrepuscolo > 0) {
-          delete returningFleet.crepuscolo;
-          const exactHome = universe.planets.find((p) => p.id === flt.originPlanetId);
-          const homeBacino = exactHome && exactHome.bacinoSpaziale;
-          if (flt.crepuscoloDamaged) {
-            if (homeBacino && homeBacino.status === 'active' && homeBacino.crepuscolo) {
-              beginCrepuscoloBattleRepair(exactHome, now);
-              addMessage(universe, 'fleet', `Crepuscolo in Riparazione [${flt.originCoords.g}:${flt.originCoords.s}:${flt.originCoords.p}]`,
-                'La Crepuscolo degli Dei è tornata danneggiata al suo Bacino: riparazioni per 10 giorni reali.');
-            } else {
-              addMessage(universe, 'fleet', `Crepuscolo Distrutta al Rientro [${flt.originCoords.g}:${flt.originCoords.s}:${flt.originCoords.p}]`,
-                'La Crepuscolo danneggiata stava tornando per le riparazioni, ma il suo Bacino era distrutto: nave perduta definitivamente.');
-            }
-          } else if (homeBacino && homeBacino.status === 'active' && homeBacino.crepuscolo) {
-            homeBacino.crepuscolo.status = 'active';
-          } else {
-            const home = (universe.planets || [])[0];
-            if (home) {
-              const dist = calculateDistance(flt.originCoords, home.coords);
-              const stats = getFleetSpeedAndFuel(universe, { crepuscolo: 1 }, dist);
-              universe.crepuscoloLimbo = {
-                status: 'travelling', homePlanetId: home.id,
-                arrivalAt: now + Math.max(1, stats.durationSec) * 100 * 1000
-              };
-              addMessage(universe, 'fleet', `Crepuscolo in Viaggio verso il Pianeta Madre [${flt.originCoords.g}:${flt.originCoords.s}:${flt.originCoords.p}]`,
-                'Il suo Bacino è distrutto: la Crepuscolo si sposta all\'1% della velocità verso il pianeta madre ed entrerà in stato LIMBO.');
-            }
-          }
-        }
-        const returningInvictus = Math.max(0, Math.floor(Number(returningFleet.invictus || 0)));
-        if (returningInvictus > 0) {
-          delete returningFleet.invictus;
-          const exactHome = universe.planets.find((p) => p.id === flt.originPlanetId);
-          if (exactHome && exactHome.bacinoSpaziale && exactHome.bacinoSpaziale.status === 'active') {
-            exactHome.bacinoSpaziale.invictusActive = (Number(exactHome.bacinoSpaziale.invictusActive) || 0) + returningInvictus;
-          } else {
-            addInvictusDebris(universe, flt.originCoords, returningInvictus);
-            addMessage(universe, 'fleet', `Invictus Persa al Rientro [${flt.originCoords.g}:${flt.originCoords.s}:${flt.originCoords.p}]`,
-              `${returningInvictus} Invictus non ha trovato il suo Bacino (distrutto) ed è diventata detriti spaziali attorno al pianeta.`);
-          }
-        }
+        dockSpecialShips(universe,flt,returningFleet,now);
         if (homeP) {
           if (Array.isArray(flt.carrierHangars) && flt.carrierHangars.length) {
             // Anche un evento di esplorazione può distruggere un vettore:
@@ -241,7 +253,7 @@
             const survived=Math.max(0,Math.floor(Number((flt.fleet||flt.ships)?.mothership || 0)));
             window.UniversumHangars.restore(homeP,flt.carrierHangars.slice(0,survived));
           }
-            for (const [id, qty] of Object.entries(returningFleet)) {
+          for (const [id, qty] of Object.entries(returningFleet)) {
             if (qty > 0) {
               homeP.fleet[id] = (homeP.fleet[id] || 0) + qty;
             }
@@ -258,6 +270,6 @@
     if (!servicesOnly) processBotAI(universe);
   }
 
-  Object.assign(G, { handleGalatticaReturnArrival, processFleetsAndBots });
+  Object.assign(G, { dockSpecialShips, handleGalatticaReturnArrival, processFleetsAndBots });
 
 })();

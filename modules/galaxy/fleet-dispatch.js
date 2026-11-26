@@ -145,8 +145,9 @@
     if (totalShips === 0) throw new Error('Seleziona almeno una nave per la missione.');
 
     if (mission === 'incursion' && isGalatticaOrigin) throw new Error('Incursione: partenza solo da un pianeta.');
-    const carrierHangars = cleanFleet.mothership && !isGalatticaOrigin
-      ? hangars.select(originP,cleanFleet.mothership,options.carrierIds || null,mission === 'incursion') : [];
+    const carrierHome=isGalatticaOrigin ? {id:originG.id, fleet:shipSource, mothershipHangars:originG.mothershipHangars} : originP;
+    const carrierHangars = cleanFleet.mothership
+      ? hangars.select(carrierHome,cleanFleet.mothership,options.carrierIds || null,mission === 'incursion') : [];
     if (mission === 'incursion') {
       hangars.validateMission(cleanFleet,carrierHangars);
       const targetSlot = G.generateProceduralSlot(universe,targetCoords.g,targetCoords.s,targetCoords.p);
@@ -210,7 +211,10 @@
       resourceSource.deuterium -= (loadD + fuelCost + blackHoleFee);
     }
 
-    if (carrierHangars.length) hangars.take(originP,carrierHangars);
+    if (carrierHangars.length) {
+      hangars.take(carrierHome,carrierHangars);
+      if (isGalatticaOrigin) originG.mothershipHangars=carrierHome.mothershipHangars;
+    }
     for (const [id, qty] of Object.entries(cleanFleet)) {
       if (isGalatticaOrigin) {
         shipSource[id] -= qty;
@@ -233,6 +237,7 @@
       id: 'flt_' + now + '_' + Math.random().toString(36).substring(2, 6),
       mission,
       originPlanetId: isGalatticaOrigin ? null : originP.id,
+      ...((cleanFleet.invictus || cleanFleet.crepuscolo) ? {birthBacinoAt:originP?.bacinoSpaziale?.startedAt ?? null} : {}),
       originCoords: Object.assign({}, originCoords),
       targetCoords: Object.assign({}, targetCoords),
       ships: Object.assign({}, cleanFleet),

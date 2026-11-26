@@ -163,7 +163,10 @@
       for (const [sid, rawQty] of Object.entries(fleetSelection || {})) {
         const qty = Math.max(0, Math.floor(Number(rawQty) || 0));
         if (qty <= 0) continue;
-        const avail = Number(planet.fleet[sid] || 0);
+        const dock = planet.bacinoSpaziale;
+        const avail = sid === 'invictus' ? Number(dock?.invictusActive || 0)
+          : sid === 'crepuscolo' ? Number(dock?.crepuscolo?.status === 'active')
+          : Number(planet.fleet[sid] || 0);
         if (qty > avail) {
           throw new Error(`Navi insufficienti per ${Data.SHIPS[sid]?.name || sid}.`);
         }
@@ -210,7 +213,10 @@
       }
 
       const blackHoleExtra = (mission === 'explore' && options.blackHole) ? 50000 : 0;
-      const totalDeutNeeded = stats.fuelCost + loadD + blackHoleExtra;
+      if (ships.invictus && targetCoords.g !== planet.coords.g) throw Error("L'Invictus non può saltare tra galassie.");
+      const jumpFuel = ships.invictus ? Galaxy.getInvictusJumpCost(planet.coords,targetCoords,ships.invictus) : 0;
+      const carrierHangars = ships.mothership ? window.UniversumHangars.select(planet,ships.mothership,options.carrierIds) : [];
+      const totalDeutNeeded = stats.fuelCost + loadD + blackHoleExtra + jumpFuel;
 
       if (!universe.creativeMode) {
         if ((planet.resources.metal || 0) < loadM ||
@@ -223,9 +229,12 @@
         planet.resources.deuterium -= totalDeutNeeded;
       }
 
+      if (carrierHangars.length) window.UniversumHangars.take(planet,carrierHangars);
       // Scala le navi dal pianeta
       for (const [sid, qty] of Object.entries(ships)) {
-        planet.fleet[sid] = Math.max(0, (planet.fleet[sid] || 0) - qty);
+        if (sid === 'invictus') planet.bacinoSpaziale.invictusActive -= qty;
+        else if (sid === 'crepuscolo') planet.bacinoSpaziale.crepuscolo.status = 'inMission';
+        else planet.fleet[sid] = Math.max(0, (planet.fleet[sid] || 0) - qty);
       }
 
       const now = Date.now();
@@ -246,6 +255,8 @@
       const missionObj = {
         id: 'flt_' + now + '_' + Math.random().toString(36).slice(2, 7),
         originPlanetId: planet.id,
+        carrierHangars,
+        ...((ships.invictus || ships.crepuscolo) ? {birthBacinoAt:planet.bacinoSpaziale?.startedAt ?? null} : {}),
         originCoords: { ...planet.coords },
         targetCoords: { ...targetCoords },
         mission,
@@ -301,7 +312,12 @@
           }
 
           // Battaglia preliminare: solo chi vince puo' imporre embargo/occupazione
-          const combat = Galaxy.resolveCombat(f.ships || f.fleet || {}, universe.researches, target.data);
+          const manifest = f.carrierHangars || [];
+          const combat = Galaxy.resolveCombat(f.ships || f.fleet || {}, universe.researches,target.data,
+            manifest.length ? {attackerTags:{mothership:manifest.map(h=>h.id)}} : {});
+          const alive = new Set(combat.attackerTagsAlive?.mothership || []);
+          f.carrierHangars = manifest.filter(h=>alive.has(h.id));
+          if (combat.attackerCrepuscoloDamaged && combat.attackerSurvivors?.crepuscolo) f.crepuscoloDamaged=true;
           SiegeMissions.applySiegeDefenderOutcome(universe, target, combat, f.targetCoords);
 
           // Report per l'attaccato (difensore) nel diario di bordo
@@ -344,6 +360,10 @@
             id: 'siege_' + now + '_' + Math.random().toString(36).slice(2, 6),
             type: siegeType,
             originPlanetId: f.originPlanetId,
+            originGalatticaId: f.originGalatticaId,
+            birthBacinoAt: f.birthBacinoAt,
+            crepuscoloDamaged: f.crepuscoloDamaged,
+            carrierHangars: f.carrierHangars,
             originCoords: { ...f.originCoords },
             targetCoords: { ...f.targetCoords },
             targetName: target.planet?.name || target.slot?.name || key,
@@ -478,6 +498,10 @@
       universe.fleetsInFlight.push({
         id: 'flt_ret_' + now + '_' + Math.random().toString(36).slice(2, 6),
         originPlanetId: siege.originPlanetId,
+            originGalatticaId: siege.originGalatticaId,
+            birthBacinoAt: siege.birthBacinoAt,
+            crepuscoloDamaged: siege.crepuscoloDamaged,
+            carrierHangars: siege.carrierHangars,
         originCoords: { ...siege.originCoords },
         targetCoords: { ...siege.targetCoords },
         mission: siege.type,
