@@ -390,17 +390,20 @@
     const db = getDB();
     const now = Date.now();
     const creditRef = await _resolveCreditRef(uniRef, fleet.attackerUid, fleet.originCoords);
+    // AT02: nessuna chiusura se manca una destinazione valida per la consegna.
+    // _inboxCredit ignora un ref nullo: qui va impedita la chiusura silenziosa.
+    if (!creditRef) return false;
     try {
       await db.runTransaction(async (tx) => {
         const freshSnap = await tx.get(fleetRef);
         if (!freshSnap.exists || freshSnap.data().resolved) return;
         const fresh = freshSnap.data();
-        let previous;
-        if (window.UniversumServices?.ids.some(id=>fresh.ships?.[id])) {
-          const home = creditRef && (await tx.get(creditRef)).data();
-          if (home?.ownerUid !== fresh.attackerUid) throw Error('Colonia di rientro non disponibile.');
-          previous = home.inbox?.serviceEvents;
+        const homeSnap = await tx.get(creditRef);
+        if (!homeSnap.exists || homeSnap.data().ownerUid !== fresh.attackerUid) {
+          throw Error('Colonia di rientro non disponibile.');
         }
+        const previous = window.UniversumServices?.ids.some(id=>fresh.ships?.[id])
+          ? homeSnap.data().inbox?.serviceEvents : undefined;
         _inboxCredit(tx, creditRef, {resources:fresh.cargo || {},fleet:fresh.ships || {}},previous);
         tx.update(fleetRef, {
           status: 'completed', phase: 'COMPLETATA', resolved: true,
@@ -418,9 +421,9 @@
       });
       return true;
     } catch (e) {
-      if (!window.UniversumServices?.ids.some(id=>fleet.ships?.[id])) {
-        await fleetRef.update({ status: 'completed', phase: 'COMPLETATA', resolved: true, completedAt: now, repaired: true }).catch((e) => _mpNotifyError('chiusura forzata flotta', e));
-      }
+      // La transazione è atomica: se l'accredito fallisce, la flotta e
+      // tutto il suo carico devono rimanere persistiti per un nuovo tentativo.
+      _mpNotifyError('accredito rientro flotta rinviato', e);
       return false;
     }
   }
