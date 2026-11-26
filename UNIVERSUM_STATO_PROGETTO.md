@@ -1,6 +1,6 @@
 # UNIVERSUM — STATO DEL PROGETTO E PASSAGGIO DI CONSEGNE
 
-**Revisione:** 1.4 — 26 novembre 2026  
+**Revisione:** 1.5 — 26 novembre 2026  
 **Tipo:** documento di continuità per ChatGPT, Codex e il proprietario del progetto  
 **Repository:** https://github.com/lombardialessio95-source/universum  
 **Riferimento verificato:** branch `main`, commit `67f71b7f2662ad2c345b0e3e8f2ba4ab4202c099` (25 novembre 2026, 21:24 UTC)  
@@ -196,7 +196,7 @@ Questa sezione prevale sui riferimenti storici incompatibili delle sezioni prece
 | D26 edifici colonie online zero | Integrato | b0eecb037b6049c4f76fac9e66668bdc77d050ba |
 | AT02-I01 chiusura forzata senza accredito | Integrato | 8c13541b33ebd1b5d7b98c9dfa02267100f28ff4 |
 | AT21 chiusura missioni dopo errore | Integrato | ca38720f144993a805f84790e15519b7340525cc |
-| AT05 atomicità partenze | Aperto | — |
+| AT05 atomicità partenze | Diagnosi avviata, implementazione e collaudi incompleti | — |
 | AT03/AT04 validazione creazione/modifica flotte | Aperti | — |
 
 AT02: diff in modules/online/fleet-control.js, impedisce chiusura se manca destinazione valida o se transazione fallisce; verifica proprietà del pianeta in transazione; elimina fallback di chiusura autonoma. Cinque scenari dichiarati superati con Firestore simulato, pipeline verde verificata; non collaudato Firebase reale. AT02-I02: integrazione confermata dal controllo HEAD main. Actions candidata verde; pipeline post-merge e Pages non verificate indipendentemente in questo controllo. Prossimo incarico AT21-I01: prima riproduzione e verifica sovrapposizioni con AT02, senza correzioni ridondanti.
@@ -227,3 +227,7 @@ Main verificato 8c13541b33ebd1b5d7b98c9dfa02267100f28ff4. Candidata ca38720f1449
 
 ### Aggiornamento AT21-I02 — 26 novembre 2026
 HEAD main ca38720f144993a805f84790e15519b7340525cc verificato; Actions 45894943987 e Pages 45894942848 entrambi success su main e sullo stesso SHA, verificati direttamente. AT21 concluso nei limiti del collaudo simulato. Prossimo AT05-I01, partenze ordinarie online: in modules/online/fleet-control.js righe 144–154 sottrazione locale e sync separati dalla creazione documento flotta (216–222); percorsi speciali usano già dispatch in syncPlayerState. Esaminare sync.js e Rules, riprodurre guasto, riutilizzare transazione esistente se compatibile; niente modifiche alle partenze speciali o altre meccaniche. Se Rules necessitano modifica, fermarsi e informare proprietario prima di integrare. AT03/AT04 successivi separati. Nessun deploy Firebase.
+
+
+### Aggiornamento AT05-I01 — rapporto intermedio
+Main verificato: ca38720f144993a805f84790e15519b7340525cc. Ordinaria riferisce verifica base e backup, percorso tecnico individuato, implementazione e collaudi non completati; Rules realmente pubblicate non confermate. Nessuna candidata approvata. Prossimo AT05-R01: sola diagnosi circoscritta e test riproduzione, confronto dispatch esistente e Rules repository; indicare eventuale modifica necessaria e non integrare prima di conferma compatibilità. Nessun deploy automatico, nessun intervento su altri ID. Profonda resta riserva. Backup riferito ma non verificato indipendentemente in questo aggiornamento.
