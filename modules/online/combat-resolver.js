@@ -301,6 +301,15 @@
               // offline. L'helper condiviso (pianeti madre/NPC) resta invariato.
               // Il carico trasportato viene aggiunto subito sotto, come prima.
               newColony.resources = { metal: 1000, crystal: 1000, deuterium: 500 };
+              // D26-I01: soltanto le nuove colonie online nascono con i 14
+              // edifici a livello 0, come nell'offline. D07, D25 e l'helper
+              // createStarterPlanetDoc restano invariati.
+              newColony.buildings = {
+                metalMine: 0, crystalMine: 0, deuteriumSynth: 0, solarPlant: 0,
+                fusionReactor: 0, roboticsFactory: 0, naniteFactory: 0, shipyard: 0,
+                metalStorage: 0, crystalStorage: 0, deuteriumTank: 0, researchLab: 0,
+                terraformer: 0, hiddenBunker: 0
+              };
               newColony.resources.metal += returnCargo.metal;
               newColony.resources.crystal += returnCargo.crystal;
               newColony.resources.deuterium += returnCargo.deuterium;
