@@ -297,6 +297,10 @@
                 `Colonia ${fleet.targetCoords.g}:${fleet.targetCoords.s}:${fleet.targetCoords.p}`,
                 false
               );
+              // D25-I01: solo la nuova colonia online adotta le risorse base
+              // offline. L'helper condiviso (pianeti madre/NPC) resta invariato.
+              // Il carico trasportato viene aggiunto subito sotto, come prima.
+              newColony.resources = { metal: 1000, crystal: 1000, deuterium: 500 };
               newColony.resources.metal += returnCargo.metal;
               newColony.resources.crystal += returnCargo.crystal;
               newColony.resources.deuterium += returnCargo.deuterium;
