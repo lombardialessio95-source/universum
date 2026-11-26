@@ -1,6 +1,6 @@
 # UNIVERSUM — STATO DEL PROGETTO E PASSAGGIO DI CONSEGNE
 
-**Revisione:** 1.5 — 26 novembre 2026  
+**Revisione:** 1.6 — 26 novembre 2026  
 **Tipo:** documento di continuità per ChatGPT, Codex e il proprietario del progetto  
 **Repository:** https://github.com/lombardialessio95-source/universum  
 **Riferimento verificato:** branch `main`, commit `67f71b7f2662ad2c345b0e3e8f2ba4ab4202c099` (25 novembre 2026, 21:24 UTC)  
@@ -231,3 +231,7 @@ HEAD main ca38720f144993a805f84790e15519b7340525cc verificato; Actions 458949439
 
 ### Aggiornamento AT05-I01 — rapporto intermedio
 Main verificato: ca38720f144993a805f84790e15519b7340525cc. Ordinaria riferisce verifica base e backup, percorso tecnico individuato, implementazione e collaudi non completati; Rules realmente pubblicate non confermate. Nessuna candidata approvata. Prossimo AT05-R01: sola diagnosi circoscritta e test riproduzione, confronto dispatch esistente e Rules repository; indicare eventuale modifica necessaria e non integrare prima di conferma compatibilità. Nessun deploy automatico, nessun intervento su altri ID. Profonda resta riserva. Backup riferito ma non verificato indipendentemente in questo aggiornamento.
+
+
+### Aggiornamento AT05-R01 — analisi statica Rules
+Main verificato: ca38720f144993a805f84790e15519b7340525cc. Ordinaria riferisce compatibilità statica di validHumanFleetCreate, validOwnerCheckpoint, aggiornamento pianeta proprietario, revisione giocatore e creazione flotta nella stessa transazione; getAfter già previsto; timestamp e percorsi speciali invariati. Nessuna modifica alle Rules del repository individuata nell'analisi riferita. Non verificati indipendentemente tutti i risultati statici, Rules pubblicate, limiti letture Rules o emulatore. Rapporto parziale: manca esito test riproduzione e proposta tecnica precisa per dispatch; richiedere completamento AT05-R01 prima di autorizzare implementazione. Nessuna candidata approvata, nessun deploy. Avvertire proprietario se emergono modifiche Rules.
