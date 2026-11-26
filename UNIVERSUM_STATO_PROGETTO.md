@@ -1,6 +1,6 @@
 # UNIVERSUM — STATO DEL PROGETTO E PASSAGGIO DI CONSEGNE
 
-**Revisione:** 1.3 — 26 novembre 2026  
+**Revisione:** 1.4 — 26 novembre 2026  
 **Tipo:** documento di continuità per ChatGPT, Codex e il proprietario del progetto  
 **Repository:** https://github.com/lombardialessio95-source/universum  
 **Riferimento verificato:** branch `main`, commit `67f71b7f2662ad2c345b0e3e8f2ba4ab4202c099` (25 novembre 2026, 21:24 UTC)  
@@ -183,7 +183,7 @@ Quando questa conversazione diventa troppo lunga:
 
 Questa sezione prevale sui riferimenti storici incompatibili delle sezioni precedenti. Il ramo documentale dedicato è la memoria di CONTROLLO; non è il ramo di gioco. Consultarlo direttamente anche se la PR #3 resta in bozza. Non spostare main per aggiornamenti documentali durante una candidata in corso.
 
-**Main verificato:** `8c13541b33ebd1b5d7b98c9dfa02267100f28ff4` (AT02).
+**Main verificato:** `ca38720f144993a805f84790e15519b7340525cc` (AT21).
 **Candidata integrata su main:** AT02-I01, `8c13541b33ebd1b5d7b98c9dfa02267100f28ff4`, PR #6, Actions 45890267403 verde. Backup `backup/pre-AT02-I01-2026-11-26` verificato sul main D26.
 
 | Micropasso | Stato | SHA / evidenza |
@@ -195,7 +195,7 @@ Questa sezione prevale sui riferimenti storici incompatibili delle sezioni prece
 | TEST-FIX-01 confronto VM rigoroso | Integrato | 8847c1350d254ced4415b9443caf1b9608373edf |
 | D26 edifici colonie online zero | Integrato | b0eecb037b6049c4f76fac9e66668bdc77d050ba |
 | AT02-I01 chiusura forzata senza accredito | Integrato | 8c13541b33ebd1b5d7b98c9dfa02267100f28ff4 |
-| AT21 chiusura missioni dopo errore | Candidata approvata, attende integrazione | ca38720f144993a805f84790e15519b7340525cc |
+| AT21 chiusura missioni dopo errore | Integrato | ca38720f144993a805f84790e15519b7340525cc |
 | AT05 atomicità partenze | Aperto | — |
 | AT03/AT04 validazione creazione/modifica flotte | Aperti | — |
 
@@ -223,3 +223,7 @@ Micropassi proposti S01 migrazione, S02 disattivazione missioni, S03 cantiere, S
 
 ### Aggiornamento AT21-I01 — 26 novembre 2026
 Main verificato 8c13541b33ebd1b5d7b98c9dfa02267100f28ff4. Candidata ca38720f144993a805f84790e15519b7340525cc, PR #7 in bozza, un solo commit, backup pre-AT21-I01-2026-11-26 verificato sul main. Diff verificato: in modules/online/combat-resolver.js rimosso il cleanup automatico nel catch generico per missioni scadute oltre 60 secondi; recupero esplicito AT02 invariato. Test AT21 quattro scenari, Firestore simulato, Actions 45894409372 verde, manifest/SW verificati; nessun collaudo Firebase reale. Checkout completo locale indisponibile per script Python pre-push. Rules e workflow invariati. Candidata approvata, non integrata. Prossimo AT21-I02: fast-forward da main verificato, verifica Actions e Pages, poi AT05. Eventuali errori persistenti possono lasciare missioni aperte e richiedono diagnosi, non chiusura automatica. Direttiva Firebase ribadita: avvertire il proprietario prima di qualsiasi modifica Rules, fornire regole complete e ordine di pubblicazione manuale; niente deploy automatico.
+
+
+### Aggiornamento AT21-I02 — 26 novembre 2026
+HEAD main ca38720f144993a805f84790e15519b7340525cc verificato; Actions 45894943987 e Pages 45894942848 entrambi success su main e sullo stesso SHA, verificati direttamente. AT21 concluso nei limiti del collaudo simulato. Prossimo AT05-I01, partenze ordinarie online: in modules/online/fleet-control.js righe 144–154 sottrazione locale e sync separati dalla creazione documento flotta (216–222); percorsi speciali usano già dispatch in syncPlayerState. Esaminare sync.js e Rules, riprodurre guasto, riutilizzare transazione esistente se compatibile; niente modifiche alle partenze speciali o altre meccaniche. Se Rules necessitano modifica, fermarsi e informare proprietario prima di integrare. AT03/AT04 successivi separati. Nessun deploy Firebase.
