@@ -733,12 +733,11 @@
         }
       } catch (err) {
         _mpNotifyError('risoluzione flotta', err);
-        // Fase 3: mai eliminare una missione con hangar dopo un errore temporaneo.
-        // Senza una transazione di rientro verificata perderemmo Navi Madre e
-        // caccia: conserviamo il documento e lasciamo riprovare il resolver.
-        if (!fleetNorm.originGalatticaKey && !fleetNorm.originPlanetId && !fleetNorm.carrierHangars?.length && fleetNorm.mission !== 'incursion' && Date.now() - _fleetDueTime(fleetNorm) > 60000) {
-          await forceCleanupOnlineFleet(uniRef, fleetNorm, fleetRef, err.message || 'resolve-failed');
-        }
+        // AT21-I01: un errore di elaborazione non conclude né annulla la missione.
+        // La transazione fallita non registra accrediti o perdite: manteniamo
+        // intatti flotta e carico persistenti, per il prossimo tentativo.
+        // Il recupero esplicito di rotte invalide e la riparazione AT02
+        // restano gestiti separatamente da forceCleanupOnlineFleet.
       }
     }
   }
