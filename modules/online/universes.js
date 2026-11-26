@@ -413,6 +413,26 @@
         false
       );
 
+      // D07-I01: solo il NUOVO pianeta madre online parte come l'offline.
+      // Non modificare createStarterPlanetDoc: serve anche altri contesti.
+      // Non riscrivere pianeti di giocatori già iscritti né colonie.
+      homePlanet.buildings = {
+        metalMine: 0,
+        crystalMine: 0,
+        deuteriumSynth: 0,
+        solarPlant: 0,
+        fusionReactor: 0,
+        roboticsFactory: 0,
+        naniteFactory: 0,
+        shipyard: 0,
+        metalStorage: 0,
+        crystalStorage: 0,
+        deuteriumTank: 0,
+        researchLab: 0,
+        terraformer: 0,
+        hiddenBunker: 0
+      };
+
       await uniRef.collection('planets').doc(homeKey).set(homePlanet);
 
       playerState = {
