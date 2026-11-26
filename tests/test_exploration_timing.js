@@ -134,7 +134,7 @@ async function runOnline(){
   }
   class Collection{
     constructor(key){this.key=key;}
-    doc(id){return new Ref(this.key+'/'+id);}
+    doc(id){return new Ref(this.key+'/'+(id ?? ('fleet'+(++seq))));}
     async add(data){
       const r=this.doc('fleet'+(++seq));
       docs.set(r.key,{...data});
@@ -160,7 +160,17 @@ async function runOnline(){
     __UniversumMPModules:{
       getAuth:()=>({currentUser:{uid:'alice',displayName:'Alice'}}),
       getDB:()=>db,coordsToKey:c=>[c.g,c.s,c.p].join('_'),
-      syncPlayerState:async()=>{},_tsToMs:v=>v?.toMillis?.()||0
+      // Il test della timeline simula il contratto del checkpoint atomico.
+      // La transazione reale viene esercitata da test_atomic_dispatch.js.
+      syncPlayerState:async(u,{dispatch}={})=>{
+        assert.ok(dispatch?.ordinary,'la partenza ordinaria usa dispatch');
+        const p=u.planets.find(p=>[p.coords.g,p.coords.s,p.coords.p].join('_')===dispatch.doc.originKey);
+        assert.ok(p,'pianeta di partenza presente');
+        for(const [id,n] of Object.entries(dispatch.doc.ships)) p.fleet[id]-=n;
+        for(const [id,n] of Object.entries(dispatch.debit)) p.resources[id]-=n;
+        docs.set(dispatch.ref.key,{...dispatch.doc});
+        return true;
+      },_tsToMs:v=>v?.toMillis?.()||0
     }
   };
   const firebase={firestore:{FieldValue:{serverTimestamp:()=>({toMillis:()=>now+900})}}};
