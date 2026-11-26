@@ -141,17 +141,6 @@
       throw new Error(`Lo slot [${targetCoords.g}:${targetCoords.s}:${targetCoords.p}] è già occupato!`);
     }
 
-    if (!targeted && !dockDispatch && !specialist && !carrierHangars.length) {
-      for (const [sId, qty] of Object.entries(cleanShips)) {
-        planet.fleet[sId] -= qty;
-      }
-      planet.resources.metal -= cargoM;
-      planet.resources.crystal -= cargoC;
-      planet.resources.deuterium -= (cargoD + flightStats.fuelCost + blackHoleExtra);
-
-      await syncPlayerState(universeObj, { force: true });
-    }
-
     const defenderUid = targeted ? selected.data().ownerUid : targetSnap.exists ? (targetSnap.data().ownerUid || null) : null;
     if (dockDispatch || carrierHangars.length) {
       const cap=Object.entries(cleanShips).reduce((s,[id,n])=>s+n*(window.UniversumData.SHIPS[id]?.cargo || 0),0);
@@ -212,13 +201,12 @@
       resolved: false
     };
 
-    let ref;
-    if (targeted || dockDispatch || specialist || carrierHangars.length) {
-      ref = uniRef.collection('fleets').doc();
-      await syncPlayerState(universeObj,{force:true,dispatch:{ref,doc:fleetDoc,
-        carrierHangars,specialist:Boolean(specialist),
-        debit:{metal:cargoM,crystal:cargoC,deuterium:cargoD+flightStats.fuelCost+blackHoleExtra}}});
-    } else ref = await uniRef.collection('fleets').add(fleetDoc);
+    const ordinary = !(targeted || dockDispatch || specialist || carrierHangars.length);
+    const ref = uniRef.collection('fleets').doc();
+    const committed = await syncPlayerState(universeObj,{force:true,dispatch:{ref,doc:fleetDoc,
+      ordinary,carrierHangars,specialist:Boolean(specialist),
+      debit:{metal:cargoM,crystal:cargoC,deuterium:cargoD+flightStats.fuelCost+blackHoleExtra}}});
+    if (ordinary && committed !== true) throw new Error('Partenza non confermata.');
     fleetDoc.id = ref.id;
 
     try {
