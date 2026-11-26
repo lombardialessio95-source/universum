@@ -79,6 +79,9 @@ const starter=G.createStarterPlanetDoc('u',coords,'alice','Alice','originale',fa
 eq(starter.resources,{metal:1500,crystal:1000,deuterium:300},
   'helper condiviso: risorse originarie invariate (D07/pianeti generici)');
 const starterBuildings=copy(starter.buildings);
+eq(starterBuildings,{metalMine:1,crystalMine:1,deuteriumSynth:0,
+  solarPlant:1,roboticsFactory:0,shipyard:0,researchLab:0},
+  'helper condiviso: livelli edifici originali invariati');
 const npc=G.createStarterPlanetDoc('u',coords,'npc','NPC','Avamposto',true);
 eq(npc.resources,{metal:50000,crystal:35000,deuterium:15000},
   'helper NPC: risorse invariate');
@@ -116,8 +119,8 @@ async function main(){
       metal:1000+cargo.metal,crystal:1000+cargo.crystal,
       deuterium:500+cargo.deuterium
     },'base offline più carico trasportato');
-    eq(online.after.buildings,starterBuildings,
-      'D26: livelli edifici online ancora invariati');
+    eq(online.after.buildings,offline.buildings,
+      'D26: nuove colonie online/offline hanno gli stessi edifici iniziali');
     eq(online.resolvedFleet.status,'completed','flotta colonizzatrice consumata');
     eq(online.resolvedFleet.resolved,true,'completamento transazionale registrato');
   }
