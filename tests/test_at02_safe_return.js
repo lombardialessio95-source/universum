@@ -75,11 +75,13 @@ const db={
       update:(r,upd)=>changes.push({kind:'update',path:r.path,value:copy(upd)}),
       set:(r,doc)=>changes.push({kind:'set',path:r.path,value:copy(doc)})
     };
+    await work(tx);
+    // Guasto di commit DOPO aver preparato sia l'accredito sia la chiusura:
+    // nessuna delle due scritture deve diventare visibile.
     if(failTransactions||failNextTransaction){
       failNextTransaction=false;
-      throw Error('Rete indisponibile: transazione abortita');
+      throw Error('Rete indisponibile: commit transazionale abortito');
     }
-    await work(tx);
     // Applica insieme tutte le scritture solo se sono valide.
     const preview=new Map([...store].map(([key,v])=>[key,copy(v)]));
     for(const change of changes){
