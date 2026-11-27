@@ -371,6 +371,10 @@
     const db = getDB();
     const user = auth.currentUser;
     if (!user || !universeObj?.id) return;
+    if (dispatch?.ordinary && (!Number.isSafeInteger(universeObj.serviceRevision) ||
+        universeObj.serviceRevision < 0 || universeObj.serviceRevision >= Number.MAX_SAFE_INTEGER)) {
+      throw new Error('Revisione non valida. Riapri la partita multiplayer.');
+    }
     window.UniversumEngine?.normalizeResearchState(universeObj);
 
     const syncKey = JSON.stringify([user.uid, universeObj.id]);

@@ -1,4 +1,4 @@
-/** AT05-I02: regressione mirata, Firestore simulato. */
+/** AT05-I02/I03: regressione mirata, Firestore simulato. */
 'use strict';
 const fs = require('node:fs');
 const path = require('node:path');
@@ -19,7 +19,7 @@ async function runTests(fleetSource,syncSource) {
     const u={id:"u",emperor:"test",planets:[p,p2],fleetsInFlight:[],researches:{},...(versioned?{serviceRevision:2}:{})};
     const root="online_universes/u", planets=root+"/planets/", fleets=root+"/fleets/", player=root+"/players/me";
     const store=new Map([[planets+origin,cp(p)],[planets+own,cp(p2)],[planets+enemy,{ownerUid:"enemy"}],[player,{...(versioned?{serviceRevision:2}:{}),specialistFlights:["existing"]}],[fleets+"existing",{resolved:false,ships:{prometheusOracle:1}}]]);
-    const mode={fail:null,retry:false,attempts:0,commits:0,settles:0,reads:[],writes:[],calls:0};
+    const mode={fail:null,retry:false,attempts:0,commits:0,settles:0,normalizations:0,reads:[],writes:[],calls:0};
     let next=0;
     function snap(path){return {id:path.split("/").pop(),exists:store.has(path),data:()=>store.has(path)?cp(store.get(path)):undefined}}
     function ref(path){return {path,id:path.split("/").pop(),collection:n=>col(path+"/"+n),
@@ -47,6 +47,7 @@ async function runTests(fleetSource,syncSource) {
       galatticaMarkers:()=>({doc:()=>({get:async()=>({exists:true,id:"gal1",data:()=>({ownerUid:"enemy"})})})}),atGalatticaTarget:()=>true};
     const ships=Object.fromEntries(["lightFighter","hephaestusForge","prometheusOracle","invictus","crepuscolo","mothership","deathStar","colonyShip","espionageProbe"].map(id=>[id,{cargo:100000,cost:{metal:3000,crystal:1000,deuterium:0}}]));
     const W={__UniversumMPModules:G,__UniversumMPVariables:{SYNC_MIN_INTERVAL_MS:0,_INBOX_RES_KEYS:["metal","crystal","deuterium"],_syncLastByUni:new Map(),_systemCache:new Map(),_systemPending:new Map(),FLEET_SCHEMA_VERSION:1,_mpErrorToastAt:new Map()},
+      UniversumEngine:{normalizeResearchState:()=>{mode.normalizations++}},
       UniversumData:{SHIPS:ships},UniversumGalaxy:{calculateDistance:()=>1,getFleetSpeedAndFuel:()=>({fuelCost:40,durationSec:60}),getInvictusJumpCost:()=>5},
       UniversumMissionsCore:{getMaxFleetSlots:()=>100,getMaxExploreHours:()=>4,getExplorationHoldDurationSec:(u,h)=>h*3600,buildExplorationTimeline:(now,d,h)=>({departureTime:now,zoneArrivalTime:now+d*1000,explorationEndTime:now+(d+h)*1000,arrivalTime:now+(d+h)*1000,returnTime:now+(2*d+h)*1000,travelDurationMs:d*1000,explorationHoldMs:h*1000,returnTravelDurationMs:d*1000})},
       UniversumServices:{ids,forge:ids[0],oracle:ids[1],transfer:(u,m,t,ships)=>ids.some(id=>ships[id]),settlePlanet:()=>{mode.settles++}},
@@ -75,7 +76,52 @@ async function runTests(fleetSource,syncSource) {
   await test("T16 targeted Galattica attack",async()=>{const f=fixture();const d=await f.launch(enemy,"destroyGalattica",{deathStar:1},{},{targetGalatticaId:"gal1"});eq(d.targetGalatticaId,"gal1","target");eq(d.mission,"destroyMoon","normalized mission");eq(f.state().remote.fleet.deathStar,0,"death star");eq(f.state().player.specialistFlights,["existing"],"registry unchanged");});
   await test("T17 ordinary dispatch does not activate capacity by itself",async()=>{const f=fixture();await f.launch();ok(!f.mode.reads.includes(f.fleets+"existing"),"no specialist flight read");eq(f.state().player.specialistFlights,["existing"],"registry preserved");});
   await test("T17 ordinary dispatch preserves capacity triggered by queue",async()=>{const f=fixture({queue:true});await f.launch();ok(f.mode.reads.includes(f.fleets+"existing"),"queue-triggered capacity");eq(f.state().player.specialistFlights,["existing"],"no ordinary flight in registry");});
-  await test("T19 unversioned checkpoint path",async()=>{const f=fixture({versioned:false});await f.launch();eq(f.state().remote.resources,debit,"legacy debit");eq(f.state().created,1,"legacy fleet");});
+  // AT05-I03: il precedente caso di successo ordinario non versionato
+  // deve ora essere rifiutato, prima di normalizzazione e transazione.
+  for (const [label,revision] of [
+    ["absent",undefined],["null",null],["string","2"],["fraction",1.5],
+    ["negative",-1],["max safe",Number.MAX_SAFE_INTEGER],
+    ["above max safe",Number.MAX_SAFE_INTEGER+1],["NaN",NaN],["infinity",Infinity]
+  ]) {
+    await test("I03 invalid revision "+label,async()=>{
+      const f=fixture({versioned:false});
+      if(revision!==undefined) f.u.serviceRevision=revision;
+      const before=f.state(), beforeStore=cp([...f.store]), beforeLocal=cp(f.u);
+      const error=await rejected(()=>f.launch(),"invalid revision");
+      eq(error.message,"Revisione non valida. Riapri la partita multiplayer.","explicit rejection");
+      eq(f.state(),before,"no debit or fleet");
+      eq([...f.store],beforeStore,"no remote change");
+      eq(cp(f.u),beforeLocal,"no local change");
+      ok(Object.is(f.u.serviceRevision,revision),"revision not converted");
+      eq([f.mode.attempts,f.mode.commits,f.mode.normalizations,f.mode.writes.length],[0,0,0,0],"no transaction, normalization or write");
+    });
+  }
+  for(const revision of [0,2,Number.MAX_SAFE_INTEGER-1]){
+    await test("I03 valid revision "+revision,async()=>{
+      const f=fixture({versioned:revision!==0});
+      f.u.serviceRevision=revision;
+      if(revision!==0) f.store.get(f.player).serviceRevision=revision;
+      await f.launch();
+      const s=f.state();
+      eq([s.local.fleet.lightFighter,s.remote.fleet.lightFighter,s.created,s.flights,f.mode.commits],[7,7,1,1,1],"one departure");
+      eq(s.local.resources,debit,"debit");
+      eq(s.remote.resources,debit,"remote debit");
+      eq(f.u.serviceRevision,revision+1,"local revision increment");
+      eq(s.player.serviceRevision,revision+1,"remote revision increment");
+    });
+  }
+  await test("I03 non-dispatch legacy checkpoint unchanged",async()=>{
+    const f=fixture({versioned:false});
+    eq(await f.G.syncPlayerState(f.u,{force:true}),true,"checkpoint succeeds");
+    eq([f.mode.commits,f.state().created,f.u.serviceRevision],[1,0,undefined],"legacy checkpoint preserved");
+  });
+  await test("I03 special legacy dispatch unchanged",async()=>{
+    const f=fixture({versioned:false});
+    const d=await f.launch(enemy,"attack",{invictus:1,crepuscolo:1},{});
+    eq(d.originPlanetId,"p1","special origin");
+    eq([f.mode.commits,f.state().created,f.u.serviceRevision],[1,1,undefined],"special checkpoint preserved");
+    eq(f.state().remote.bacinoSpaziale.crepuscolo.status,"inMission","special debit");
+  });
   await test("T01 missing checkpoint confirmation",async()=>{const f=fixture();f.G.syncPlayerState=async()=>undefined;const before=f.state();await rejected(()=>f.launch(),"not confirmed");eq(f.state(),before,"no local flight");});
   await test("T10 partial: stale revision rejected after another commit",async()=>{const f=fixture();const stale=cp(f.u);await f.launch();const before=f.state();await rejected(()=>f.G.launchOnlineFleet(stale,0,{g:1,s:1,p:3},"attack",{lightFighter:3},{}),"stale revision");eq(f.state(),before,"no second commit");});
   await test("T09 diagnostic: ambiguous acknowledgment leaves local stale",async()=>{const f=fixture();f.mode.fail="lostAck";await rejected(()=>f.launch(),"lost ack");const s=f.state();eq([s.created,s.flights,s.local.fleet.lightFighter,s.remote.fleet.lightFighter],[1,0,10,7],"ambiguity reproduced");});
