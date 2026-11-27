@@ -1,6 +1,6 @@
 # UNIVERSUM — STATO DEL PROGETTO E PASSAGGIO DI CONSEGNE
 
-**Revisione:** 1.46 — 26 novembre 2026  
+**Revisione:** 1.47 — 26 novembre 2026  
 **Tipo:** documento di continuità per ChatGPT, Codex e il proprietario del progetto  
 **Repository:** https://github.com/lombardialessio95-source/universum  
 **Riferimento verificato:** branch `main`, commit `67f71b7f2662ad2c345b0e3e8f2ba4ab4202c099` (25 novembre 2026, 21:24 UTC)  
@@ -434,3 +434,7 @@ Rapporto conclusivo Ordinaria: candidato remoto candidate/AT05-final-08942f0 SHA
 
 ### AT05 — confronto Rules attuali consegnate dal proprietario (27/11/2026)
 Il proprietario ha fornito Testo incollato(3).txt come copia delle Rules attualmente pubblicate. CONTROLLO ha letto i byte dell'allegato: 22507 byte, SHA256 ca65ca20eb948d5a8a817c565a1566439d4792ba2c3e1157306b9ab5b8fdba4d, blob b5fb4b8f2188f657abc572bef5062031f1dd86ac. Rimuovendo esclusivamente il newline finale, 22506 byte, blob Git esatto 911d2a1e81185d3b489a22f9738ca1975c5ba7f8, coincidente con main verificato ca38720f144993a805f84790e15519b7340525cc. Nessuna differenza funzionale. Non è verifica diretta della console Firebase o del progetto attivo: provenienza dichiarata dal proprietario. Rules candidate 08942f02f3cbeba0cb7ed32f11bb19aff1226684 blob 2a668723c9f5d22a1f7a3909b22a4e142562060d verificato via GitHub. Candidata e main invariati. Passo successivo: predisporre finestra controllata, backup codice/Rules/config/dati e verificare progetto attivo, client chiusi, piano staging/canary e integrazione fast-forward; nessuna pubblicazione Rules o merge autorizzati in questo controllo. Non assumere disponibilità export gestito Spark; verificare modalità di backup compatibile e non distruttiva. Non pubblicare Rules isolate con client incompatibili. Nessuna modifica operativa eseguita.
+
+
+### AT05 — avvio pubblicazione manuale coordinata
+Verificato direttamente hash Git della copia Rules fornita dal proprietario, normalizzata solo per newline finale: 911d2a1e81185d3b489a22f9738ca1975c5ba7f8, coincide con main. Candidata 08942f02f3cbeba0cb7ed32f11bb19aff1226684 e Rules blob 2a668723c9f5d22a1f7a3909b22a4e142562060d ricontrollate. Proprietario conferma backup e uscita di tutti i giocatori (punti 1 e 2). Istruzione per pubblicazione manuale delle Rules integrali della candidata mantenendo sospeso il multiplayer, verificare progetto corretto e conferma pubblicazione prima dell'integrazione autorizzata. Nessuna pubblicazione o merge effettuata da CONTROLLO; nessun accesso diretto a Firebase. Backup dati non ispezionato direttamente. Dopo conferma, integrare solo commit approvato con fast-forward, verificare CI main/Pages, versione PWA e canary prima di riaprire; se errore fermarsi e preservare ledger. Nessuna chiusura operativa anticipata.
