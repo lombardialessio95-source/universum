@@ -1,0 +1,6 @@
+tree f36a2516c1d34208070b87e37d29d8aa25ae65f0
+parent a75ab56c559af87d1b04dda321cfcb344fb492ae
+author UNIVERSUM local <universum-local@invalid> 1795792941 +0000
+committer UNIVERSUM local <universum-local@invalid> 1795792941 +0000
+
+AT05: local Rules for immutable operation evidence, recovery and replay protection

@@ -1,0 +1,6 @@
+tree d73ffd1c0ba87c5df8e93698b6a8837ded05178b
+parent 7099402d8596d3a179191b8ff2427ac3145df897
+author UNIVERSUM AT05 <at05@local.invalid> 1795791514 +0000
+committer UNIVERSUM AT05 <at05@local.invalid> 1795791514 +0000
+
+AT05: tested recovery and direct-write guards; Rules approval pending

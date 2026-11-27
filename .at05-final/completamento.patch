@@ -1,0 +1,2331 @@
+diff --git a/modules/online/bots.js b/modules/online/bots.js
+index eacd2ec..84ad05c 100644
+--- a/modules/online/bots.js
++++ b/modules/online/bots.js
+@@ -215,6 +215,8 @@
+   // La flotta del mercante non è una flotta PvP reale: risolve un attacco orbitale
+   // su commissione e ritira tutti i detriti; difese, edifici e pianeta restano intatti.
+   async function hireOnlineMoonMerchant(universeObj, coords) {
++    const guard=G.ordinaryMutationGuard(universeObj);
++    try {
+     const user = getAuth().currentUser;
+     if (!user) throw new Error('Utente non autenticato.');
+     if (!universeObj?.id || universeObj.creativeMode) throw new Error('Servizio disponibile solo negli universi Normali.');
+@@ -222,7 +224,9 @@
+     if (!mm) throw new Error('Servizio Mercante di Lune non disponibile.');
+     const planetRef = getDB().collection('online_universes').doc(universeObj.id)
+       .collection('planets').doc(coordsToKey(coords));
++    guard.check();
+     const outcome = await getDB().runTransaction(async (tx) => {
++      guard.check();
+       const snap = await tx.get(planetRef);
+       if (!snap.exists || snap.data().ownerUid !== user.uid) throw new Error('Il pianeta non appartiene al tuo impero.');
+       const stored = snap.data();
+@@ -237,6 +241,7 @@
+         updates[`inbox.fleet.${shipId}`] = FV.increment(-qty);
+       }
+       if (success) updates.moon = mm.createMoonData();
++      guard.check();
+       tx.update(planetRef, updates);
+       return { ...check, success, coords, charged: mm.FEE };
+     });
+@@ -246,10 +251,13 @@
+       body: mm.report(outcome), timestamp: Date.now()
+     }).catch((e) => console.warn('[MoonMerchant] Report non salvato:', e));
+     return outcome;
++    } finally { guard.release(); }
+   }
+ 
+ 
+   async function tradeWithOnlineBot(universeObj, botCoords, giveRes, giveAmount, getRes) {
++    const guard=G.ordinaryMutationGuard(universeObj);
++    try {
+     const auth = getAuth();
+     const db = getDB();
+     const user = auth.currentUser;
+@@ -280,7 +288,9 @@
+     if (received <= 0) throw new Error('Quantità troppo bassa.');
+ 
+     const FV = firebase.firestore.FieldValue;
++    guard.check();
+     await db.runTransaction(async (tx) => {
++      guard.check();
+       const homeSnap = await tx.get(homeRef);
+       const freshBot = await tx.get(botRef);
+       if (!homeSnap.exists || !freshBot.exists) throw new Error('Dati non disponibili.');
+@@ -301,6 +311,7 @@
+         [`inbox.resources.${giveRes}`]: FV.increment(-amount),
+         [`inbox.resources.${getRes}`]: FV.increment(received)
+       };
++      guard.check();
+       tx.update(homeRef, updHome);
+       tx.update(botRef, {
+         [`resources.${giveRes}`]: FV.increment(amount),
+@@ -310,6 +321,7 @@
+     });
+ 
+     return { given: amount, received };
++    } finally { guard.release(); }
+   }
+ 
+ 
+diff --git a/modules/online/combat-resolver.js b/modules/online/combat-resolver.js
+index 1412a74..6716c19 100644
+--- a/modules/online/combat-resolver.js
++++ b/modules/online/combat-resolver.js
+@@ -44,6 +44,11 @@
+   }
+ 
+   async function _resolveArrivedOnlineFleetsImpl(uniId, knownSpeed) {
++    // AT05: le risoluzioni server proseguono, ma un callback tardivo non
++    // deve proiettare un risultato sulla partita sostituita dal recupero.
++    const projectionUniverse = window.UniversumUI?.state?.currentUniverse;
++    const projectionUid = getAuth().currentUser?.uid;
++    const projectionEpoch = G.ordinaryRecoveryEpoch?.(projectionUniverse,projectionUid);
+     const db = getDB();
+     const uniRef = db.collection('online_universes').doc(uniId);
+     const now = Date.now();
+@@ -699,7 +704,11 @@
+           }
+         });
+ 
+-        const localUni = window.UniversumUI?.state?.currentUniverse;
++        const currentLocal = window.UniversumUI?.state?.currentUniverse;
++        const localUni = currentLocal && currentLocal===projectionUniverse && currentLocal.id===uniId &&
++          getAuth().currentUser?.uid===projectionUid &&
++          G.ordinaryRecoveryEpoch?.(currentLocal,projectionUid)===projectionEpoch &&
++          !G.ordinaryCheckpointBlocked?.(currentLocal,null,projectionUid) ? currentLocal : null;
+         if (localUni?.id===uniId && galCredit && localUni.galatticaVersions?.[galCredit.key]===galCredit.previous) {
+           const gal=localUni.galattiche.find(g=>g.id===galCredit.id);
+           if (gal) {
+diff --git a/modules/online/communications.js b/modules/online/communications.js
+index 538fba9..2a3f9ed 100644
+--- a/modules/online/communications.js
++++ b/modules/online/communications.js
+@@ -29,18 +29,27 @@
+ 
+ 
+   async function deleteReport(uniId, reportId) {
++    const guard=G.ordinaryMutationGuard({id:uniId});
++    try {
++    guard.check();
+     const db = getDB();
+     await db.collection('online_universes').doc(uniId).collection('messages').doc(reportId).delete();
++    } finally { guard.release(); }
+   }
+ 
+ 
+   async function deleteAllReports(uniId) {
++    const guard=G.ordinaryMutationGuard({id:uniId});
++    try {
++    guard.check();
+     const reports = await getReports(uniId);
++    guard.check();
+     const db = getDB();
+     const batch = db.batch();
+     reports.forEach((r) => batch.delete(db.collection('online_universes').doc(uniId).collection('messages').doc(r.id)));
+     await batch.commit();
+     return reports.length;
++    } finally { guard.release(); }
+   }
+ 
+ 
+@@ -238,6 +247,8 @@
+ 
+ 
+   async function leaveOnlineUniverse(uniId) {
++    const guard=G.ordinaryMutationGuard({id:uniId});
++    try {
+     const auth = getAuth();
+     const db = getDB();
+     const user = auth.currentUser;
+@@ -245,7 +256,11 @@
+ 
+     const uniRef = db.collection('online_universes').doc(uniId);
+     const playerRef = uniRef.collection('players').doc(user.uid);
+-    const playerSnap = await playerRef.get();
++    const playerSnap = await playerRef.get({source:'server'});
++    guard.check();
++    if (playerSnap.metadata?.fromCache!==false || playerSnap.metadata.hasPendingWrites!==false) throw Error('Profilo non verificato dal server.');
++    if (playerSnap.data()?.ordinaryDispatchReceipt && playerSnap.data().ordinaryDispatchReceipt.acknowledged!==true)
++      throw Error('Ricevuta partenza non riconciliata: abbandono sospeso.');
+     if (!playerSnap.exists) {
+       await releaseServerSlot(db, user.uid, uniId);
+       return;
+@@ -254,6 +269,7 @@
+     const planetsSnap = await uniRef.collection('planets').where('ownerUid', '==', user.uid).get();
+     const fleetsSnap = await uniRef.collection('fleets').where('attackerUid', '==', user.uid).get().catch(() => ({ docs: [] }));
+ 
++    guard.check();
+     const batch = db.batch();
+     planetsSnap.docs.forEach((d) => batch.delete(d.ref));
+     fleetsSnap.docs.forEach((d) => batch.delete(d.ref));
+@@ -263,10 +279,13 @@
+     await uniRef.update({ playerCount: firebase.firestore.FieldValue.increment(-1) }).catch(() => {});
+     G.invalidateOnlineUniverseList?.();
+     await releaseServerSlot(db, user.uid, uniId);
++    } finally { guard.release(); }
+   }
+ 
+ 
+   async function deleteOnlineUniverse(uniId) {
++    const guard=G.ordinaryMutationGuard({id:uniId});
++    try {
+     const auth = getAuth();
+     const db = getDB();
+     const user = auth.currentUser;
+@@ -281,7 +300,13 @@
+       throw new Error("Solo l'utente che ha creato il server puo' eliminarlo.");
+     }
+ 
+-    const playersSnap = await uniRef.collection('players').get();
++    const playersSnap = await uniRef.collection('players').get({source:'server'});
++    guard.check();
++    if (playersSnap.metadata?.fromCache!==false || playersSnap.metadata.hasPendingWrites!==false ||
++        playersSnap.docs.some(d=>d.metadata?.fromCache!==false || d.metadata.hasPendingWrites!==false))
++      throw Error('Profili non verificati dal server.');
++    if (playersSnap.docs.some(d=>d.data()?.ordinaryDispatchReceipt && d.data().ordinaryDispatchReceipt.acknowledged!==true))
++      throw Error('Ricevuta partenza non riconciliata: eliminazione sospesa.');
+     const playerUids = playersSnap.docs.map((d) => d.data()?.uid || d.id);
+ 
+     for (const uid of playerUids) {
+@@ -312,6 +337,7 @@
+ 
+     _invalidateUniCaches(uniId);
+     _syncLastByUni.delete(uniId);
++    } finally { guard.release(); }
+   }
+ 
+ 
+diff --git a/modules/online/fleet-control.js b/modules/online/fleet-control.js
+index 7020051..403c468 100644
+--- a/modules/online/fleet-control.js
++++ b/modules/online/fleet-control.js
+@@ -39,11 +39,279 @@
+ 
+ 
+ 
++  // AT05-I05: richiesta persistente e ricevuta terminale a spazio costante.
++  const ordinaryDepartures = new Map();
++  const ordinaryRecoveries = new Set();
++  const ordinaryMutations = new Map();
++  const retiredDepartureStates = new WeakSet();
++  const recoveryEpochs = new Map();
++  const departureKey = (u,uid=getAuth().currentUser?.uid) =>
++    'universum:ordinary-departure:v1:'+JSON.stringify([uid,u.id]);
++  const terminalStatuses=new Set(['committed','cancelled']);
++  function pendingDepartureError(p) {
++    return Object.assign(Error('Partenza in verifica. Non ripetere l’invio.'),
++      {code:'ordinary-departure-pending',fleetId:p?.operationId || null});
++  }
++  function storageError(cause) {
++    return Object.assign(Error('Memoria locale indisponibile: impossibile garantire una partenza sicura.'),
++      {code:'ordinary-departure-storage',cause});
++  }
++  const validRevision=n=>Number.isSafeInteger(n) && n>=0 && n<Number.MAX_SAFE_INTEGER;
++  function readStoredDeparture(u,uid) {
++    const key=departureKey(u,uid);
++    try {
++      const raw=window.localStorage.getItem(key);
++      const active=ordinaryDepartures.get(key);
++      if (raw===null) return active ? {...active.record,missing:true} : null;
++      const record=JSON.parse(raw);
++      if (!record || record.accountUid!==uid || record.universeId!==u.id ||
++          typeof record.operationId!=='string' || !record.operationId || record.operationId.includes('/') ||
++          typeof record.originKey!=='string' || !record.originKey ||
++          !(record.expectedRevision===null || validRevision(record.expectedRevision)) ||
++          !['pending','settled'].includes(record.status) ||
++          (record.status==='settled' && (!terminalStatuses.has(record.terminalStatus) ||
++            !(record.terminalRevision===null || Number.isSafeInteger(record.terminalRevision))))) throw Error('Richiesta persistente non valida.');
++      // Una scrittura locale parzialmente riuscita non libera la sessione attiva.
++      if (active && record.status==='settled') return {...active.record,missing:true};
++      return record;
++    } catch (error) { throw storageError(error); }
++  }
++  function readOrdinaryDeparture(u,uid) {
++    const record=readStoredDeparture(u,uid);
++    return record?.status==='pending' ? record : null;
++  }
++  function ordinaryDepartureStatus(u,uid=getAuth().currentUser?.uid) {
++    if (!u?.id || !uid) return null;
++    return readOrdinaryDeparture(u,uid);
++  }
++  function ordinaryDepartureBusy(u,uid=getAuth().currentUser?.uid) {
++    if (!u?.id || !uid) return false;
++    const key=departureKey(u,uid);
++    return ordinaryRecoveries.has(key) || Boolean(ordinaryDepartures.get(key)?.busy);
++  }
++  function ordinaryDepartureInitialBusy(u,uid=getAuth().currentUser?.uid) {
++    return Boolean(u?.id && uid && ordinaryDepartures.get(departureKey(u,uid))?.busy);
++  }
++  function notifyOrdinaryDepartureChanged(u) {
++    try { window.UniversumUI?.onOrdinaryDepartureChanged?.(u); }
++    catch (error) { console.warn('[AT05] Aggiornamento pannello:',error); }
++  }
++  function beginOrdinaryMutation(u,uid=getAuth().currentUser?.uid) {
++    if (!u?.id || !uid || getAuth().currentUser?.uid!==uid) throw Error('Account non attivo.');
++    assertOrdinaryMutationAllowed(u,uid);
++    const key=departureKey(u,uid);
++    ordinaryMutations.set(key,(ordinaryMutations.get(key)||0)+1);
++    let released=false;
++    return ()=>{
++      if (released) return;
++      released=true;
++      const count=ordinaryMutations.get(key)||0;
++      if (count<=1) ordinaryMutations.delete(key);
++      else ordinaryMutations.set(key,count-1);
++    };
++  }
++  // AT05: protezione delle API volontarie che non passano dal checkpoint.
++  function ordinaryMutationGuard(u,uid=getAuth().currentUser?.uid) {
++    const release=beginOrdinaryMutation(u,uid);
++    const epoch=ordinaryRecoveryEpoch(u,uid);
++    const active=window.UniversumUI?.state?.currentUniverse;
++    return {release,check(){
++      if (getAuth().currentUser?.uid!==uid || ordinaryRecoveryEpoch(u,uid)!==epoch ||
++          window.UniversumUI?.state?.currentUniverse!==active) throw pendingDepartureError(null);
++      assertOrdinaryMutationAllowed(u,uid);
++    }};
++  }
++  function ordinaryRecoveryEpoch(u,uid=getAuth().currentUser?.uid) {
++    return u?.id && uid ? recoveryEpochs.get(departureKey(u,uid)) || 0 : 0;
++  }
++  function ordinaryCheckpointBlocked(u,dispatch,uid=getAuth().currentUser?.uid) {
++    if (!u?.id || !uid) return false;
++    if (retiredDepartureStates.has(u)) return true;
++    try {
++      const p=readOrdinaryDeparture(u,uid);
++      if (!p) return false;
++      const active=ordinaryDepartures.get(departureKey(u,uid));
++      return !(active && dispatch?.ordinary && dispatch===active.dispatch &&
++        active.universe===u && !p.missing && JSON.stringify(p)===JSON.stringify(active.record));
++    } catch (error) { return true; }
++  }
++  function assertOrdinaryMutationAllowed(u,uid=getAuth().currentUser?.uid) {
++    if (ordinaryCheckpointBlocked(u,null,uid)) throw pendingDepartureError(ordinaryDepartureStatus(u,uid));
++  }
++  function writeDeparture(key,record) {
++    try {
++      const raw=JSON.stringify(record);
++      window.localStorage.setItem(key,raw);
++      if (window.localStorage.getItem(key)!==raw) throw Error('Scrittura locale non verificata.');
++    } catch (error) { throw storageError(error); }
++  }
++  function assertDepartureRecord(request) {
++    if (window.localStorage.getItem(request.key)!==JSON.stringify(request.record)) throw pendingDepartureError(request.record);
++  }
++  function reserveOrdinaryDeparture(u,uid,dispatch) {
++    const previous=readStoredDeparture(u,uid);
++    if (previous?.status==='pending') throw pendingDepartureError(previous);
++    const key=departureKey(u,uid);
++    if (ordinaryMutations.has(key)) throw Error('Operazione in corso. Attendi prima di inviare la flotta.');
++    const record={accountUid:uid,universeId:u.id,operationId:dispatch.ref.id,
++      originKey:dispatch.doc.originKey,expectedRevision:validRevision(u.serviceRevision)?u.serviceRevision:null,
++      status:'pending',protocol:2,armed:false};
++    writeDeparture(key,record);
++    const request={key,record,universe:u,dispatch,previous,busy:true};
++    ordinaryDepartures.set(key,request);
++    notifyOrdinaryDepartureChanged(u);
++    return request;
++  }
++  function prepareOrdinaryDispatch(u,dispatch,uid) {
++    const request=ordinaryDepartures.get(departureKey(u,uid));
++    if (!request || request.dispatch!==dispatch || ordinaryCheckpointBlocked(u,dispatch,uid))
++      throw pendingDepartureError(request?.record);
++    const expected=validRevision(u.serviceRevision)?u.serviceRevision:null;
++    if (expected===request.record.expectedRevision) return;
++    const record={...request.record,expectedRevision:expected};
++    writeDeparture(request.key,record);
++    request.record=record;
++  }
++  function receiptMatches(record,receipt) {
++    return Boolean(receipt && receipt.operationId===record.operationId && receipt.originKey===record.originKey &&
++      receipt.expectedRevision===record.expectedRevision && terminalStatuses.has(receipt.status) &&
++      receipt.terminalRevision===(record.expectedRevision===null ? null : record.expectedRevision+1) &&
++      (record.profileJoinedAt===undefined || receipt.profileJoinedAt===record.profileJoinedAt));
++  }
++  function settledMatches(record,receipt) {
++    return record?.status==='settled' && receiptMatches(record,receipt) &&
++      record.terminalStatus===receipt.status && record.terminalRevision===receipt.terminalRevision;
++  }
++  function bindOrdinaryReceipt(u,dispatch,uid,playerSnap) {
++    const request=ordinaryDepartures.get(departureKey(u,uid));
++    if (!request || request.dispatch!==dispatch || ordinaryCheckpointBlocked(u,dispatch,uid) || !playerSnap?.exists)
++      throw pendingDepartureError(request?.record);
++    const player=playerSnap.data();
++    const previous=player.ordinaryDispatchReceipt || null;
++    // La ricevuta non ancora riconciliata non può essere sovrascritta.
++    if (previous && previous.acknowledged!==true && !settledMatches(request.previous,previous))
++      throw Object.assign(Error('Ricevuta precedente non riconciliata.'),{code:'ordinary-receipt-unacknowledged'});
++    if (previous?.operationId===request.record.operationId) throw pendingDepartureError(request.record);
++    const joinedAt=Number.isSafeInteger(player.joinedAt) ? player.joinedAt : null;
++    const record={...request.record,armed:true,profileJoinedAt:joinedAt,previousReceiptId:previous?.operationId || null};
++    if (request.record.armed && JSON.stringify(record)!==JSON.stringify(request.record)) throw pendingDepartureError(request.record);
++    if (!request.record.armed) {
++      writeDeparture(request.key,record);
++      request.record=record;
++    }
++    return {operationId:record.operationId,originKey:record.originKey,expectedRevision:record.expectedRevision,
++      terminalRevision:record.expectedRevision===null ? null : record.expectedRevision+1,
++      profileJoinedAt:joinedAt,status:'committed',acknowledged:false};
++  }
++  function ordinaryReceiptAcknowledgement(u,player,uid) {
++    const record=readStoredDeparture(u,uid);
++    const receipt=player.ordinaryDispatchReceipt;
++    return receipt && receipt.acknowledged!==true && settledMatches(record,receipt) ? {...receipt,acknowledged:true} : null;
++  }
++  function clearOrdinaryDeparture(request) {
++    // Soltanto fallimento certamente precedente a qualunque commit.
++    try {
++      assertDepartureRecord(request);
++      if (request.previous) writeDeparture(request.key,request.previous);
++      else {
++        window.localStorage.removeItem(request.key);
++        if (window.localStorage.getItem(request.key)!==null) throw Error('Rimozione locale non verificata.');
++      }
++      ordinaryDepartures.delete(request.key);
++    } catch (error) { throw storageError(error); }
++  }
++  function settleOrdinaryDeparture(request,receipt) {
++    if (!receiptMatches(request.record,receipt)) throw pendingDepartureError(request.record);
++    assertDepartureRecord(request);
++    // Prima la conferma persistente; la ricevuta server rimane fino al prossimo checkpoint.
++    const record={...request.record,status:'settled',terminalStatus:receipt.status,terminalRevision:receipt.terminalRevision};
++    writeDeparture(request.key,record);
++    ordinaryDepartures.delete(request.key);
++  }
++  function verifyTerminalEvidence(record,evidence) {
++    if (!evidence || evidence.uid!==record.accountUid || evidence.universeId!==record.universeId ||
++        evidence.operationId!==record.operationId || !Number.isSafeInteger(evidence.revision)) throw pendingDepartureError(record);
++    if (record.profileJoinedAt!=null && evidence.joinedAt!==record.profileJoinedAt) throw pendingDepartureError(record);
++    const fleet=evidence.fleet;
++    if (fleet && (fleet.id!==record.operationId || fleet.attackerUid!==record.accountUid || fleet.originKey!==record.originKey))
++      throw pendingDepartureError(record);
++    if (receiptMatches(record,evidence.receipt)) {
++      if (evidence.receipt.status==='cancelled' && fleet) throw pendingDepartureError(record);
++      if (evidence.receipt.terminalRevision!==null && evidence.revision<evidence.receipt.terminalRevision) throw pendingDepartureError(record);
++      return evidence.receipt;
++    }
++    // Compatibilità con richieste I01 anteriori al protocollo ricevute:
++    // solo presenza positiva della flotta, mai assenza come prova negativa.
++    if (record.protocol!==2 && fleet && (record.expectedRevision===null || evidence.revision>record.expectedRevision))
++      return {operationId:record.operationId,originKey:record.originKey,expectedRevision:record.expectedRevision,
++        terminalRevision:record.expectedRevision===null ? null : record.expectedRevision+1,status:'committed'};
++    throw pendingDepartureError(record);
++  }
++  async function cancelUncertainDeparture(request,passcode,stillCurrent) {
++    const {record}=request;
++    if (record.protocol!==2 || record.armed!==true || !validRevision(record.expectedRevision) || record.profileJoinedAt==null)
++      throw pendingDepartureError(record);
++    const uid=record.accountUid;
++    const db=getDB(),uni=db.collection('online_universes').doc(record.universeId);
++    const playerRef=uni.collection('players').doc(uid),fleetRef=uni.collection('fleets').doc(record.operationId);
++    await db.runTransaction(async tx=>{
++      if (!stillCurrent()) throw pendingDepartureError(record);
++      assertDepartureRecord(request);
++      const [universe,player,fleet]=await Promise.all([tx.get(uni),tx.get(playerRef),tx.get(fleetRef)]);
++      if (!universe.exists || !player.exists || player.data().joinedAt!==record.profileJoinedAt) throw pendingDepartureError(record);
++      if (universe.data().passcode && universe.data().passcode!==String(passcode || '').trim()) throw Error('Codice stanza errato.');
++      const data=player.data(),receipt=data.ordinaryDispatchReceipt;
++      if (receiptMatches(record,receipt)) return; // esito già terminale, nessuna nuova scrittura
++      if (fleet.exists || (data.serviceRevision ?? 0)!==record.expectedRevision ||
++          (receipt?.operationId || null)!==record.previousReceiptId) throw pendingDepartureError(record);
++      if (!stillCurrent()) throw pendingDepartureError(record);
++      assertDepartureRecord(request);
++      // Barriera sulla stessa revisione letta dal dispatch originale. Non
++      // accredita risorse e non crea una flotta: rende impossibile il commit tardivo.
++      tx.update(playerRef,{serviceRevision:record.expectedRevision+1,ordinaryDispatchReceipt:{
++        operationId:record.operationId,originKey:record.originKey,expectedRevision:record.expectedRevision,
++        terminalRevision:record.expectedRevision+1,profileJoinedAt:record.profileJoinedAt,status:'cancelled',acknowledged:false}});
++    });
++  }
++  async function verifyOrdinaryDeparture(u,{cancel=false,passcode=u?.roomPasscode,isCurrent=null}={}) {
++    const uid=getAuth().currentUser?.uid;
++    const record=ordinaryDepartureStatus(u,uid);
++    if (!record || record.missing) throw pendingDepartureError(record);
++    const key=departureKey(u,uid),activeRequest=ordinaryDepartures.get(key);
++    if (ordinaryRecoveries.has(key) || activeRequest?.busy || activeRequest?.dispatch) throw pendingDepartureError(record);
++    const ui=window.UniversumUI,active=ui?.state?.currentUniverse;
++    const stillCurrent=()=>getAuth().currentUser?.uid===uid && ui?.state?.currentUniverse===active &&
++      (active ? active===u && ui.state.isMultiplayerMode : !ui?.state?.isMultiplayerMode && typeof isCurrent==='function' && isCurrent());
++    if (!stillCurrent()) throw pendingDepartureError(record);
++    ordinaryRecoveries.add(key);
++    notifyOrdinaryDepartureChanged(active);
++    const request={key,record,universe:active};
++    try {
++      assertDepartureRecord(request);
++      if (cancel) await cancelUncertainDeparture(request,passcode,stillCurrent);
++      if (!stillCurrent()) throw pendingDepartureError(record);
++      const fresh=await G.joinOnlineUniverse(u.id,passcode,{serverOnly:true,operationId:record.operationId});
++      const receipt=verifyTerminalEvidence(record,G.ordinaryRecoveryEvidence(fresh));
++      if (!stillCurrent()) throw pendingDepartureError(record);
++      assertDepartureRecord(request);
++      if (active) retiredDepartureStates.add(active);
++      if (activeRequest?.universe) retiredDepartureStates.add(activeRequest.universe);
++      recoveryEpochs.set(key,ordinaryRecoveryEpoch(u,uid)+1);
++      ui.startOnlineGame(fresh);
++      if (getAuth().currentUser?.uid!==uid || ui.state.currentUniverse!==fresh || !ui.state.isMultiplayerMode)
++        throw pendingDepartureError(record);
++      settleOrdinaryDeparture(request,receipt);
++      return {status:receipt.status,operationId:record.operationId};
++    } finally { ordinaryRecoveries.delete(key); notifyOrdinaryDepartureChanged(ui?.state?.currentUniverse); }
++  }
+   async function launchOnlineFleet(universeObj, originPlanetIndex, targetCoords, mission, shipsSelected, cargo = {}, options = {}) {
+     const auth = getAuth();
+     const db = getDB();
+     const user = auth.currentUser;
+     if (!user) throw new Error('Utente non autenticato.');
++    assertOrdinaryMutationAllowed(universeObj,user.uid);
++    const epoch=ordinaryRecoveryEpoch(universeObj,user.uid);
++    const wasActive=window.UniversumUI?.state?.currentUniverse===universeObj;
+ 
+     const planet = universeObj.planets[originPlanetIndex];
+     if (!planet) throw new Error('Pianeta di partenza non valido.');
+@@ -203,41 +471,65 @@
+ 
+     const ordinary = !(targeted || dockDispatch || specialist || carrierHangars.length);
+     const ref = uniRef.collection('fleets').doc();
+-    const committed = await syncPlayerState(universeObj,{force:true,dispatch:{ref,doc:fleetDoc,
+-      ordinary,carrierHangars,specialist:Boolean(specialist),
+-      debit:{metal:cargoM,crystal:cargoC,deuterium:cargoD+flightStats.fuelCost+blackHoleExtra}}});
+-    if (ordinary && committed !== true) throw new Error('Partenza non confermata.');
+-    fleetDoc.id = ref.id;
+-
++    if (getAuth().currentUser?.uid!==user.uid) throw Error('Account cambiato durante la partenza.');
++    if (ordinaryRecoveryEpoch(universeObj,user.uid)!==epoch) throw pendingDepartureError(null);
++    assertOrdinaryMutationAllowed(universeObj,user.uid);
++    const dispatch={ref,doc:fleetDoc,ordinary,carrierHangars,specialist:Boolean(specialist),
++      debit:{metal:cargoM,crystal:cargoC,deuterium:cargoD+flightStats.fuelCost+blackHoleExtra}};
++    const request=ordinary ? reserveOrdinaryDeparture(universeObj,user.uid,dispatch) : null;
++    if (request) dispatch.outcome={};
+     try {
+-      const savedSnap = await ref.get();
+-      const serverDepartureMs = _tsToMs(savedSnap.exists ? savedSnap.data()?.departureAt : null);
+-      if (serverDepartureMs > 0) {
+-        const durationMs = arrivalTime - now;
+-        const returnDurationMs = returnTime - arrivalTime;
+-        fleetDoc.departureTime = serverDepartureMs;
+-        if (timeline) {
+-          Object.assign(fleetDoc, MCore.buildExplorationTimeline(
+-            serverDepartureMs, flightStats.durationSec, holdDurationSec));
+-        } else {
+-          fleetDoc.arrivalTime = serverDepartureMs + durationMs;
+-          fleetDoc.returnTime = fleetDoc.arrivalTime + returnDurationMs;
+-        }
+-        await ref.update({
+-          departureTime: fleetDoc.departureTime,
+-          arrivalTime: fleetDoc.arrivalTime,
+-          returnTime: fleetDoc.returnTime,
+-          ...(timeline ? {
+-            zoneArrivalTime: fleetDoc.zoneArrivalTime,
+-            explorationEndTime: fleetDoc.explorationEndTime
+-          } : {})
+-        });
++      let committed;
++      try {
++        committed=await syncPlayerState(universeObj,{force:true,dispatch});
++      } catch (error) {
++        // Un callback mai concluso non ha consegnato scritture al commit SDK.
++        // Se il callback è stato concluso almeno una volta, non dedurre l’esito.
++        if (request && dispatch.outcome.definitePreCommitFailure) clearOrdinaryDeparture(request);
++        else if (request) throw pendingDepartureError(request.record);
++        throw error;
++      } finally {
++        // Il privilegio vale soltanto per la chiamata iniziale, non per un retry.
++        if (request) request.dispatch=null;
+       }
+-    } catch (e) { /* fallback ai tempi gia' salvati */ }
++      if (ordinary && (committed !== true || getAuth().currentUser?.uid!==user.uid)) throw pendingDepartureError(request.record);
++      fleetDoc.id = ref.id;
++
++      try {
++        const savedSnap = await ref.get();
++        const serverDepartureMs = _tsToMs(savedSnap.exists ? savedSnap.data()?.departureAt : null);
++        if (serverDepartureMs > 0 && getAuth().currentUser?.uid===user.uid && ordinaryRecoveryEpoch(universeObj,user.uid)===epoch) {
++          const durationMs = arrivalTime - now;
++          const returnDurationMs = returnTime - arrivalTime;
++          fleetDoc.departureTime = serverDepartureMs;
++          if (timeline) {
++            Object.assign(fleetDoc, MCore.buildExplorationTimeline(
++              serverDepartureMs, flightStats.durationSec, holdDurationSec));
++          } else {
++            fleetDoc.arrivalTime = serverDepartureMs + durationMs;
++            fleetDoc.returnTime = fleetDoc.arrivalTime + returnDurationMs;
++          }
++          await ref.update({
++            departureTime: fleetDoc.departureTime,
++            arrivalTime: fleetDoc.arrivalTime,
++            returnTime: fleetDoc.returnTime,
++            ...(timeline ? {
++              zoneArrivalTime: fleetDoc.zoneArrivalTime,
++              explorationEndTime: fleetDoc.explorationEndTime
++            } : {})
++          });
++        }
++      } catch (e) { /* fallback ai tempi gia' salvati */ }
+ 
+-    if (!universeObj.fleetsInFlight.some(f=>f.id===ref.id)) universeObj.fleetsInFlight.push(fleetDoc);
++      if (!universeObj.fleetsInFlight.some(f=>f.id===ref.id)) universeObj.fleetsInFlight.push(fleetDoc);
++      if (request) {
++        if (getAuth().currentUser?.uid!==user.uid || (wasActive && window.UniversumUI?.state?.currentUniverse!==universeObj))
++          throw pendingDepartureError(request.record);
++        settleOrdinaryDeparture(request,dispatch.outcome.receipt);
++      }
+ 
+-    return fleetDoc;
++      return fleetDoc;
++    } finally { if (request) { request.busy=false; notifyOrdinaryDepartureChanged(universeObj); } }
+   }
+ 
+ 
+@@ -246,7 +538,8 @@
+     const db = getDB();
+     const user = auth.currentUser;
+     if (!user || !universeObj?.id) throw new Error('Utente non autenticato.');
+-
++    const releaseMutation=beginOrdinaryMutation(universeObj,user.uid);
++    try {
+     const uniRef = db.collection('online_universes').doc(universeObj.id);
+     const fleetRef = uniRef.collection('fleets').doc(fleetId);
+     let newArrival = 0;
+@@ -267,6 +560,8 @@
+         ? MCore.getRecallDurationMs(fleet, now)
+         : Math.max(2000, now - Number(fleet.departureTime || now));
+       newArrival = now + durationMs;
++      if (getAuth().currentUser?.uid!==user.uid) throw Error('Account cambiato.');
++      assertOrdinaryMutationAllowed(universeObj,user.uid);
+       tx.update(fleetRef, {
+         status: 'returning',
+         phase: 'IN RITORNO',
+@@ -276,6 +571,7 @@
+       });
+     });
+ 
++    if (getAuth().currentUser?.uid!==user.uid || ordinaryCheckpointBlocked(universeObj,null,user.uid)) return;
+     const local = (universeObj.fleetsInFlight || []).find((f) => f.id === fleetId);
+     if (local) {
+       local.status = 'returning';
+@@ -286,6 +582,7 @@
+       local.arrivalTime = newArrival;
+       local.returnTime = newArrival;
+     }
++    } finally { releaseMutation(); }
+   }
+ 
+   function _mpNotifyError(context, err) {
+@@ -476,6 +773,6 @@
+     }
+   }
+ 
+-  Object.assign(G, { launchOnlineFleet, recallOnlineFleet, _mpNotifyError, listenOwnFleets, listenIncomingFleets, getLiveFleetDocs, clearLiveFleetDocs, _cleanupReasonText, forceCleanupOnlineFleet, processEmbargoFleets });
++  Object.assign(G, { launchOnlineFleet, ordinaryDepartureStatus, ordinaryDepartureBusy, ordinaryDepartureInitialBusy, beginOrdinaryMutation, ordinaryMutationGuard, ordinaryCheckpointBlocked, ordinaryRecoveryEpoch, assertOrdinaryMutationAllowed, prepareOrdinaryDispatch, bindOrdinaryReceipt, ordinaryReceiptAcknowledgement, verifyOrdinaryDeparture, recallOnlineFleet, _mpNotifyError, listenOwnFleets, listenIncomingFleets, getLiveFleetDocs, clearLiveFleetDocs, _cleanupReasonText, forceCleanupOnlineFleet, processEmbargoFleets });
+ 
+ })();
+diff --git a/modules/online/galattiche.js b/modules/online/galattiche.js
+index ee4445b..94e9d17 100644
+--- a/modules/online/galattiche.js
++++ b/modules/online/galattiche.js
+@@ -22,8 +22,8 @@
+     return {ownerUid:data.ownerUid,ownerName:data.ownerName,name:data.state.name || 'Galattica',
+       coordKey:data.coordKey,systemKey:data.systemKey,defenses:data.state.defenses || {},destroyed:data.destroyed};
+   }
+-  async function restoreGalattiche(universe, uid) {
+-    const result = await collection(universe.id).where('ownerUid', '==', uid).get();
++  async function restoreGalattiche(universe, uid, {snapshot=null,now=null} = {}) {
++    const result = snapshot || await collection(universe.id).where('ownerUid', '==', uid).get();
+     universe.galattiche = [];
+     universe.galatticaVersions = {};
+     universe.galatticaSignatures = {};
+@@ -33,7 +33,7 @@
+       const state = data.state;
+       universe.galatticaSignatures[doc.id]=JSON.stringify(state);
+       window.__UniversumEngineModules.addGalatticaProduction({ ...universe, galattiche: [state] },
+-        Math.max(0, (Date.now() - data.updatedAt) / 1000));
++        Math.max(0, ((now ?? Date.now()) - data.updatedAt) / 1000));
+       universe.galattiche.push(state);
+       universe.galatticaVersions[doc.id] = data.version;
+     }
+@@ -89,6 +89,8 @@
+   }
+   async function launchGalattica(u,id,target,mission,selection,cargo,options={}) {
+     const uid=G.getAuth().currentUser?.uid;
++    const release=G.beginOrdinaryMutation?.(u,uid) || (()=>{});
++    try {
+     if (!uid || !Number.isSafeInteger(u.serviceRevision)) throw Error('Riapri la partita multiplayer.');
+     const source=u.galattiche?.find(g=>g.id===id);
+     if (!source) throw Error('Galattica di origine non disponibile.');
+@@ -112,10 +114,13 @@
+     await G.syncPlayerState(u,{force:true,galLaunch:{ref,doc,state,key:doc.originGalatticaKey,expected,before}});
+     if (!u.fleetsInFlight.some(f=>f.id===doc.id)) u.fleetsInFlight.push(doc);
+     return doc;
++    } finally { release(); }
+   }
+ 
+   async function jumpOnlineGalattica(u,id,target) {
+     const uid = G.getAuth().currentUser?.uid;
++    const release=G.beginOrdinaryMutation?.(u,uid) || (()=>{});
++    try {
+     const source = u.galattiche.find(g=>g.id===id);
+     if (!uid || !source || !Number.isSafeInteger(u.serviceRevision)) throw Error('Origine non disponibile.');
+     const state = structuredClone(source);
+@@ -137,6 +142,7 @@
+     await G.syncPlayerState(u,{force:true,galLaunch:change});
+     if (change.doc && !u.fleetsInFlight.some(f=>f.id===change.doc.id)) u.fleetsInFlight.push(change.doc);
+     return result;
++    } finally { release(); }
+   }
+   async function returnGalattica(tx,base,ref,fleet,now,speed) {
+     const galRef=base.collection('galattiche').doc(fleet.originGalatticaKey);
+diff --git a/modules/online/sieges.js b/modules/online/sieges.js
+index 8cb7afa..bf2eee8 100644
+--- a/modules/online/sieges.js
++++ b/modules/online/sieges.js
+@@ -20,7 +20,11 @@
+ 
+ 
+   async function repairStuckMissions(uniId) {
++    const guard=G.ordinaryMutationGuard({id:uniId});
++    try {
++    guard.check();
+     await migrateOnlineFleets(uniId, { force: true });
++    guard.check();
+     await resolveArrivedOnlineFleets(uniId);
+     const db = getDB();
+     const uniRef = db.collection('online_universes').doc(uniId);
+@@ -36,11 +40,13 @@
+       if (fleet.resolved) continue;
+       if (fleet.status === 'embargo' || fleet.status === 'occupy') continue;
+       if (_fleetDueTime(fleet) <= now) {
++        guard.check();
+         await forceCleanupOnlineFleet(uniRef, fleet, d.ref, 'repair-button');
+         repaired++;
+       }
+     }
+     return repaired;
++    } finally { guard.release(); }
+   }
+ 
+ 
+@@ -166,6 +172,8 @@
+ 
+ 
+   async function payOnlineSiegeRansom(uniId, targetCoords) {
++    const guard=G.ordinaryMutationGuard({id:uniId});
++    try {
+     const auth = getAuth();
+     const db = getDB();
+     const user = auth.currentUser;
+@@ -191,7 +199,9 @@
+       return !ff.resolved && (ff.status === 'embargo' || ff.status === 'occupy');
+     });
+ 
++    guard.check();
+     await db.runTransaction(async (tx) => {
++      guard.check();
+       const snap = await tx.get(planetRef);
+       if (!snap.exists) throw new Error('Pianeta non trovato.');
+       const pl = snap.data();
+@@ -219,6 +229,7 @@
+       if (ransom.metal) payUpd['inbox.resources.metal'] = FV.increment(-Math.round(ransom.metal));
+       if (ransom.crystal) payUpd['inbox.resources.crystal'] = FV.increment(-Math.round(ransom.crystal));
+       if (ransom.deuterium) payUpd['inbox.resources.deuterium'] = FV.increment(-Math.round(ransom.deuterium));
++      guard.check();
+       tx.update(planetRef, payUpd);
+ 
+       if (!hasSiegeFleet && creditRef) {
+@@ -243,10 +254,13 @@
+     if (paidRansom) {
+       await _transitionSiegeFleetToReturning(uniRef, key, { pendingRansom: paidRansom });
+     }
++    } finally { guard.release(); }
+   }
+ 
+ 
+   async function liftOnlineSiege(uniId, targetCoords) {
++    const guard=G.ordinaryMutationGuard({id:uniId});
++    try {
+     const auth = getAuth();
+     const db = getDB();
+     const user = auth.currentUser;
+@@ -268,7 +282,9 @@
+       return !ff.resolved && (ff.status === 'embargo' || ff.status === 'occupy');
+     });
+ 
++    guard.check();
+     await db.runTransaction(async (tx) => {
++      guard.check();
+       const snap = await tx.get(planetRef);
+       if (!snap.exists) throw new Error('Pianeta non trovato.');
+       const pl = snap.data();
+@@ -280,6 +296,7 @@
+       }
+ 
+       const siege = isMyOccupation ? pl.occupation : pl.embargo;
++      guard.check();
+       tx.update(planetRef, {
+         embargo: isMyEmbargo ? null : pl.embargo,
+         occupation: isMyOccupation ? null : pl.occupation
+@@ -291,6 +308,7 @@
+     });
+ 
+     await _transitionSiegeFleetToReturning(uniRef, key);
++    } finally { guard.release(); }
+   }
+ 
+   Object.assign(G, { repairStuckMissions, processAllOccupations, sweepOccupationsThrottled, processOnlineOccupations, _transitionSiegeFleetToReturning, payOnlineSiegeRansom, liftOnlineSiege });
+diff --git a/modules/online/sync.js b/modules/online/sync.js
+index be71e5d..cb8e6e0 100644
+--- a/modules/online/sync.js
++++ b/modules/online/sync.js
+@@ -13,9 +13,9 @@
+ 
+ 
+ 
+-  function calculateLiveResources(planetDoc, speed = 10) {
++  function calculateLiveResources(planetDoc, speed = 10, recovery = null) {
+     if (!planetDoc) return planetDoc;
+-    const now = Date.now();
++    const now = recovery?.now ?? Date.now();
+     const last = Number(planetDoc.lastUpdated || now);
+     const elapsedHours = Math.max(0, (now - last) / 3600000);
+ 
+@@ -28,7 +28,7 @@
+       const ownUid = window.fbAuth?.currentUser?.uid;
+       // La tecnologia energetica è già nello stato della propria partita:
+       // nessuna lettura aggiuntiva di documenti Firestore.
+-      const prodResearches = cloned.researches || (ownUid && cloned.ownerUid === ownUid && active?.researches) || {};
++      const prodResearches = recovery ? recovery.researches : cloned.researches || (ownUid && cloned.ownerUid === ownUid && active?.researches) || {};
+       // Calcolo puro: divide l'intervallo anche se il combustibile termina durante l'assenza.
+       // Stessa regola usata dal tick offline: la produzione positiva si ferma
+       // alla capienza, i trasporti preesistenti oltre soglia non vengono tagliati
+@@ -96,12 +96,12 @@
+     const order = 1+events.reduce((n,e)=>Math.max(n,e.order || 0),0);
+     upd['inbox.serviceEvents.' + services.uid()] = {at,order,fleet,resources,defenses};
+   }
+-  function restoreServices(u, planets, player, now = Date.now()) {
++  function restoreServices(u, planets, player, now = Date.now(), {serverRecovery=false} = {}) {
+     const engine = window.UniversumEngine;
+     const services = window.UniversumServices;
+     const events = planets.flatMap(p=>Object.entries(p.inbox?.serviceEvents || {}).map(([key,event])=>({p,key,event})));
+     if (!engine || !services || (!events.length && !services.hasServices({planets}))) {
+-      u.planets = planets.map(p=>calculateLiveResources(p,u.speed));
++      u.planets = planets.map(p=>calculateLiveResources(p,u.speed,serverRecovery ? {now,researches:u.researches || {}} : null));
+       return;
+     }
+     u.planets = planets;
+@@ -318,8 +318,21 @@
+ 
+   async function syncPlayerState(u, options = {}) {
+     if (!u) return;
++    const uid=getAuth().currentUser?.uid;
++    const epoch=G.ordinaryRecoveryEpoch?.(u,uid);
++    const blocked=()=>G.ordinaryRecoveryEpoch?.(u,uid)!==epoch || G.ordinaryCheckpointBlocked?.(u,options.dispatch,uid);
++    const rejectBlocked=()=>{
++      if (options.dispatch || options.galLaunch) throw Object.assign(Error('Partenza in verifica.'),{code:'ordinary-departure-pending'});
++      return false;
++    };
++    // Controllo all’accodamento e all’esecuzione: un checkpoint vecchio
++    // non può diventare autorizzato soltanto perché era già nella coda.
++    if (blocked()) return rejectBlocked();
+     const previous = checkpoints.get(u);
+-    const operation = (previous || Promise.resolve()).catch(()=>{}).then(()=>saveCheckpoint(u,options));
++    const operation = (previous || Promise.resolve()).catch(()=>{}).then(()=>{
++      if (getAuth().currentUser?.uid!==uid || blocked()) return rejectBlocked();
++      return saveCheckpoint(u,{...options,recoveryEpoch:epoch});
++    });
+     checkpoints.set(u,operation);
+     try { return await operation; }
+     catch (error) {
+@@ -330,7 +343,7 @@
+         const fresh = ref && await ref.get({source:'server'}).catch(()=>null);
+         if (fresh?.exists && fresh.data().serviceRevision !== u.serviceRevision) error = conflict();
+       }
+-      if (error.code === 'service-conflict' && window.UniversumUI?.state?.currentUniverse === u) {
++      if (!options.dispatch?.outcome && !blocked() && error.code === 'service-conflict' && window.UniversumUI?.state?.currentUniverse === u) {
+         const ui = window.UniversumUI;
+         ui.toast(error.message,'error');
+         await ui.exitToLobbyAfterServerRemoval();
+@@ -366,11 +379,16 @@
+     for (const [k,n] of Object.entries(dispatch.debit)) p.resources[k] = Math.max(0,p.resources[k]-n);
+     if (!dispatch.ordinary) window.UniversumServices?.settlePlanet(u,p,now);
+   }
+-  async function saveCheckpoint(universeObj, { force = false, dispatch = null, galLaunch = null } = {}) {
++  async function saveCheckpoint(universeObj, { force = false, dispatch = null, galLaunch = null, recoveryEpoch } = {}) {
+     const auth = getAuth();
+     const db = getDB();
+     const user = auth.currentUser;
+     if (!user || !universeObj?.id) return;
++    if (G.ordinaryCheckpointBlocked?.(universeObj,dispatch,user.uid)) {
++      if (dispatch || galLaunch) throw Object.assign(Error('Partenza in verifica.'),{code:'ordinary-departure-pending'});
++      return false;
++    }
++    if (dispatch?.ordinary && dispatch.outcome) G.prepareOrdinaryDispatch(universeObj,dispatch,user.uid);
+     window.UniversumEngine?.normalizeResearchState(universeObj);
+ 
+     const syncKey = JSON.stringify([user.uid, universeObj.id]);
+@@ -393,15 +411,26 @@
+     let moonUpdates = [];
+     let dockState,galWrites;
+ 
+-    await db.runTransaction(async (tx) => {
++    const outcome=dispatch?.ordinary ? dispatch.outcome : null;
++    if (dispatch?.ordinary && !outcome) throw Error('Dispatch ordinario non autorizzato.');
++    let terminalReceipt;
++    const checkpointBlocked=()=>G.ordinaryRecoveryEpoch?.(universeObj,user.uid)!==recoveryEpoch ||
++      G.ordinaryCheckpointBlocked?.(universeObj,dispatch,user.uid);
++    try { await db.runTransaction(async (tx) => {
++      if (getAuth().currentUser?.uid!==user.uid || checkpointBlocked())
++        throw Object.assign(Error('Checkpoint non autorizzato.'),{code:'ordinary-departure-pending'});
+       reconciled = [];
+       lost = [];
+       moonUpdates = [];
+       const entries = planets.map((p) => ({ p, ref: planetsCol.doc(coordsToKey(p.coords)) }));
+       const snaps = await Promise.all(entries.map((e) => tx.get(e.ref)));
+-      const playerSnap = versioned ? await tx.get(playerRef) : null;
++      const playerSnap = versioned || dispatch?.ordinary ? await tx.get(playerRef) : null;
+       const player = playerSnap?.data() || {};
+       if (versioned && (player.serviceRevision || 0) !== expected) throw conflict();
++      if (dispatch?.ordinary && !versioned && player.serviceRevision!=null) throw conflict();
++      if (dispatch?.ordinary && versioned && (!Number.isSafeInteger(expected) || expected<0 || expected>=Number.MAX_SAFE_INTEGER)) throw conflict();
++      terminalReceipt=dispatch?.ordinary ? G.bindOrdinaryReceipt(universeObj,dispatch,user.uid,playerSnap) :
++        playerSnap?.exists ? G.ordinaryReceiptAcknowledgement?.(universeObj,player,user.uid) : null;
+       if (galLaunch && ((universeObj.galatticaVersions?.[galLaunch.key] || 0)!==galLaunch.expected ||
+           JSON.stringify({...universeObj.galattiche.find(g=>g.id===galLaunch.state.id),resources:null})!==JSON.stringify({...JSON.parse(galLaunch.before),resources:null}))) throw conflict();
+       galWrites=(universeObj.galattiche?.length || Object.keys(universeObj.galatticaVersions || {}).length) ? await G.prepareGalattiche(tx,universeObj,user.uid,galLaunch) : [];
+@@ -534,6 +563,7 @@
+       if (galLaunch?.ref) tx.set(galLaunch.ref,galLaunch.doc);
+       if (dispatch) tx.set(dispatch.ref,dispatch.doc);
+       const playerPayload = {
++        ...(terminalReceipt ? {ordinaryDispatchReceipt:terminalReceipt} : {}),
+         ...(versioned ? {serviceRevision:expected+1,serviceCheckpoint:nowTs,
+           checkpointPlanets:entries.filter((e,i)=>snaps[i].data()?.ownerUid===user.uid).map(e=>e.ref.id),
+           specialistBuilt:universeObj.specialistBuilt || {}, specialistFlights:activeRefs} : {}),
+@@ -550,7 +580,16 @@
+       };
+       if (playerSnap?.exists) tx.update(playerRef,playerPayload);
+       else tx.set(playerRef,playerPayload,{merge:true});
+-    });
++      if (getAuth().currentUser?.uid!==user.uid || checkpointBlocked())
++        throw Object.assign(Error('Checkpoint non autorizzato.'),{code:'ordinary-departure-pending'});
++      if (outcome) outcome.callbackReady=true;
++    }); } catch (error) {
++      if (outcome && !outcome.callbackReady) outcome.definitePreCommitFailure=true;
++      throw error;
++    }
++    if (outcome) outcome.receipt=terminalReceipt;
++    if (getAuth().currentUser?.uid!==user.uid || G.ordinaryRecoveryEpoch?.(universeObj,user.uid)!==recoveryEpoch)
++      throw Object.assign(Error('Stato del checkpoint non più attivo.'),{code:'ordinary-departure-pending'});
+     if (versioned) universeObj.serviceRevision = expected+1;
+     for (const write of galWrites) {
+       universeObj.galatticaVersions ||= {};
+@@ -603,7 +642,8 @@
+     if (lost.length > 0) {
+       universeObj.planets = (universeObj.planets || []).filter((p) => !lost.includes(p));
+     }
+-    if (reconciled.length > 0 || lost.length > 0 || moonUpdates.length > 0) {
++    if ((reconciled.length > 0 || lost.length > 0 || moonUpdates.length > 0) &&
++        (!window.UniversumUI?.state || window.UniversumUI.state.currentUniverse===universeObj)) {
+       try {
+         window.UniversumUI?.onOnlineReconciled?.({ reconciled, lost });
+       } catch (e) {
+@@ -623,6 +663,7 @@
+     return db.collection('online_universes').doc(universeObj.id).collection('planets')
+       .where('ownerUid', '==', user.uid)
+       .onSnapshot((snap) => {
++        if (getAuth().currentUser?.uid!==user.uid || (window.UniversumUI && window.UniversumUI.state?.currentUniverse!==universeObj)) return;
+         const gained = [];
+         let needSync = false;
+         for (const ch of snap.docChanges()) {
+@@ -649,21 +690,27 @@
+ 
+ 
+   async function renameOnlinePlanet(uniId, coords, newName) {
++    const release=G.beginOrdinaryMutation?.({id:uniId}) || (()=>{});
++    try {
+     const db = getDB();
+     const key = coordsToKey(coords);
+     await db.collection('online_universes').doc(uniId).collection('planets').doc(key).update({
+       name: newName,
+       planetName: newName
+     });
++    } finally { release(); }
+   }
+ 
+ 
+   async function renameOnlineMoon(uniId, coords, newMoonName) {
++    const release=G.beginOrdinaryMutation?.({id:uniId}) || (()=>{});
++    try {
+     const db = getDB();
+     const key = coordsToKey(coords);
+     await db.collection('online_universes').doc(uniId).collection('planets').doc(key).update({
+       'moon.name': newMoonName
+     });
++    } finally { release(); }
+   }
+ 
+ 
+@@ -754,11 +801,14 @@
+   async function changeOnlineMothershipHangar(u,planetIndex,id,amount) {
+     const user=getAuth().currentUser, db=getDB(), H=window.UniversumHangars;
+     if (!user || !u?.id || !H || !Number.isSafeInteger(amount) || !amount) throw Error('Operazione hangar non valida.');
++    const release=G.beginOrdinaryMutation?.(u,user.uid) || (()=>{});
++    try {
+     const planet=u.planets[planetIndex];
+     if (!planet) throw Error('Pianeta selezionato non disponibile.');
+     // Prima conclude qualsiasi checkpoint della partita: i due client non devono
+     // usare due versioni diverse del campo fleet mentre spostano i caccia.
+-    await syncPlayerState(u,{force:true});
++    if (await syncPlayerState(u,{force:true})!==true) throw Error('Checkpoint hangar non confermato.');
++    G.assertOrdinaryMutationAllowed?.(u,user.uid);
+     const uni=db.collection('online_universes').doc(u.id);
+     const ref=uni.collection('planets').doc(coordsToKey(planet.coords));
+     const player=uni.collection('players').doc(user.uid);
+@@ -776,16 +826,20 @@
+           Object.keys(data.inbox?.hangarLosses || {}).length ||
+           Number(data.inbox?.fleet?.lightFighter || 0) !== 0 ||
+           Number(data.inbox?.fleet?.mothership || 0) !== 0) throw conflict();
++      if (getAuth().currentUser?.uid!==user.uid) throw Error('Account cambiato.');
++      G.assertOrdinaryMutationAllowed?.(u,user.uid);
+       H.changeLoad(before,id,amount);
+       accepted={fleet:before.fleet,hangars:before.mothershipHangars};
+       tx.update(ref,{fleet:before.fleet,mothershipHangars:before.mothershipHangars,
+         serviceRevision:expected+1,lastUpdated:Date.now()});
+       tx.update(player,{serviceRevision:expected+1,serviceCheckpoint:Date.now()});
+     });
++    if (getAuth().currentUser?.uid!==user.uid || G.ordinaryCheckpointBlocked?.(u,null,user.uid)) throw Error('Stato hangar non più attivo.');
+     planet.fleet.lightFighter=accepted.fleet.lightFighter;
+     planet.mothershipHangars=accepted.hangars;
+     u.serviceRevision=expected+1;
+     return true;
++    } finally { release(); }
+   }
+ 
+   Object.assign(G, { changeOnlineMothershipHangar, combatPlanet, restoreServices, calculateLiveResources, computePlayerPoints, _applyUnitDelta, _hasInbox, _effectivePlanetView, _snapshotForDiff, _writePlanetResult, _inboxCredit, _resolveCreditRef, syncPlayerState, listenOwnPlanets, renameOnlinePlanet, renameOnlineMoon, getOnlineSystem, fetchOnlineSystem });
+diff --git a/modules/online/universes.js b/modules/online/universes.js
+index 8cafc46..8202c0f 100644
+--- a/modules/online/universes.js
++++ b/modules/online/universes.js
+@@ -374,14 +374,79 @@
+   }
+ 
+ 
+-  async function joinOnlineUniverse(universeId, passcode = '') {
++  // AT05-E: letture di recupero esplicite, nessuna scrittura o migrazione.
++  const recoveryEvidence = new WeakMap();
++  const recoveryChanged = () => Object.assign(Error('Stato del server variato durante il recupero. Riprova la verifica.'),
++    {code:'ordinary-recovery-changed'});
++  function requireServerSnapshot(snap) {
++    if (snap?.metadata?.fromCache !== false || snap.metadata.hasPendingWrites !== false) throw recoveryChanged();
++    return snap;
++  }
++  function canonicalRecoveryValue(value) {
++    return JSON.stringify(value, (key, item) => {
++      if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
++      return Object.fromEntries(Object.keys(item).sort().map(k=>[k,item[k]]));
++    });
++  }
++  function recoverySignature(snap) {
++    if (Array.isArray(snap.docs)) return canonicalRecoveryValue(snap.docs.map(d=>{
++      requireServerSnapshot(d);
++      return [d.id,d.data()];
++    }).sort((a,b)=>a[0].localeCompare(b[0])));
++    return canonicalRecoveryValue([snap.id,snap.exists,snap.exists ? snap.data() : null]);
++  }
++  async function readRecoverySet(db, uniRef, uid, operationId) {
++    const assertAccount=()=>{if (getAuth().currentUser?.uid!==uid) throw recoveryChanged();};
++    const read=async ref=>requireServerSnapshot(await ref.get({source:'server'}));
++    const refs=[uniRef,uniRef.collection('players').doc(uid),
++      uniRef.collection('planets').where('ownerUid','==',uid),
++      uniRef.collection('fleets').where('attackerUid','==',uid).where('resolved','==',false),
++      uniRef.collection('galattiche').where('ownerUid','==',uid)];
++    if (operationId) refs.push(uniRef.collection('fleets').doc(operationId));
++    assertAccount();
++    const first=await Promise.all(refs.map(read));
++    assertAccount();
++    if (!first[0].exists || !first[1].exists) throw recoveryChanged();
++    const signatures=first.map(recoverySignature);
++    // La transazione di sola lettura verifica il contenuto dei documenti noti.
++    // Le query prima/dopo verificano anche l'insieme dei documenti; non si
++    // dichiara uno snapshot atomico globale delle query Firestore Web.
++    const known=new Map();
++    for (const snap of first) for (const doc of snap.docs || [snap]) {
++      requireServerSnapshot(doc);
++      const signature=recoverySignature(doc);
++      if (known.has(doc.ref.path) && known.get(doc.ref.path).signature!==signature) throw recoveryChanged();
++      known.set(doc.ref.path,{ref:doc.ref,signature});
++    }
++    const knownDocuments=[...known.values()];
++    await db.runTransaction(async tx=>{
++      assertAccount();
++      const docs=await Promise.all(knownDocuments.map(item=>tx.get(item.ref)));
++      docs.forEach((doc,i)=>{
++        if (recoverySignature(doc)!==knownDocuments[i].signature) throw recoveryChanged();
++      });
++      assertAccount();
++    });
++    const second=await Promise.all(refs.map(read));
++    assertAccount();
++    if (second.some((snap,i)=>recoverySignature(snap)!==signatures[i])) throw recoveryChanged();
++    const [uni,player,planets,fleets,galattiche,operation]=second;
++    if (planets.docs.some(d=>d.data().ownerUid!==uid) || fleets.docs.some(d=>d.data().attackerUid!==uid || d.data().resolved!==false) ||
++        galattiche.docs.some(d=>d.data().ownerUid!==uid)) throw recoveryChanged();
++    const revision=player.data().serviceRevision ?? 0;
++    if (!Number.isSafeInteger(revision) || revision<0) throw recoveryChanged();
++    return {uni,player,planets,fleets,galattiche,operation};
++  }
++  async function joinOnlineUniverse(universeId, passcode = '', {serverOnly=false,operationId=null} = {}) {
+     const auth = getAuth();
+     const db = getDB();
+     const user = auth.currentUser;
+     if (!user) throw new Error('Devi accedere prima di entrare in un universo.');
++    if (!serverOnly) G.assertOrdinaryMutationAllowed?.({id:universeId},user.uid);
+ 
+     const uniRef = db.collection('online_universes').doc(universeId);
+-    const uniSnap = await uniRef.get();
++    const recovered=serverOnly ? await readRecoverySet(db,uniRef,user.uid,operationId) : null;
++    const uniSnap = recovered ? recovered.uni : await uniRef.get();
+     if (!uniSnap.exists) throw new Error('Universo online non trovato.');
+ 
+     const uniData = uniSnap.data();
+@@ -391,12 +456,15 @@
+ 
+     const playerName = user.displayName || user.email.split('@')[0];
+     const playerRef = uniRef.collection('players').doc(user.uid);
+-    const playerSnap = await playerRef.get();
++    const playerSnap = recovered ? recovered.player : await playerRef.get();
+ 
+     let playerState;
+     let myPlanets = [];
+ 
+-    if (!playerSnap.exists) {
++    if (recovered) {
++      playerState=playerSnap.data();
++      myPlanets=recovered.planets.docs.map(d=>d.data());
++    } else if (!playerSnap.exists) {
+       await claimServerSlot(db, user.uid, universeId);
+       const homeCoords = await findFreeHomeCoords(
+         universeId,
+@@ -464,35 +532,38 @@
+       myPlanets = planetsSnap.docs.map((d) => d.data());
+     }
+ 
+-    const activeFleetsSnap = await uniRef.collection('fleets')
++    const activeFleetsSnap = recovered ? recovered.fleets : await uniRef.collection('fleets')
+       .where('attackerUid', '==', user.uid)
+       .where('resolved', '==', false)
+       .get();
+ 
+     const fleetsInFlight = activeFleetsSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+ 
+-    const msgSnap = await uniRef.collection('messages')
+-      .where('recipientUid', '==', user.uid)
+-      .orderBy('timestamp', 'desc')
+-      .limit(20)
+-      .get()
+-      .catch(() => ({ docs: [] }));
++    const msgQuery=uniRef.collection('messages').where('recipientUid','==',user.uid).orderBy('timestamp','desc').limit(20);
++    const msgSnap = recovered ? requireServerSnapshot(await msgQuery.get({source:'server'})) :
++      await msgQuery.get().catch(() => ({ docs: [] }));
++    if (recovered) {
++      msgSnap.docs.forEach(requireServerSnapshot);
++      if (getAuth().currentUser?.uid!==user.uid) throw recoveryChanged();
++    }
+ 
+     const messages = msgSnap.docs.map((d) => d.data());
+ 
+-    if (playerSnap.exists) {
+-      await claimServerSlot(db, user.uid, universeId, { alreadyMember: true }).catch(() => {});
+-    }
+-    _invalidateUniCaches(universeId);
+-    // Un giocatore appena creato non ha flotte legacy da migrare.
+-    if (playerSnap.exists) await migrateOnlineFleets(universeId).catch(() => {});
+-    await cleanupPrivateMessagesOnce(db, universeId, user.uid);
+-
+-    // I bot configurabili vengono distribuiti vicino alla prima colonia.
+-    if (uniData.botConfig?.density > 0 && myPlanets[0]) {
+-      await ensureBotsAroundHome(universeId, myPlanets[0].coords,
+-        normalizeBotConfig(uniData.botConfig), uniData)
+-        .catch((e) => console.warn('[MP Bot] Generazione bot fallita:', e));
++    if (!recovered) {
++      if (playerSnap.exists) {
++        await claimServerSlot(db, user.uid, universeId, { alreadyMember: true }).catch(() => {});
++      }
++      _invalidateUniCaches(universeId);
++      // Un giocatore appena creato non ha flotte legacy da migrare.
++      if (playerSnap.exists) await migrateOnlineFleets(universeId).catch(() => {});
++      await cleanupPrivateMessagesOnce(db, universeId, user.uid);
++
++      // I bot configurabili vengono distribuiti vicino alla prima colonia.
++      if (uniData.botConfig?.density > 0 && myPlanets[0]) {
++        await ensureBotsAroundHome(universeId, myPlanets[0].coords,
++          normalizeBotConfig(uniData.botConfig), uniData)
++          .catch((e) => console.warn('[MP Bot] Generazione bot fallita:', e));
++      }
+     }
+ 
+     const output = {
+@@ -522,13 +593,23 @@
+       spyReports: [],
+       messages
+     };
+-    await G.restoreGalattiche(output,user.uid);
++    const recoveredAt=Date.now();
++    await G.restoreGalattiche(output,user.uid,recovered ? {snapshot:recovered.galattiche,now:recoveredAt} : undefined);
+     Object.defineProperty(output,'roomPasscode',{value:passcode});
+     window.UniversumEngine?.normalizeResearchState(output);
+-    if (playerSnap.exists) G.restoreServices(output,myPlanets,playerState);
++    if (playerSnap.exists) G.restoreServices(output,myPlanets,playerState,
++      recovered ? recoveredAt : undefined,recovered ? {serverRecovery:true} : undefined);
++    if (recovered) {
++      if (getAuth().currentUser?.uid!==user.uid) throw recoveryChanged();
++      const operation=recovered.operation;
++      recoveryEvidence.set(output,Object.freeze({uid:user.uid,universeId,operationId,
++        revision:output.serviceRevision,joinedAt:playerState.joinedAt ?? null,
++        receipt:playerState.ordinaryDispatchReceipt ? Object.freeze({...playerState.ordinaryDispatchReceipt}) : null,
++        fleet:operation?.exists ? Object.freeze({...operation.data(),id:operation.id}) : null}));
++    }
+     return output;
+   }
+ 
+-  Object.assign(G, { _cacheGet, _invalidateUniCaches, invalidateOnlineUniverseList, getMembership, claimServerSlot, releaseServerSlot, getMyServerMembership, cleanupPrivateMessagesOnce, sanitizeNickname, nicknameToInternalEmail, generatePlanetSpecs, createStarterPlanetDoc, registerOrLogin, getOnlineUniverses, generateNeutralOutpostsOnce, createOnlineUniverse, findFreeHomeCoords, joinOnlineUniverse });
++  Object.assign(G, { ordinaryRecoveryEvidence:u=>recoveryEvidence.get(u) || null, _cacheGet, _invalidateUniCaches, invalidateOnlineUniverseList, getMembership, claimServerSlot, releaseServerSlot, getMyServerMembership, cleanupPrivateMessagesOnce, sanitizeNickname, nicknameToInternalEmail, generatePlanetSpecs, createStarterPlanetDoc, registerOrLogin, getOnlineUniverses, generateNeutralOutpostsOnce, createOnlineUniverse, findFreeHomeCoords, joinOnlineUniverse });
+ 
+ })();
+diff --git a/modules/ui/diplomacy.js b/modules/ui/diplomacy.js
+index 6251eab..2d37686 100644
+--- a/modules/ui/diplomacy.js
++++ b/modules/ui/diplomacy.js
+@@ -61,6 +61,7 @@
+       selector.addEventListener('change', renderEstimate);
+       renderEstimate();
+       button.addEventListener('click', async () => {
++        if (UI.blockPendingMutation(uni)) return;
+         if (busy) return;
+         const planet = selected();
+         if (!planet) return;
+@@ -150,6 +151,7 @@
+       });
+ 
+       document.getElementById('btn-exec-blackmarket')?.addEventListener('click', async () => {
++        if (UI.blockPendingMutation(uni)) return;
+         try {
+           const res = Galaxy.blackMarketTrade(
+             uni,
+@@ -257,6 +259,7 @@
+ 
+     activateMerchant();
+     document.getElementById('btn-exec-bot-trade')?.addEventListener('click', async () => {
++      if (UI.blockPendingMutation(uni)) return;
+       try {
+         const coords = {
+           g: Number(document.getElementById('trd-g').value),
+@@ -282,6 +285,7 @@
+     });
+ 
+     document.getElementById('btn-sign-bot-contract')?.addEventListener('click', async () => {
++      if (UI.blockPendingMutation(uni)) return;
+       try {
+         const coords = {
+           g: Number(document.getElementById('trd-g').value),
+@@ -301,6 +305,7 @@
+     });
+ 
+     document.getElementById('btn-exec-blackmarket')?.addEventListener('click', async () => {
++      if (UI.blockPendingMutation(uni)) return;
+       try {
+         const res = Galaxy.blackMarketTrade(
+           uni,
+diff --git a/modules/ui/lobby-online.js b/modules/ui/lobby-online.js
+index 295b52a..adb8308 100644
+--- a/modules/ui/lobby-online.js
++++ b/modules/ui/lobby-online.js
+@@ -223,7 +223,11 @@
+       listEl.innerHTML = limitHeader + universes.map((u) => {
+         const isMember = membership.serverIds.includes(u.id);
+         const isFounder = myUid && (u.founderUid === myUid || u.ownerUid === myUid);
+-        const joinDisabled = !isMember && atLimit;
++        let pending=null;
++        try { pending=window.__UniversumMPModules?.ordinaryDepartureStatus?.({id:u.id},myUid); }
++        catch (error) { pending={storageUnavailable:true}; }
++        const joinDisabled = !pending && !isMember && atLimit;
++        const cancellable=pending?.protocol===2 && pending.armed && Number.isSafeInteger(pending.expectedRevision) && pending.profileJoinedAt!=null;
+         const npcBadge = u.npcMode === 'limited'
+           ? '<span class="badge badge-neutral">MAX 10 AVAMPOSTI NEUTRALI</span>'
+           : '<span class="badge badge-red">100% PvP • ZERO BOT</span>';
+@@ -248,9 +252,10 @@
+             ${isFounder ? '<span class="badge badge-blue">CREATORE</span>' : ''}
+             <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
+               <button type="button" class="btn btn-green btn-sm btn-join-online-uni" data-uid="${u.id}" data-locked="${u.hasPasscode ? '1' : '0'}" ${joinDisabled ? 'disabled' : ''}>
+-                ${svgIcon('globe')} ${joinDisabled ? 'LIMITE 3 SERVER RAGGIUNTO' : (isMember ? "RIENTRA NELL'UNIVERSO" : "ENTRA NELL'UNIVERSO")}
++                ${svgIcon('globe')} ${pending ? 'VERIFICA PARTENZA' : joinDisabled ? 'LIMITE 3 SERVER RAGGIUNTO' : (isMember ? "RIENTRA NELL'UNIVERSO" : "ENTRA NELL'UNIVERSO")}
+               </button>
+-              ${isMember ? `<button type="button" class="btn btn-red btn-sm btn-leave-online-uni" data-uid="${u.id}">Abbandona Server</button>` : ''}
++              ${cancellable ? `<button type="button" class="btn btn-red btn-sm btn-join-online-uni" data-uid="${u.id}" data-locked="${u.hasPasscode?'1':'0'}" data-cancel="1">ANNULLA SE DIMOSTRABILE</button>` : ''}
++              ${isMember && !pending ? `<button type="button" class="btn btn-red btn-sm btn-leave-online-uni" data-uid="${u.id}">Abbandona Server</button>` : ''}
+             </div>
+           </article>
+         `;
+@@ -262,13 +267,28 @@
+           const isLocked = btn.dataset.locked === '1';
+ 
+           const proceedJoin = async (passcode = '') => {
++            const G=window.__UniversumMPModules,u={id:uniId};
+             try {
++              if (!myUid || window.fbAuth?.currentUser?.uid!==myUid || UI.state.currentUniverse) throw Error('Selezione non più attiva.');
++              if (G?.ordinaryDepartureBusy?.(u,myUid)) throw Error('Verifica già in corso.');
++              const cancel=btn.dataset.cancel==='1';
++              if (cancel && !window.confirm('Annullare soltanto se il server può impedire definitivamente il commit?')) return;
++              const token=++UI._ordinaryEntryGeneration;
++              const isCurrent=()=>UI._ordinaryEntryGeneration===token && window.fbAuth?.currentUser?.uid===myUid && !UI.state.currentUniverse;
++              if (G?.ordinaryDepartureStatus?.(u,myUid)) {
++                const result=await G.verifyOrdinaryDeparture(u,{passcode,cancel,isCurrent});
++                playSound('complete');toast(result.status==='committed'?'Partenza confermata.':'Partenza annullata definitivamente.','success');
++                return;
++              }
++              if (cancel) throw Error('Nessuna richiesta da annullare.');
+               const joinedUni = await window.UniversumMP.joinOnlineUniverse(uniId, passcode);
++              if (!isCurrent()) return;
+               playSound('complete');
+               startOnlineGame(joinedUni);
+             } catch (err) {
+               playSound('error');
+               toast(err.message, 'error');
++              if (!UI.state.currentUniverse && err.code==='ordinary-departure-pending') await UI.renderOnlineUniversesList(true);
+             }
+           };
+ 
+@@ -306,6 +326,15 @@
+           `);
+           document.getElementById('btn-cancel-leave-server')?.addEventListener('click', closeModal);
+           document.getElementById('btn-confirm-leave-server')?.addEventListener('click', async () => {
++            if (!myUid || window.fbAuth?.currentUser?.uid !== myUid) {
++              toast('Account cambiato: riapri la conferma.', 'info');
++              return;
++            }
++            // La lobby non ha un universo multiplayer attivo: consulta la stessa mappa pendente per ID.
++            if (window.__UniversumMPModules?.ordinaryCheckpointBlocked?.({id:uniId},null,myUid)) {
++              toast('Partenza in verifica: rientra nell’universo per verificarla.', 'info');
++              return;
++            }
+             try {
+               await window.UniversumMP.leaveOnlineUniverse(uniId);
+               closeModal();
+@@ -349,6 +378,11 @@
+     document.getElementById('cancel-rename-planet')?.addEventListener('click', UI.closeModal);
+     document.getElementById('form-rename-planet')?.addEventListener('submit', async (e) => {
+       e.preventDefault();
++      if (UI.blockPendingMutation(uni)) return;
++      if (UI.state.currentUniverse !== uni) {
++        UI.toast('Partita cambiata: riapri la schermata.', 'info');
++        return;
++      }
+       try {
+         const newName = window.UniversumEngine.renamePlanet(uni, planetIndex, inp.value);
+         if (UI.state.isMultiplayerMode && window.UniversumMP?.renameOnlinePlanet) {
+@@ -393,6 +427,11 @@
+     document.getElementById('cancel-rename-moon')?.addEventListener('click', UI.closeModal);
+     document.getElementById('form-rename-moon')?.addEventListener('submit', async (e) => {
+       e.preventDefault();
++      if (UI.blockPendingMutation(uni)) return;
++      if (UI.state.currentUniverse !== uni) {
++        UI.toast('Partita cambiata: riapri la schermata.', 'info');
++        return;
++      }
+       try {
+         const newName = window.UniversumEngine.renameMoon(uni, planetIndex, inp.value);
+         if (UI.state.isMultiplayerMode && window.UniversumMP?.renameOnlineMoon) {
+diff --git a/modules/ui/navigation.js b/modules/ui/navigation.js
+index 2cee2db..b0a1cfb 100644
+--- a/modules/ui/navigation.js
++++ b/modules/ui/navigation.js
+@@ -76,6 +76,7 @@
+     const viewport = document.getElementById('game-viewport');
+     const st = UI.state;
+     if (!viewport || !st.currentUniverse) return;
++    if (UI.updateOrdinaryDeparturePanel()) return;
+ 
+     if (st.currentView !== 'overview') UI.stopPlanetCanvas?.();
+ 
+@@ -140,6 +141,11 @@
+     `);
+     document.getElementById('form-online-bot-trade')?.addEventListener('submit', async (e) => {
+       e.preventDefault();
++      if (UI.blockPendingMutation(uni)) return;
++      if (UI.state.currentUniverse !== uni || !UI.state.isMultiplayerMode) {
++        UI.toast('Partita cambiata: riapri il modulo commerciale.', 'info');
++        return;
++      }
+       const button = e.target.querySelector('button[type="submit"]');
+       button.disabled = true;
+       try {
+@@ -283,6 +289,11 @@
+     document.getElementById('btn-overview-open-chat')?.addEventListener('click', () => UI.switchView('chat'));
+ 
+     document.getElementById('btn-overview-turbo')?.addEventListener('click', async () => {
++      if (UI.blockPendingMutation(uni)) return;
++      if (UI.state.currentUniverse !== uni) {
++        UI.toast('Partita cambiata: riapri la schermata.', 'info');
++        return;
++      }
+       const res = Engine.activateTurbo(uni);
+       await UI.persistUniverseState();
+       UI.updateTopBarNumbers();
+@@ -292,6 +303,7 @@
+     });
+ 
+     document.getElementById('btn-overview-event')?.addEventListener('click', async () => {
++      if (UI.blockPendingMutation(uni)) return;
+       const bonusM = Math.floor((1500 + Math.random() * 4500) * Math.sqrt(uni.speed || 1));
+       const bonusC = Math.floor((1000 + Math.random() * 3000) * Math.sqrt(uni.speed || 1));
+       planet.resources.metal += bonusM;
+@@ -338,6 +350,11 @@
+     `;
+ 
+     document.getElementById('btn-leave-server-view')?.addEventListener('click', async () => {
++      if (UI.blockPendingMutation(uni)) return;
++      if (UI.state.currentUniverse !== uni || !UI.state.isMultiplayerMode) {
++        UI.toast('Partita cambiata: riapri la schermata.', 'info');
++        return;
++      }
+       try {
+         await window.UniversumMP.leaveOnlineUniverse(uni.id);
+         UI.playSound('success');
+@@ -368,6 +385,11 @@
+       });
+       document.getElementById('btn-cancel-delete-server')?.addEventListener('click', UI.closeModal);
+       confirmBtn?.addEventListener('click', async () => {
++        if (UI.blockPendingMutation(uni)) return;
++        if (UI.state.currentUniverse !== uni || !UI.state.isMultiplayerMode) {
++          UI.toast('Partita cambiata: riapri la schermata.', 'info');
++          return;
++        }
+         if (confirmInput?.value.trim() !== 'ELIMINA') return;
+         try {
+           await window.UniversumMP.deleteOnlineUniverse(uni.id);
+@@ -383,6 +405,11 @@
+     });
+ 
+     document.getElementById('btn-repair-missions')?.addEventListener('click', async () => {
++      if (UI.blockPendingMutation(uni)) return;
++      if (UI.state.currentUniverse !== uni || !UI.state.isMultiplayerMode) {
++        UI.toast('Partita cambiata: riapri la schermata.', 'info');
++        return;
++      }
+       try {
+         const repaired = window.UniversumMP?.repairStuckMissions
+           ? await window.UniversumMP.repairStuckMissions(uni.id)
+@@ -397,6 +424,11 @@
+     });
+ 
+     document.getElementById('btn-save-now')?.addEventListener('click', async () => {
++      if (UI.blockPendingMutation(uni)) return;
++      if (UI.state.currentUniverse !== uni) {
++        UI.toast('Partita cambiata: riapri la schermata.', 'info');
++        return;
++      }
+       await UI.persistUniverseState();
+       UI.playSound('success');
+       UI.toast(st.isMultiplayerMode ? 'Dati sincronizzati con Firestore!' : 'Partita salvata su IndexedDB!', 'success');
+diff --git a/modules/ui/runtime.js b/modules/ui/runtime.js
+index 87cd5ce..7d12083 100644
+--- a/modules/ui/runtime.js
++++ b/modules/ui/runtime.js
+@@ -6,11 +6,12 @@
+ 
+ 
+   UI.exitActiveGameToLobby = async function () {
+-    UI.closeResourceDeposit?.();
+     const st = UI.state;
+-    if (st.currentUniverse) {
+-      await UI.persistUniverseState();
+-    }
++    const pending=UI.pendingDeparture(st.currentUniverse);
++    if (pending?.busy) { UI.toast('Verifica in corso: attendi la fine del tentativo.','info'); return; }
++    UI._ordinaryEntryGeneration++;
++    UI.closeResourceDeposit?.();
++    if (st.currentUniverse && !pending) await UI.persistUniverseState();
+     UI.stopGameLoop();
+     UI.cleanupMultiplayerListeners();
+     st.isMultiplayerMode = false;
+@@ -20,12 +21,14 @@
+     document.getElementById('screen-game')?.classList.add('hidden');
+     document.getElementById('screen-lobby')?.classList.remove('hidden');
+     document.body.classList.add('lobby-black');
++    UI.updateOrdinaryDeparturePanel();
+     await window.UniversumDB.renderLobbyList();
+-    window.UniversumUpdater?.onSafeLobby();
++    if (!pending) window.UniversumUpdater?.onSafeLobby();
+   };
+ 
+ 
+   UI.exitToLobbyAfterServerRemoval = async function () {
++    UI._ordinaryEntryGeneration++;
+     UI.closeResourceDeposit?.();
+     const st = UI.state;
+     UI.stopGameLoop();
+@@ -36,6 +39,7 @@
+     document.getElementById('screen-lobby')?.classList.remove('hidden');
+     document.body.classList.add('lobby-black');
+     await window.UniversumDB.renderLobbyList();
++    UI.updateOrdinaryDeparturePanel();
+     await UI.refreshOnlineLobbyState();
+     window.UniversumUpdater?.onSafeLobby();
+   };
+@@ -90,10 +94,36 @@
+     let mpTickCounter = 0;
+     let pendingCompletionRender = false;
+     let lastTick = Date.now();
++    const runOnlineTick=(uni,queueCompleted,blocked)=>{
++      mpTickCounter++;
++      if (!blocked && queueCompleted) UI.persistUniverseState().catch(() => {});
++      if (mpTickCounter % 3 === 0 && window.UniversumMP?.resolveArrivedOnlineFleets) {
++        window.UniversumMP.resolveArrivedOnlineFleets(uni.id, uni.speed).catch(() => {});
++      }
++      if (mpTickCounter % 30 === 0 && window.UniversumMP?.processOnlineOccupations) {
++        window.UniversumMP.processOnlineOccupations(uni.id).catch(() => {});
++      }
++      if (mpTickCounter % 60 === 0) {
++        if (!blocked && !queueCompleted) UI.persistUniverseState({force:false}).catch(() => {});
++        if (uni.botConfig?.raids && uni.botConfig.personality?.hostile > 0 && window.UniversumMP?.maybeLaunchBotRaid) {
++          window.UniversumMP.maybeLaunchBotRaid(uni.id,uni.botConfig).catch(e=>console.warn('[MP Bot] Raid:',e));
++        }
++      }
++    };
+ 
+     st.gameLoopTimer = setInterval(async () => {
+       const uni = st.currentUniverse;
+       if (!uni) return;
++      const pending=UI.pendingDeparture(uni);
++      if (pending) {
++        UI.updateOrdinaryDeparturePanel();
++        // Le risoluzioni server e gli accrediti legacy continuano. Si ferma
++        // soltanto la simulazione locale dello stato ormai incerto.
++        if (!window.__UniversumMPModules?.ordinaryDepartureInitialBusy?.(uni)) {
++          runOnlineTick(uni,false,true);
++          return;
++        }
++      }
+ 
+       const activeP = UI.getActivePlanet();
+       const prevQueueCount = (activeP?.buildQueue?.length || 0) +
+@@ -115,21 +145,7 @@
+       lastTick = now;
+ 
+       if (st.isMultiplayerMode) {
+-        mpTickCounter++;
+-        if (queueCompleted) UI.persistUniverseState().catch(() => {});
+-        if (mpTickCounter % 3 === 0 && window.UniversumMP?.resolveArrivedOnlineFleets) {
+-          window.UniversumMP.resolveArrivedOnlineFleets(uni.id, uni.speed).catch(() => {});
+-        }
+-        if (mpTickCounter % 30 === 0 && window.UniversumMP?.processOnlineOccupations) {
+-          window.UniversumMP.processOnlineOccupations(uni.id).catch(() => {});
+-        }
+-        if (mpTickCounter % 60 === 0) {
+-          // Solo checkpoint periodico: le azioni volontarie usano force:true.
+-          if (!queueCompleted) UI.persistUniverseState({ force: false }).catch(() => {});
+-          if (uni.botConfig?.raids && uni.botConfig.personality?.hostile > 0 && window.UniversumMP?.maybeLaunchBotRaid) {
+-            window.UniversumMP.maybeLaunchBotRaid(uni.id, uni.botConfig).catch((e) => console.warn('[MP Bot] Raid:', e));
+-          }
+-        }
++        runOnlineTick(uni,queueCompleted,Boolean(pending));
+       } else {
+         window.UniversumGalaxy.processFleetsAndBots(uni);
+       }
+@@ -158,7 +174,7 @@
+       }
+       st.lastAlertCount = atkCount;
+ 
+-      if (document.hidden) return; // Mantieni la simulazione, evita soltanto il lavoro DOM.
++      if (pending || document.hidden) return; // Mantieni la simulazione, evita soltanto il lavoro DOM.
+       if (pendingCompletionRender) {
+         pendingCompletionRender = false;
+         if (['buildings', 'research', 'shipyard'].includes(st.currentView)) UI.renderCurrentView();
+@@ -207,10 +223,12 @@
+ 
+ 
+   UI.startGame = function (universe) {
++    UI._ordinaryEntryGeneration++;
+     UI.cleanupMultiplayerListeners();
+     const st = UI.state;
+     st.isMultiplayerMode = false;
+     st.currentUniverse = universe;
++    UI.updateOrdinaryDeparturePanel();
+ 
+     const offlineReport = window.UniversumEngine.processOfflineProgress(universe);
+     window.UniversumGalaxy.processFleetsAndBots(universe);
+@@ -251,6 +269,7 @@
+ 
+ 
+   UI.startOnlineGame = function (universe) {
++    UI._ordinaryEntryGeneration++;
+     UI.cleanupMultiplayerListeners();
+     const st = UI.state;
+     st.isMultiplayerMode = true;
+@@ -269,7 +288,7 @@
+ 
+     if (window.UniversumMP?.listenUniverseDeleted) {
+       st.unsubServerListener = window.UniversumMP.listenUniverseDeleted(universe.id, async () => {
+-        if (UI.state.currentUniverse?.id !== universe.id) return;
++        if (UI.state.currentUniverse !== universe) return;
+         UI.toast('Il server e stato eliminato dal creatore.', 'error');
+         await UI.exitToLobbyAfterServerRemoval();
+       });
+@@ -277,6 +296,7 @@
+ 
+     if (window.UniversumMP?.listenIncomingFleets) {
+       st.unsubFleetsListener = window.UniversumMP.listenIncomingFleets(universe, (incomingList) => {
++        if (UI.state.currentUniverse!==universe) return;
+         universe.incomingAttacks = incomingList;
+         if (incomingList.length > st.lastAlertCount) {
+           UI.playSound('alarm');
+@@ -320,6 +340,17 @@
+ 
+   UI.bindGlobalUIEvents = function () {
+     const st = UI.state;
++    // Il pannello resta utilizzabile anche se un rendering asincrono precedente
++    // ha terminato sul viewport nascosto. Blocca i controlli esterni e i modali.
++    const guard=event=>{
++      if (!UI.pendingDeparture()) return;
++      const target=event.target;
++      if (target?.closest?.('[data-at05-control],#btn-back-lobby')) return;
++      if (target?.closest?.('#screen-game,#universal-modal,#mobile-menu-drawer')) {
++        event.preventDefault();event.stopImmediatePropagation();UI.updateOrdinaryDeparturePanel();
++      }
++    };
++    for (const event of ['click','submit','change']) document.addEventListener(event,guard,true);
+     document.getElementById('active-planet-select')?.addEventListener('change', (e) => {
+       if (!st.currentUniverse) return;
+       st.currentUniverse.activePlanetId = e.target.value;
+diff --git a/release-manifest.json b/release-manifest.json
+index 4ff6113..a80332b 100644
+--- a/release-manifest.json
++++ b/release-manifest.json
+@@ -1,6 +1,6 @@
+ {
+   "schema": 1,
+-  "version": "ra1e66ab4bb5c27e075ee",
++  "version": "rd056f25404ed8a3d816c",
+   "workerHash": "e6113328911026127c7b936a2bc671e2eddf4a68cf7f6168b1138fb7daa1e923",
+   "files": {
+     "app.html": "b685545586d2e04359dc7cb8931b5b7384dfba6446e1fbfa4b79e272ed33340d",
+@@ -43,26 +43,26 @@
+     "modules/galaxy/suprema-siege.js": "5196c974d09808d50c6fc55f26fa96f7ccf4ab823b460075f7994fd335a9240f",
+     "modules/galaxy/trade.js": "f59dfa44e3c8103963461fc5369d1da29f620efa8aa043f59b88b78843e453ab",
+     "modules/offline/storage.js": "daf5b61eee50a5c1ffe9df077170c5717a147104b7516a44e00c73e38458330d",
+-    "modules/online/bots.js": "8137d6a8a2cc697140830cbbf62b5e5fc88863cc27e4d8a5ec1c5e0e6644939e",
+-    "modules/online/combat-resolver.js": "354a46a476704d66d74ea3be120c1ee746d973bed671badb8d6f86cbad7538a3",
+-    "modules/online/communications.js": "379062453cbfbfb69c660c55092a40d7892c755035b57f249f3d02198f2b7818",
++    "modules/online/bots.js": "f1c5fde4855db32375b0718132658deeace9ba4cf23696df1384f1ee590682d0",
++    "modules/online/combat-resolver.js": "4341648757bbe1c242d689c9d5e0074a4e1974916b628f7412652b0ec19d35b2",
++    "modules/online/communications.js": "2846a2d023c944730b82a282481fc7f72dae43a3e8cf15cb9868f306df616643",
+     "modules/online/context.js": "a122cdb2bcff42d48b7b1875d48fd5818243346e9e931e8872b8c9d54af1907b",
+-    "modules/online/fleet-control.js": "b4cb1ef5b0b82326a7f826e7030a6282e2ff3b07f525581fb4ef939531823735",
++    "modules/online/fleet-control.js": "9fbeb266a9aab6359bd206ac631a2687517ab667624db5261b224e20af7791c3",
+     "modules/online/foundation.js": "4ceee7ac4455d69118352aaa462d350d8aef4fe888f05df792a4c43ff4222371",
+-    "modules/online/galattiche.js": "2d44a0c8350440db2dc8eb93bfeb26b3733d34a9079c230a7b4623314bba21e1",
+-    "modules/online/sieges.js": "6c3406dbd081fe58a3cc986267730e9b7a22f436f12882b9bf5cf4e05d5fcf19",
++    "modules/online/galattiche.js": "261ad34e45d78fb3c1e113932744090f2446110736d1021bb8f3ca0affa4c3d9",
++    "modules/online/sieges.js": "28cd7d7f5390cf3735d6fc6050bb34120ae669fad58cfa6014972af26a67013e",
+     "modules/online/suprema-staging-client.js": "9d5c8d7cf3bacef39ff1a32a596c4ab72b2ea6e3b3300703eb009d5de68e72a9",
+-    "modules/online/sync.js": "458d36c7a5deaad0afb08b1097b05c36d04a96f30cc8f056ab7b4a0211b9de90",
+-    "modules/online/universes.js": "75382eb26a6cdce30df18410a054b96590627d877405c357ff2684a65b8fc2f4",
+-    "modules/ui/diplomacy.js": "dda2751c3677322e6a22c498d818e9ad59706372e7cdd1ed3ed2d8e4cee6690f",
++    "modules/online/sync.js": "d752880f9e952f7d0a3092810c074ca322ffdf59be51c4be5b2b8d8bbeb805a6",
++    "modules/online/universes.js": "c3f900e9521e17e9e8b76f22ba6d744eb4418938562921e902078eec8a2e2d94",
++    "modules/ui/diplomacy.js": "eab863b83257ad6fc81922f0669c24e3707081bc299a635706f7670dc4744457",
+     "modules/ui/espionage.js": "7955c38ad8b7c6c9694579f83237ccd615c07753bca27ee71a49ebd75b25eabc",
+     "modules/ui/fleet.js": "0d004ae1f9a6ea7de05bf0dffae2c90daa2e85683251e8b3e84f138652394a45",
+     "modules/ui/galaxy.js": "a4ccddccb8fe8243454bda876b98b76c95ac1f04d13a1b3268e5d340bdd0567c",
+-    "modules/ui/lobby-online.js": "01523ece94582105294af26e7722abccd2784e75b2a298e16e5ccd6a95fe987a",
+-    "modules/ui/navigation.js": "6d2a4e7e95a0efbf65121dc9679daf47c2f0052896a3f4657d651435369e16fc",
++    "modules/ui/lobby-online.js": "7ab31e5fecaac3c9b3fe0ab4e5bcc1397228b80439042cfbd24372a392111f76",
++    "modules/ui/navigation.js": "49654f8562d64f099b394cb921aa890bcee0e31dbb33f8fa85ce4111b162b959",
+     "modules/ui/planet-canvas.js": "5898156d0c5abb546046ce5c77112c6956ce2843d3a75e60cab2d198db0dea62",
+     "modules/ui/resource-deposits.js": "b0ad8ca3ffbdeaedcf187d455e41eec8ee647811ee785b9cc799de3abe614124",
+-    "modules/ui/runtime.js": "f411c0962cdb2eb186d692a34aee79fa71443c080e27608ad9cafb1c3682a950",
++    "modules/ui/runtime.js": "9644aa9e5bc4b654a794fc71e4bdfbcf5117a83ff014362edcc2d25d8d2ae513",
+     "modules/ui/selects.js": "10f61c57edc40f38e1c031618d49a82137b4b37e13558db18502ce5c1c4ec3e3",
+     "modules/ui/simulator.js": "63866f66c2255d6e71cef54129b515edd4ec884cb24f54faa1789ad970c5ab90",
+     "modules/ui/ui-buildings.js": "1fd1b91f21a6d524258e918199f2598af179e02c126abe7f2c67dc80e09666e4",
+@@ -77,10 +77,10 @@
+     "siege-missions.js": "a4e2dd38c3e08b087bb96b77b961f890db86d51901bffb5d47b71019a0351e70",
+     "style.css": "8058e5dd17f8a6f44b7bf1e3ef8f63f828297fc1792c68a4481a4e7ea5bcd3c4",
+     "tutorial.js": "2be18f4128adec5d2cc4d8bcadcd95b9bf160bf23f91377298011cd9842b55b7",
+-    "ui-core.js": "6b83b53e48a11a106d1173d58c5a168b67cb3e6c8d78bdaceb76230289e19ffc",
++    "ui-core.js": "350fc41ebf394aa6a51148096cd78545223566715e5e8046a50c8ef802c0b1ca",
+     "ui-fleet-movements.js": "8443c2cc0632746fdbc1e5ad6acc80712dc0c55487923a4d7ef6961083ae0b80",
+     "ui-guide.js": "9cbebd4c8985b5ca848af3323b6693861d1d5dd85820d448882ad6ef4bb2fd69",
+-    "ui-social.js": "ecbd58a03f7c47d45dbaf754d90467d48339c07b09d55c9be2c729e98cc8d368",
++    "ui-social.js": "2cee5ba2637fee1ad98001dfc3bcc6651e8ca1c33d3e4b2b9ee91d63621b17f5",
+     "update-client.js": "de94990036b3a4caa87f6b6b41f4c1c1ba3d7905c6752124a34dd1676e9e9256"
+   }
+ }
+diff --git a/sw.js b/sw.js
+index 0c38845..f35a648 100644
+--- a/sw.js
++++ b/sw.js
+@@ -5,7 +5,7 @@
+  * Non legge, scrive o cancella IndexedDB, localStorage o Firebase.
+  */
+ 'use strict';
+-const VERSIONE_RELEASE = 'ra1e66ab4bb5c27e075ee';
++const VERSIONE_RELEASE = 'rd056f25404ed8a3d816c';
+ const CACHE_PREFIX = 'universum-static-release-';
+ const CACHE_NAME = CACHE_PREFIX + VERSIONE_RELEASE;
+ const META_PATH = './__universum_cache_metadata__';
+diff --git a/tests/test_at02_safe_return.js b/tests/test_at02_safe_return.js
+index 7e0a2ee..9dd5f11 100644
+--- a/tests/test_at02_safe_return.js
++++ b/tests/test_at02_safe_return.js
+@@ -93,7 +93,8 @@ const db={
+     for(const [key,v] of preview)store.set(key,v);
+   }
+ };
+-const win={fbAuth:{currentUser:{uid:'alice'}},fbDB:db};
++const storage=new Map();
++const win={fbAuth:{currentUser:{uid:'alice'}},fbDB:db,localStorage:{getItem:k=>storage.get(k)??null,setItem:(k,v)=>storage.set(k,String(v)),removeItem:k=>storage.delete(k)}};
+ const sandbox={window:win,firebase:{firestore:{FieldValue:op}},console,Date,Math,Promise,Map,Set};
+ vm.createContext(sandbox);
+ for(const f of ['context.js','foundation.js','sync.js','fleet-control.js','combat-resolver.js'])
+@@ -163,7 +164,23 @@ async function run(){
+     await G.resolveArrivedOnlineFleets('AT02',1);
+     assert.deepEqual(store.get(planetPath).inbox.resources,res);
+   });
+-  console.log('AT02-I01: '+checked+'/5 scenari superati.');
++  await check('AT05: callback tardivo non modifica la nuova sessione; accredito server invariato',async()=>{
++    store.set(planetPath,planet());const f=seed('late-projection');
++    const old={id:'AT02',fleetsInFlight:[copy(f)],planets:[]},fresh=copy(old);
++    win.UniversumUI={state:{currentUniverse:old,isMultiplayerMode:true}};
++    const run=db.runTransaction;
++    db.runTransaction=async function(work){const result=await run.call(this,work);win.UniversumUI.state.currentUniverse=fresh;return result;};
++    try{await G.resolveArrivedOnlineFleets('AT02',1);}finally{db.runTransaction=run;}
++    assert.equal(fresh.fleetsInFlight.length,1);assert.equal(old.fleetsInFlight.length,1);
++    assert.equal(store.get(fleetPath(f.id)).resolved,true);assert.deepEqual(store.get(planetPath).inbox.resources,res);
++  });
++  await check('AT05: proiezione normale in sessione invariata',async()=>{
++    store.set(planetPath,planet());const f=seed('normal-projection');
++    const u={id:'AT02',fleetsInFlight:[copy(f)],planets:[]};win.UniversumUI={state:{currentUniverse:u,isMultiplayerMode:true}};
++    await G.resolveArrivedOnlineFleets('AT02',1);assert.equal(u.fleetsInFlight.length,0);
++    assert.deepEqual(store.get(planetPath).inbox.resources,res);
++  });
++  console.log('AT02-I01/AT05: '+checked+'/7 scenari superati.');
+   if(problems.length){console.error(problems.join('\n'));process.exitCode=1;}
+ }
+ run().catch(e=>{console.error(e);process.exitCode=1;});
+diff --git a/tests/test_at05_direct_api.js b/tests/test_at05_direct_api.js
+new file mode 100644
+index 0000000..0486391
+--- /dev/null
++++ b/tests/test_at05_direct_api.js
+@@ -0,0 +1,48 @@
++/** AT05: protezione delle API volontarie (mock; non sostituisce Emulator). */
++'use strict';
++const assert=require('node:assert/strict');
++const fs=require('node:fs'),path=require('node:path');
++const root=path.join(__dirname,'..');
++const sources=['fleet-control.js','communications.js','sieges.js','bots.js'].map(p=>fs.readFileSync(path.join(root,'modules/online',p),'utf8'));
++const key='universum:ordinary-departure:v1:'+JSON.stringify(['me','u']);
++const pending={accountUid:'me',universeId:'u',operationId:'pending',originKey:'1_1_1',expectedRevision:2,status:'pending',protocol:2,armed:true,profileJoinedAt:1,previousReceiptId:null};
++const coords={g:1,s:1,p:2};
++function fixture({blocked=false,serverReceipt=false,cache=false,otherReceipt=false}={}){
++ const trace=[],storage=new Map(),mode={},auth={uid:'me'};
++ if(blocked)storage.set(key,JSON.stringify(pending));
++ const sentinel=kind=>{trace.push(kind);throw Error('WRITE_ENTRY:'+kind)};
++ const meta={fromCache:cache,hasPendingWrites:false};
++ const planet={id:'p',ownerUid:'me',coords:{g:1,s:1,p:1},fleet:{lightFighter:10},resources:{metal:100000,crystal:100000,deuterium:100000},isNpc:true,botPersonality:'Pacifico'};
++ const receipt={operationId:'older',status:'committed',acknowledged:false};
++ const u={id:'u',speed:10,serviceRevision:2,emperor:'test',planets:[structuredClone(planet)],fleetsInFlight:[],researches:{}};
++ const ref=(key='')=>({id:key.split('/').pop(),path:key,collection:n=>ref(key+'/'+n),doc:n=>ref(key+'/'+(n||'new')),where:()=>ref(key),orderBy:()=>ref(key),limit:()=>ref(key),get:async opts=>{
++   if(mode.onGet)await mode.onGet(key,opts);
++   const data=key.endsWith('/u')?{founderUid:'me',speed:10}:key.endsWith('/players/me')?{uid:'me',...(serverReceipt?{ordinaryDispatchReceipt:receipt}:{})}:planet;
++   return {id:key.split('/').pop(),exists:true,data:()=>data,metadata:meta,docs:[{id:'sample',ref:ref(key+'/sample'),metadata:meta,data:()=>({uid:'me',recipientUid:'me',...(otherReceipt?{ordinaryDispatchReceipt:receipt}:{})})}],empty:false};
++ },set:()=>sentinel('set'),update:()=>sentinel('update'),add:()=>sentinel('add'),delete:()=>sentinel('delete')});
++ const db={collection:n=>ref(n),batch:()=>({delete:()=>{},commit:()=>sentinel('batch.commit')}),runTransaction:async cb=>{
++  if(!mode.runCallback)return sentinel('runTransaction');
++  return cb({get:async r=>r.get(),update:()=>sentinel('tx.update'),set:()=>sentinel('tx.set')});
++ }};
++ const G={getAuth:()=>({currentUser:{uid:auth.uid}}),getDB:()=>db,coordsToKey:c=>`${c.g}_${c.s}_${c.p}`,syncPlayerState:()=>sentinel('dispatch'),migrateOnlineFleets:()=>sentinel('migrateOnlineFleets'),resolveArrivedOnlineFleets:()=>sentinel('resolveArrivedOnlineFleets'),releaseServerSlot:()=>sentinel('releaseServerSlot'),_effectivePlanetView:x=>x,_resolveCreditRef:async()=>null,normalizeOnlineFleet:x=>x};
++ const W={localStorage:{getItem:k=>storage.get(k)??null,setItem:(k,v)=>storage.set(k,String(v)),removeItem:k=>storage.delete(k)},__UniversumMPModules:G,__UniversumMPVariables:{},UniversumMoonMerchant:{FEE:20,inspect:()=>({available:true,chance:0,fleet:{lightFighter:1}})},UniversumGalaxy:{calculateDistance:()=>1,getFleetSpeedAndFuel:()=>({fuelCost:40,durationSec:60})},UniversumMissionsCore:{getMaxFleetSlots:()=>100,getMaxExploreHours:()=>4},UniversumData:{SHIPS:{lightFighter:{cargo:100000}}},UniversumUI:{state:{currentUniverse:u}},fbAuth:{currentUser:{uid:'me'}}};
++ for(const source of sources)new Function('window','firebase',source)(W,{firestore:{FieldValue:{increment:x=>x}}});
++ const args={deleteReport:['u','r'],deleteAllReports:['u'],leaveOnlineUniverse:['u'],deleteOnlineUniverse:['u'],repairStuckMissions:['u'],payOnlineSiegeRansom:['u',coords],liftOnlineSiege:['u',coords],hireOnlineMoonMerchant:[u,coords],tradeWithOnlineBot:[u,coords,'metal',100,'crystal']};
++ const call=name=>G[name](...args[name]);
++ return {G,u,W,trace,mode,auth,storage,call,launch:()=>G.launchOnlineFleet(u,0,coords,'attack',{lightFighter:1},{})};
++}
++const cases=[];const test=(name,fn)=>cases.push([name,fn]);
++const normal={deleteReport:'delete',deleteAllReports:'batch.commit',leaveOnlineUniverse:'batch.commit',deleteOnlineUniverse:'add',repairStuckMissions:'migrateOnlineFleets',payOnlineSiegeRansom:'runTransaction',liftOnlineSiege:'runTransaction',hireOnlineMoonMerchant:'runTransaction',tradeWithOnlineBot:'runTransaction'};
++for(const [name,entry] of Object.entries(normal)){
++ test('blocked '+name+' before any write',async()=>{const f=fixture({blocked:true});await assert.rejects(f.call(name),{code:'ordinary-departure-pending'});assert.deepEqual(f.trace,[]);});
++ test('normal '+name+' reaches original write path',async()=>{const f=fixture();await assert.rejects(f.call(name),new RegExp('WRITE_ENTRY:'+entry));assert.deepEqual(f.trace,[entry]);});
++}
++test('leave rejects unacknowledged server receipt even without local request',async()=>{const f=fixture({serverReceipt:true});await assert.rejects(f.call('leaveOnlineUniverse'),/Ricevuta partenza non riconciliata/);assert.deepEqual(f.trace,[]);});
++test('founder deletion rejects other player unacknowledged receipt',async()=>{const f=fixture({otherReceipt:true});await assert.rejects(f.call('deleteOnlineUniverse'),/Ricevuta partenza non riconciliata/);assert.deepEqual(f.trace,[]);});
++for(const name of ['leaveOnlineUniverse','deleteOnlineUniverse'])test('cache rejected '+name,async()=>{const f=fixture({cache:true});await assert.rejects(f.call(name),/verificat[io] dal server/);assert.deepEqual(f.trace,[]);});
++test('account switches during report query',async()=>{const f=fixture();f.mode.onGet=()=>{f.auth.uid='other'};await assert.rejects(f.call('deleteAllReports'),{code:'ordinary-departure-pending'});assert.deepEqual(f.trace,[]);});
++test('active universe switches during trade query',async()=>{const f=fixture();f.mode.onGet=()=>{f.W.UniversumUI.state.currentUniverse={id:'other'}};await assert.rejects(f.call('tradeWithOnlineBot'),{code:'ordinary-departure-pending'});assert.deepEqual(f.trace,[]);});
++test('pending appears during transaction read, merchant cannot debit',async()=>{const f=fixture();f.mode.runCallback=true;f.mode.onGet=()=>{f.storage.set(key,JSON.stringify(pending))};await assert.rejects(f.call('hireOnlineMoonMerchant'),{code:'ordinary-departure-pending'});assert.deepEqual(f.trace,[]);});
++test('pending appears during BOT read, trade cannot debit',async()=>{const f=fixture();f.mode.onGet=()=>{f.storage.set(key,JSON.stringify(pending))};await assert.rejects(f.call('tradeWithOnlineBot'),{code:'ordinary-departure-pending'});assert.deepEqual(f.trace,[]);});
++test('in-flight direct operation blocks dispatch and releases guard on rejection',async()=>{const f=fixture();let enter,release;const entered=new Promise(r=>enter=r),hold=new Promise(r=>release=r);f.mode.onGet=async p=>{if(p.endsWith('/messages')){enter();await hold;}};const action=f.call('deleteAllReports').catch(e=>e);await entered;await assert.rejects(f.launch(),/Operazione in corso/);assert.deepEqual(f.trace,[]);release();assert.match(String(await action),/WRITE_ENTRY:batch.commit/);await assert.rejects(f.launch(),{code:'ordinary-departure-pending'});assert.deepEqual(f.trace,['batch.commit','dispatch']);});
++(async()=>{for(const [name,fn] of cases){try{await fn();console.log('PASS '+name);}catch(e){console.error('FAIL '+name+': '+e.stack);process.exitCode=1;}}})();
+diff --git a/tests/test_at05_recovery_reads.js b/tests/test_at05_recovery_reads.js
+new file mode 100644
+index 0000000..14b1149
+--- /dev/null
++++ b/tests/test_at05_recovery_reads.js
+@@ -0,0 +1,57 @@
++/** AT05-E: letture server e riconciliazione senza alterare gli accrediti. */
++'use strict';
++const assert=require('node:assert/strict');
++const fs=require('node:fs');
++const path=require('node:path');
++const root=path.join(__dirname,'..');
++const sources=['sync.js','galattiche.js','universes.js'].map(f=>fs.readFileSync(path.join(root,'modules/online',f),'utf8'));
++const cp=x=>JSON.parse(JSON.stringify(x));
++function fixture(){
++ const base='online_universes/u', player=base+'/players/me', home=base+'/planets/1_1_1',fleet=base+'/fleets/f1',gal=base+'/galattiche/me~g1';
++ const now=Date.now();
++ const store=new Map([[base,{name:'test',speed:10,passcode:'secret',createdAt:1,botConfig:{density:1}}],
++  [player,{uid:'me',joinedAt:1,serviceRevision:3,researches:{energyTech:7},ordinaryDispatchReceipt:{operationId:'f1',status:'committed'}}],
++  [home,{ownerUid:'me',id:'p1',coords:{g:1,s:1,p:1},resources:{metal:100,crystal:200,deuterium:300},fleet:{lightFighter:7},lastUpdated:now-3600000,inbox:{fleet:{lightFighter:3},resources:{metal:5}}}],
++  [fleet,{attackerUid:'me',resolved:false,originKey:'1_1_1',ships:{lightFighter:3}}],
++  [gal,{ownerUid:'me',version:4,updatedAt:now-1000,state:{id:'g1',resources:{metal:3}}}],
++  [base+'/messages/m1',{recipientUid:'me',timestamp:now,title:'test'}],
++  [base+'/planets/1_1_2',{ownerUid:'enemy'}]]);
++ const mode={gets:[],txReads:[],txCount:0,writes:0,restoreResearch:[],auth:'me'};
++ const checkWrite=()=>{mode.writes++;throw Error('scrittura vietata nel recupero')};
++ const meta=(key)=>({fromCache:mode.cache===key,hasPendingWrites:mode.pending===key});
++ const snap=(key)=>{const data=store.has(key)?cp(store.get(key)):undefined;return {id:key.split('/').pop(),ref:ref(key),exists:data!==undefined,data:()=>data===undefined?undefined:cp(data),metadata:meta(key)}};
++ const ref=key=>({path:key,id:key.split('/').pop(),collection:n=>col(key+'/'+n),set:checkWrite,update:checkWrite,delete:checkWrite,
++  get:async opt=>{assert.equal(opt?.source,'server');mode.gets.push(key);if(mode.error===key)throw Error('lettura fallita');return snap(key)}});
++ function col(key,filters=[],order=null,max=null){return {doc:id=>ref(key+'/'+id),where:(k,op,v)=>{assert.equal(op,'==');return col(key,[...filters,[k,v]],order,max)},orderBy:(k,o)=>col(key,filters,[k,o],max),limit:n=>col(key,filters,order,n),get:async opt=>{
++  assert.equal(opt?.source,'server');mode.gets.push(key);if(mode.error===key)throw Error('query fallita');
++  let docs=[...store.keys()].filter(k=>k.startsWith(key+'/')&&!k.slice(key.length+1).includes('/')&&filters.every(([field,v])=>store.get(k)[field]===v)).map(snap);
++  if(order)docs.sort((a,b)=>(a.data()[order[0]]-b.data()[order[0]])*(order[1]==='desc'?-1:1));
++  if(max!==null)docs=docs.slice(0,max);
++  return {docs,metadata:meta(key)};
++ }}}
++ const db={collection:n=>col(n),runTransaction:async cb=>{mode.txCount++;mode.beforeTx?.();const result=await cb({get:async r=>{mode.txReads.push(r.path);return snap(r.path)},set:checkWrite,update:checkWrite,delete:checkWrite});mode.afterTx?.();return result;},batch:checkWrite};
++ const G={getAuth:()=>({currentUser:{uid:mode.auth,displayName:'test'}}),getDB:()=>db,coordsToKey:c=>`${c.g}_${c.s}_${c.p}`,ensureBotsAroundHome:checkWrite,migrateOnlineFleets:checkWrite};
++ const W={__UniversumMPModules:G,__UniversumMPVariables:{},fbAuth:{currentUser:{uid:'me'}},UniversumUI:{state:{currentUniverse:{researches:{energyTech:999}}}},UniversumEngine:{getPlanetProduction(){},normalizeResearchState(){}},__UniversumEngineModules:{advancePlanetResources(p,u){mode.restoreResearch.push(u.researches.energyTech)},addGalatticaProduction(u,dt){mode.galTime=dt;}}};
++ for(const source of sources)new Function('window','firebase',source)(W,{});
++ const recover=(id='f1',pass='secret')=>G.joinOnlineUniverse('u',pass,{serverOnly:true,operationId:id});
++ return {G,mode,W,store,recover,base,player,home,fleet,gal};
++}
++const cases=[];
++function test(name,fn){cases.push([name,fn]);}
++test('E01 verified server state, legacy inbox unchanged, correct research, no writes',async()=>{const f=fixture(),u=await f.recover();assert.equal(u.serviceRevision,3);assert.equal(u.planets.length,1);assert.equal(u.planets[0].fleet.lightFighter,7);assert.equal(u.planets[0].inbox.fleet.lightFighter,3);assert.equal(u.fleetsInFlight.length,1);assert.equal(u.galattiche.length,1);assert.deepEqual(f.mode.restoreResearch,[7]);assert.equal(f.mode.writes,0);assert.equal(f.mode.txCount,1);assert.ok(f.mode.txReads.includes(f.home));assert.ok(f.mode.txReads.includes(f.gal));assert.equal(f.G.ordinaryRecoveryEvidence(u).fleet.id,'f1');assert.equal(f.G.ordinaryRecoveryEvidence(u).receipt.operationId,'f1');});
++test('E02 cache query rejected',async()=>{const f=fixture();f.mode.cache=f.base+'/planets';await assert.rejects(f.recover(),{code:'ordinary-recovery-changed'});assert.equal(f.mode.writes,0);});
++test('E03 pending local document rejected',async()=>{const f=fixture();f.mode.pending=f.home;await assert.rejects(f.recover(),{code:'ordinary-recovery-changed'});});
++test('E04 profile changes before transaction',async()=>{const f=fixture();f.mode.beforeTx=()=>f.store.get(f.player).serviceRevision++;await assert.rejects(f.recover(),{code:'ordinary-recovery-changed'});});
++test('E05 planet inbox changes during recovery',async()=>{const f=fixture();f.mode.beforeTx=()=>f.store.get(f.home).inbox.fleet.lightFighter++;await assert.rejects(f.recover(),{code:'ordinary-recovery-changed'});});
++test('E06 fleet resolution after transaction',async()=>{const f=fixture();f.mode.afterTx=()=>f.store.get(f.fleet).resolved=true;await assert.rejects(f.recover(),{code:'ordinary-recovery-changed'});});
++test('E07 planet query membership changes after transaction',async()=>{const f=fixture();f.mode.afterTx=()=>f.store.set(f.base+'/planets/1_1_4',{ownerUid:'me'});await assert.rejects(f.recover(),{code:'ordinary-recovery-changed'});});
++test('E08 Galattica mutation rejected',async()=>{const f=fixture();f.mode.afterTx=()=>f.store.get(f.gal).version++;await assert.rejects(f.recover(),{code:'ordinary-recovery-changed'});});
++test('E09 absent fleet retained as evidence, not classified negative',async()=>{const f=fixture();f.store.delete(f.fleet);const u=await f.recover();assert.equal(f.G.ordinaryRecoveryEvidence(u).fleet,null);assert.equal(f.G.ordinaryRecoveryEvidence(u).receipt.operationId,'f1');assert.equal(f.mode.writes,0);});
++test('E10 server query failure not converted into empty list',async()=>{const f=fixture();f.mode.error=f.base+'/fleets';await assert.rejects(f.recover(),/query fallita/);});
++test('E11 missing profile never created in recovery',async()=>{const f=fixture();f.store.delete(f.player);await assert.rejects(f.recover(),{code:'ordinary-recovery-changed'});assert.equal(f.mode.writes,0);});
++test('E12 account switch rejected',async()=>{const f=fixture();f.mode.afterTx=()=>f.mode.auth='other';await assert.rejects(f.recover(),{code:'ordinary-recovery-changed'});});
++test('E13 passcode enforced',async()=>{const f=fixture();await assert.rejects(f.recover('f1','wrong'),/Codice stanza errato/);assert.equal(f.mode.writes,0);});
++test('E14 message cache rejected',async()=>{const f=fixture();f.mode.cache=f.base+'/messages/m1';await assert.rejects(f.recover(),{code:'ordinary-recovery-changed'});});
++test('E15 legacy profile without revision recoverable, no migration',async()=>{const f=fixture();delete f.store.get(f.player).serviceRevision;const u=await f.recover();assert.equal(u.serviceRevision,0);assert.equal(f.mode.writes,0);});
++test('E16 invalid revision rejected',async()=>{const f=fixture();f.store.get(f.player).serviceRevision=-1;await assert.rejects(f.recover(),{code:'ordinary-recovery-changed'});});
++(async()=>{for(const [name,fn] of cases){try{await fn();console.log('PASS '+name);}catch(e){console.error('FAIL '+name+': '+e.stack);process.exitCode=1;}}})();
+diff --git a/tests/test_at05_ui_protection.js b/tests/test_at05_ui_protection.js
+new file mode 100644
+index 0000000..4ff0520
+--- /dev/null
++++ b/tests/test_at05_ui_protection.js
+@@ -0,0 +1,32 @@
++/** AT05: UI wiring tests using actual modules with small DOM/timer mocks. */
++'use strict';
++const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
++const root=path.join(__dirname,'..');
++const read=p=>fs.readFileSync(path.join(root,p),'utf8');
++function fixture(){
++ const nodes=new Map(), listeners=new Map();let interval;const counters={saves:0,sync:0,ticks:0,resolve:0,occupation:0,render:0,lobby:0,update:0,verify:0};
++ function node(id){const classes=new Set();const n={id,style:{},dataset:{},children:new Map(),classList:{add:k=>classes.add(k),remove:k=>classes.delete(k),contains:k=>classes.has(k),toggle:(k,v)=>v?classes.add(k):classes.delete(k)},remove(){nodes.delete(n.id)},before(x){nodes.set(x.id,x)},querySelector(k){if(!n.children.has(k))n.children.set(k,node(k));return n.children.get(k)},addEventListener(k,f){n[k]=f}};return n;}
++ for(const id of ['game-viewport','screen-game','screen-lobby','universal-modal'])nodes.set(id,node(id));
++ const doc={hidden:true,body:node('body'),getElementById:k=>nodes.get(k)||null,querySelector:()=>null,querySelectorAll:()=>[],createElement:()=>node(''),addEventListener:(k,f,c)=>listeners.set(k+Boolean(c),f)};
++ const u={id:'u',planets:[{id:'p',coords:{g:1,s:1,p:1}}],incomingAttacks:[]};let pending=null,initial=false,storageFail=false;
++ const G={ordinaryDepartureStatus:()=>{if(storageFail)throw Error('storage');return pending},ordinaryDepartureBusy:()=>!!pending?.busy,ordinaryCheckpointBlocked:()=>!!pending||storageFail,ordinaryDepartureInitialBusy:()=>initial,verifyOrdinaryDeparture:async()=>{counters.verify++;return {status:'committed'}}};
++ const W={__UniversumMPModules:G,UniversumDB:{save:async()=>counters.saves++,renderLobbyList:async()=>counters.lobby++},UniversumMP:{syncPlayerState:async()=>{counters.sync++;return true},resolveArrivedOnlineFleets:async()=>counters.resolve++,processOnlineOccupations:async()=>counters.occupation++},UniversumEngine:{tick:()=>{counters.ticks++;return false}},UniversumGalaxy:{processFleetsAndBots:()=>{}},UniversumUpdater:{onSafeLobby:()=>counters.update++},confirm:()=>true};
++ const load=p=>new Function('window','document','localStorage','setInterval','clearInterval','setTimeout','clearTimeout',read(p))(W,doc,{getItem:()=>null},f=>{interval=f;return 1},()=>{},()=>1,()=>{});
++ load('ui-core.js');load('modules/ui/runtime.js');load('modules/ui/navigation.js');
++ const UI=W.UniversumUI;UI.state.currentUniverse=u;UI.state.isMultiplayerMode=true;UI.toast=()=>{};UI.playSound=()=>{};UI.stopChatListeners=()=>{};UI.updateCommBadges=()=>{};UI.renderOverview=()=>counters.render++;UI.refreshOnlineLobbyState=async()=>{};
++ return {UI,W,G,u,nodes,listeners,counters,setPending:(v,b=false)=>{pending=v;initial=b},setStorageFail:v=>storageFail=v,tick:()=>interval()};
++}
++const record={operationId:'new1',protocol:2,armed:true,expectedRevision:2,profileJoinedAt:1};
++async function main(){let passed=0;async function test(name,fn){await fn();console.log('PASS '+name);passed++;}
++ await test('UI01 pending hides viewport and blocks rendering',async()=>{const f=fixture();f.setPending(record);await f.UI.renderCurrentView();assert(f.nodes.has('at05-ordinary-departure-panel'));assert(f.nodes.get('game-viewport').classList.contains('hidden'));assert.equal(f.counters.render,0);f.setPending(null);await f.UI.renderCurrentView();assert(!f.nodes.has('at05-ordinary-departure-panel'));assert.equal(f.counters.render,1)});
++ await test('UI02 pending blocks online persistence and offline remains independent',async()=>{const f=fixture();f.setPending(record);assert.equal(await f.UI.persistUniverseState(),false);assert.equal(f.counters.sync,0);f.UI.state.isMultiplayerMode=false;await f.UI.persistUniverseState();assert.equal(f.counters.saves,1)});
++ await test('UI03 inaccessible storage blocks mutation',async()=>{const f=fixture();f.setStorageFail(true);assert(f.UI.blockPendingMutation(f.u));assert.equal(await f.UI.persistUniverseState(),false);assert.equal(f.counters.sync,0)});
++ await test('UI04 stale captured state rejected',async()=>{const f=fixture();assert(f.UI.blockPendingMutation({...f.u}));assert(!f.UI.blockPendingMutation(f.u))});
++ await test('UI05 busy exit refused; uncertain exit does not save',async()=>{const f=fixture();f.setPending({...record,busy:true});await f.UI.exitActiveGameToLobby();assert.equal(f.UI.state.currentUniverse,f.u);f.setPending(record);await f.UI.exitActiveGameToLobby();assert.equal(f.UI.state.currentUniverse,null);assert.equal(f.counters.sync,0);assert.equal(f.counters.update,0);assert.equal(f.counters.lobby,1)});
++ await test('UI06 normal offline exit saves and allows update',async()=>{const f=fixture();f.UI.state.isMultiplayerMode=false;await f.UI.exitActiveGameToLobby();assert.equal(f.counters.saves,1);assert.equal(f.counters.update,1)});
++ await test('UI07 pending freezes local tick, keeps server resolution cadence',async()=>{const f=fixture();f.setPending(record);f.UI.startGameLoop();for(let i=0;i<60;i++)await f.tick();assert.equal(f.counters.ticks,0);assert.equal(f.counters.sync,0);assert.equal(f.counters.resolve,20);assert.equal(f.counters.occupation,2)});
++ await test('UI08 initial dispatch keeps local tick without extra checkpoint',async()=>{const f=fixture();f.setPending({...record,busy:true},true);f.UI.startGameLoop();await f.tick();assert.equal(f.counters.ticks,1);assert.equal(f.counters.sync,0)});
++ await test('UI09 capture guard blocks fresh user actions but not recovery controls',async()=>{const f=fixture();f.setPending(record);f.UI.bindGlobalUIEvents();let n=0;const ev=allow=>({target:{closest:s=>s.includes('data-at05-control')?allow:true},preventDefault:()=>n++,stopImmediatePropagation:()=>n++});f.listeners.get('clicktrue')(ev(false));assert.equal(n,2);f.listeners.get('clicktrue')(ev(true));assert.equal(n,2)});
++ await test('UI10 verification control calls original recovery API',async()=>{const f=fixture();f.setPending(record);f.UI.updateOrdinaryDeparturePanel();const panel=f.nodes.get('at05-ordinary-departure-panel');await panel.querySelector('[data-at05-control="verify"]').click();assert.equal(f.counters.verify,1)});
++ console.log(`${passed}/${passed} UI scenarios passed`);
++}main().catch(e=>{console.error(e);process.exitCode=1});
+diff --git a/tests/test_atomic_dispatch.js b/tests/test_atomic_dispatch.js
+index eb1670c..d405524 100644
+--- a/tests/test_atomic_dispatch.js
++++ b/tests/test_atomic_dispatch.js
+@@ -2,51 +2,63 @@
+ 'use strict';
+ const fs = require('node:fs');
+ const path = require('node:path');
+-async function runTests(fleetSource,syncSource) {
++async function runTests(fleetSource,syncSource,universesSource,galatticheSource) {
+   const results=[];
+   const cp=x=>JSON.parse(JSON.stringify(x));
+   const eq=(x,y,label)=>{if(JSON.stringify(x)!==JSON.stringify(y))throw Error(label+": "+JSON.stringify(x)+" != "+JSON.stringify(y))};
+   const ok=(x,label)=>{if(!x)throw Error(label)};
+   const origin="1_1_1", own="1_1_2", enemy="1_1_3", empty="1_1_4";
+-  function fixture({versioned=true,queue=false,initial=10}={}) {
+-    const mk=(key,id)=>({id,name:key,coords:{g:1,s:1,p:Number(key.slice(-1))},ownerUid:"me",
++  function fixture({versioned=true,queue=false,initial=10,uid="me",uniId="u",storageMap=new Map(),sharedStore=null,counter={next:0},recovery=false}={}) {
++    const storageMode={};
++    const localStorage={getItem:k=>{if(storageMode.failGet)throw Error("storage read denied");return storageMap.get(k)??null},
++      setItem:(k,v)=>{if(storageMode.failSet)throw Error("storage quota");if(!storageMode.dropWrite)storageMap.set(k,String(v))},
++      removeItem:k=>{if(storageMode.failRemove)throw Error("storage remove denied");storageMap.delete(k)}};
++    const auth={uid};
++    const mk=(key,id)=>({id,name:key,coords:{g:1,s:1,p:Number(key.slice(-1))},ownerUid:uid,
+       fleet:{lightFighter:initial,hephaestusForge:1,invictus:0,crepuscolo:0,mothership:1,deathStar:1,colonyShip:1,espionageProbe:1},
+       resources:{metal:1000,crystal:1000,deuterium:100000},buildings:{},defenses:{},
+       shipyardQueue:queue?[{id:"prometheusOracle",remaining:1}]:[],
+       mothershipHangars:[{id:"hangar1",fighters:0}],
+       bacinoSpaziale:{status:"active",startedAt:1,invictusActive:1,crepuscolo:{status:"active"}}});
+     const p=mk(origin,"p1"), p2=mk(own,"p2"); p2.fleet.hephaestusForge=0;p2.shipyardQueue=[];
+-    const u={id:"u",emperor:"test",planets:[p,p2],fleetsInFlight:[],researches:{},...(versioned?{serviceRevision:2}:{})};
+-    const root="online_universes/u", planets=root+"/planets/", fleets=root+"/fleets/", player=root+"/players/me";
+-    const store=new Map([[planets+origin,cp(p)],[planets+own,cp(p2)],[planets+enemy,{ownerUid:"enemy"}],[player,{...(versioned?{serviceRevision:2}:{}),specialistFlights:["existing"]}],[fleets+"existing",{resolved:false,ships:{prometheusOracle:1}}]]);
++    const u={id:uniId,emperor:"test",planets:[p,p2],fleetsInFlight:[],researches:{},...(versioned?{serviceRevision:2}:{})};
++    const root="online_universes/"+uniId, planets=root+"/planets/", fleets=root+"/fleets/", player=root+"/players/"+uid;
++    const store=sharedStore || new Map([[root,{name:"test"}],[planets+origin,cp(p)],[planets+own,cp(p2)],[planets+enemy,{ownerUid:"enemy"}],[player,{joinedAt:1,...(versioned?{serviceRevision:2}:{}),specialistFlights:["existing"]}],[fleets+"existing",{resolved:false,ships:{prometheusOracle:1}}]]);
+     const mode={fail:null,retry:false,attempts:0,commits:0,settles:0,reads:[],writes:[],calls:0};
+-    let next=0;
+-    function snap(path){return {id:path.split("/").pop(),exists:store.has(path),data:()=>store.has(path)?cp(store.get(path)):undefined}}
++    function snap(path){const data=store.has(path)?cp(store.get(path)):undefined;return {id:path.split("/").pop(),ref:ref(path),exists:data!==undefined,data:()=>data===undefined?undefined:cp(data),metadata:{fromCache:mode.cache===path,hasPendingWrites:mode.pendingWrite===path}}}
+     function ref(path){return {path,id:path.split("/").pop(),collection:n=>col(path+"/"+n),
+-      get:async()=>snap(path),update:async d=>store.set(path,{...store.get(path),...cp(d)})}}
+-    function col(path){return {doc:id=>ref(path+"/"+(id??("new"+(++next)))),
++      get:async opts=>{if(opts?.source==='server' && mode.readFail)throw Error('server unavailable');return snap(path)},update:async d=>store.set(path,{...store.get(path),...cp(d)})}}
++    function col(path,filters=[],max=null){return {doc:id=>ref(path+"/"+(id??("new"+(++counter.next)))),
++      where:(k,op,v)=>{eq(op,'==','query operator');return col(path,[...filters,[k,v]],max)},orderBy:()=>col(path,filters,max),limit:n=>col(path,filters,n),
++      get:async opts=>{eq(opts?.source,'server','recovery reads server');if(mode.readFail)throw Error('server unavailable');let docs=[...store.keys()].filter(k=>k.startsWith(path+'/')&&!k.slice(path.length+1).includes('/')&&filters.every(([field,v])=>store.get(k)[field]===v)).map(snap);if(max!==null)docs=docs.slice(0,max);return {docs,metadata:{fromCache:mode.cache===path,hasPendingWrites:mode.pendingWrite===path}};},
+       add:async d=>{mode.calls++;throw Error("La candidata non deve usare add")}}}
+     const db={collection:n=>col(n),runTransaction:async cb=>{
+       const count=mode.retry?2:1;
+       for(let i=0;i<count;i++){
+         mode.attempts++;
+-        const staged=[];
+-        const tx={get:async r=>{mode.reads.push(r.path);return snap(r.path)},
++        const staged=[],readVersions=new Map();
++        const tx={get:async r=>{mode.reads.push(r.path);const s=snap(r.path);readVersions.set(r.path,JSON.stringify(s.data()));return s;},
+           set:(r,d,opt)=>{if(mode.fail==="create"&&r.path.startsWith(fleets))throw Error("create rejected");staged.push([r.path,cp(d),!!opt?.merge])},
+           update:(r,d)=>staged.push([r.path,cp(d),true])};
+-        await cb(tx);
++        await mode.beforeCallback?.();
++        const result=await cb(tx);
++        await mode.afterCallback?.();
+         if(mode.fail==="commit")throw Error("commit rejected");
+         if(i+1<count)continue;
++        for(const [key,data] of readVersions)if(JSON.stringify(store.get(key))!==data)throw Object.assign(Error('mock transaction conflict'),{code:'aborted'});
++        if(!staged.length){mode.readTransactions=(mode.readTransactions || 0)+1;return result;}
+         for(const [path,d,merge] of staged){store.set(path,merge?{...store.get(path),...d}:d);mode.writes.push(path)}
+         mode.commits++;
++        await mode.afterCommit?.();
+         if(mode.fail==="lostAck")throw Error("commit acknowledged by server but response lost");
++        return result;
+       }
+     }};
+     const ids=["hephaestusForge","prometheusOracle"];
+-    const G={getAuth:()=>({currentUser:{uid:"me"}}),getDB:()=>db,coordsToKey:c=>`${c.g}_${c.s}_${c.p}`, _tsToMs:()=>0,
++    const G={getAuth:()=>({currentUser:{uid:auth.uid,displayName:"test"}}),getDB:()=>db,coordsToKey:c=>`${c.g}_${c.s}_${c.p}`, _tsToMs:()=>0,
+       galatticaMarkers:()=>({doc:()=>({get:async()=>({exists:true,id:"gal1",data:()=>({ownerUid:"enemy"})})})}),atGalatticaTarget:()=>true};
+     const ships=Object.fromEntries(["lightFighter","hephaestusForge","prometheusOracle","invictus","crepuscolo","mothership","deathStar","colonyShip","espionageProbe"].map(id=>[id,{cargo:100000,cost:{metal:3000,crystal:1000,deuterium:0}}]));
+-    const W={__UniversumMPModules:G,__UniversumMPVariables:{SYNC_MIN_INTERVAL_MS:0,_INBOX_RES_KEYS:["metal","crystal","deuterium"],_syncLastByUni:new Map(),_systemCache:new Map(),_systemPending:new Map(),FLEET_SCHEMA_VERSION:1,_mpErrorToastAt:new Map()},
++    const W={localStorage,__UniversumMPModules:G,__UniversumMPVariables:{SYNC_MIN_INTERVAL_MS:0,_INBOX_RES_KEYS:["metal","crystal","deuterium"],_syncLastByUni:new Map(),_systemCache:new Map(),_systemPending:new Map(),FLEET_SCHEMA_VERSION:1,_mpErrorToastAt:new Map()},
+       UniversumData:{SHIPS:ships},UniversumGalaxy:{calculateDistance:()=>1,getFleetSpeedAndFuel:()=>({fuelCost:40,durationSec:60}),getInvictusJumpCost:()=>5},
+       UniversumMissionsCore:{getMaxFleetSlots:()=>100,getMaxExploreHours:()=>4,getExplorationHoldDurationSec:(u,h)=>h*3600,buildExplorationTimeline:(now,d,h)=>({departureTime:now,zoneArrivalTime:now+d*1000,explorationEndTime:now+(d+h)*1000,arrivalTime:now+(d+h)*1000,returnTime:now+(2*d+h)*1000,travelDurationMs:d*1000,explorationHoldMs:h*1000,returnTravelDurationMs:d*1000})},
+       UniversumServices:{ids,forge:ids[0],oracle:ids[1],transfer:(u,m,t,ships)=>ids.some(id=>ships[id]),settlePlanet:()=>{mode.settles++}},
+@@ -54,9 +66,14 @@ async function runTests(fleetSource,syncSource) {
+     const firebase={firestore:{FieldValue:{serverTimestamp:()=>null,delete:()=>null}}};
+     new Function("window","firebase",syncSource)(W,firebase);
+     new Function("window","firebase",fleetSource)(W,firebase);
++    if(recovery){
++      new Function("window","firebase",universesSource)(W,firebase);
++      new Function("window","firebase",galatticheSource)(W,firebase);
++      W.UniversumUI={state:{currentUniverse:u,isMultiplayerMode:true},startOnlineGame(fresh){if(mode.installFail==='throw')throw Error('install failed');if(mode.installFail==='skip')return;this.state.currentUniverse=fresh;this.state.isMultiplayerMode=true;if(mode.installFail==='partial')throw Error('partial install');},toast(){}};
++    }
+     const launch=(target=enemy,mission="attack",ships={lightFighter:3},cargo={metal:100,crystal:50,deuterium:20},options={})=>G.launchOnlineFleet(u,0,{g:1,s:1,p:Number(target.slice(-1))},mission,ships,cargo,options);
+     const state=()=>({local:cp(p),remote:cp(store.get(planets+origin)),flights:u.fleetsInFlight.length,created:[...store.keys()].filter(k=>k.startsWith(fleets+"new")).length,player:cp(store.get(player))});
+-    return {G,u,p,mode,store,state,launch,planets,player,fleets,W};
++    return {G,u,p,mode,store,state,launch,planets,player,fleets,W,storageMap,storageMode,auth,counter,root};
+   }
+   async function rejected(f,label){let error;try{await f()}catch(e){error=e}ok(error,label+" expected rejection");return error}
+   async function test(name,fn){try{await fn();results.push({name,pass:true})}catch(e){results.push({name,pass:false,error:String(e)})}}
+@@ -79,7 +96,127 @@ async function runTests(fleetSource,syncSource) {
+   await test("T01 missing checkpoint confirmation",async()=>{const f=fixture();f.G.syncPlayerState=async()=>undefined;const before=f.state();await rejected(()=>f.launch(),"not confirmed");eq(f.state(),before,"no local flight");});
+   await test("T10 partial: stale revision rejected after another commit",async()=>{const f=fixture();const stale=cp(f.u);await f.launch();const before=f.state();await rejected(()=>f.G.launchOnlineFleet(stale,0,{g:1,s:1,p:3},"attack",{lightFighter:3},{}),"stale revision");eq(f.state(),before,"no second commit");});
+   await test("T09 diagnostic: ambiguous acknowledgment leaves local stale",async()=>{const f=fixture();f.mode.fail="lostAck";await rejected(()=>f.launch(),"lost ack");const s=f.state();eq([s.created,s.flights,s.local.fleet.lightFighter,s.remote.fleet.lightFighter],[1,0,10,7],"ambiguity reproduced");});
++  // AT05-I03-I01: persistenza locale e blocco; nessun recupero automatico.
++  const pending=f=>f.G.ordinaryDepartureStatus(f.u);
++  const gate=()=>{let open;const wait=new Promise(r=>open=r);return {open,wait}};
++  const until=async condition=>{for(let i=0;i<200;i++){if(condition())return;await Promise.resolve()}throw Error("condizione non raggiunta")};
++  await test("I01-01 original dispatch persists ID before transaction, then clears on known success",async()=>{
++    const f=fixture();f.mode.beforeCallback=()=>{const p=pending(f);eq(p.operationId,"new1","original ID before tx");eq(p.expectedRevision,2,"revision");eq(f.storageMap.size,1,"durable");ok(f.G.ordinaryCheckpointBlocked(f.u,{ordinary:true,ref:{id:"new1"}}),"forged dispatch blocked")};
++    const d=await f.launch();eq(d.id,"new1","same ID");eq(pending(f),null,"known success cleared");eq(JSON.parse([...f.storageMap.values()][0]).status,"settled","durable terminal");eq(f.mode.commits,1,"initial permitted");
++    f.mode.beforeCallback=null;
++    eq(await f.G.syncPlayerState(f.u,{force:true}),true,"normal sync resumes");
++  });
++  await test("I01-02 lost ack retained, original ID, no retries or stale saves",async()=>{
++    const f=fixture();f.mode.fail="lostAck";const err=await rejected(()=>f.launch(),"lost ack");eq(err.code,"ordinary-departure-pending","typed error");
++    const p=pending(f),before=f.state();eq(p.operationId,"new1","retained ID");eq(f.storageMap.size,1,"persisted");f.mode.fail=null;
++    await rejected(()=>f.launch(),"no repeat");await rejected(()=>f.launch(own,"deploy",{hephaestusForge:1},{}),"special launch blocked");
++    eq(await f.G.syncPlayerState(f.u,{force:true}),false,"forced sync blocked");eq(await f.G.syncPlayerState(cp(f.u),{force:false}),false,"other object blocked");
++    eq(f.state(),before,"no changes");eq(f.mode.commits,1,"no duplicate");eq(pending(f),p,"same record");
++  });
++  await test("I01-03 page reload retains exact request; no dispatch authorization survives",async()=>{
++    const f=fixture({versioned:false});f.mode.fail="lostAck";await rejected(()=>f.launch(),"lost ack");const saved=pending(f);eq(saved.expectedRevision,null,"legacy");
++    const fresh=fixture({storageMap:f.storageMap,versioned:false});eq(pending(fresh),saved,"same durable ID after reload");
++    await rejected(()=>fresh.launch(),"reload launch");eq(await fresh.G.syncPlayerState(fresh.u,{force:true}),false,"reload sync");eq(fresh.mode.commits,0,"no new commit");
++  });
++  await test("I01-04 pending isolated by account and universe",async()=>{
++    const f=fixture();f.mode.fail="lostAck";await rejected(()=>f.launch(),"lost ack");const saved=pending(f);
++    const other=fixture({uid:"other",storageMap:f.storageMap});eq(pending(other),null,"other account");await other.launch();eq(other.mode.commits,1,"other account dispatch");
++    const universe=fixture({uniId:"other-universe",storageMap:f.storageMap});eq(pending(universe),null,"other universe");await universe.launch();eq(universe.mode.commits,1,"other universe dispatch");
++    eq(pending(f),saved,"original unaffected");eq(f.storageMap.size,3,"one marker per account and universe");
++  });
++  await test("I01-05 storage unavailable before dispatch fails closed",async()=>{
++    for(const mode of ["failGet","failSet","dropWrite"]){const f=fixture();f.storageMode[mode]=true;const before=f.state();
++      const e=await rejected(()=>f.launch(),mode);eq(e.code,"ordinary-departure-storage",mode);eq(f.state(),before,"no debit");eq(f.mode.commits,0,"no tx commit");eq(f.mode.attempts,0,"no tx start");}
++  });
++  await test("I01-06 storage corrupt or unreadable blocks checkpoints",async()=>{
++    const f=fixture();f.storageMode.failGet=true;eq(await f.G.syncPlayerState(f.u,{force:true}),false,"storage unavailable");
++    f.storageMode.failGet=false;f.storageMap.set('universum:ordinary-departure:v1:'+JSON.stringify(["me","u"]),"{bad");
++    eq(await f.G.syncPlayerState(f.u,{force:true}),false,"invalid record");await rejected(()=>f.launch(),"corrupt record");eq(f.mode.commits,0,"no writes");
++  });
++  await test("I01-07 failure persisting terminal marker after confirmed commit remains blocked",async()=>{
++    const f=fixture();f.mode.afterCommit=()=>{f.storageMode.failSet=true};await rejected(()=>f.launch(),"terminal marker");eq(f.mode.commits,1,"commit known");eq(pending(f).operationId,"new1","retained");
++    f.storageMode.failSet=false;await rejected(()=>f.launch(),"still blocked");eq(await f.G.syncPlayerState(f.u,{force:true}),false,"still blocked sync");eq(f.mode.commits,1,"no duplicate");
++  });
++  await test("I01-08 prequeued checkpoint blocked at execution",async()=>{
++    const f=fixture(),hold=gate(),entered=gate();f.mode.beforeCallback=async()=>{if(f.mode.attempts===1){entered.open();await hold.wait}};
++    const first=f.G.syncPlayerState(f.u,{force:true}).catch(e=>e);await entered.wait;
++    const queued=f.G.syncPlayerState(f.u,{force:true});const launch=f.launch().catch(e=>e);await until(()=>f.storageMap.size===1);
++    f.mode.fail="lostAck";hold.open();const a=await first;eq(a.code,"ordinary-departure-pending","inflight pre-callback blocked");eq(await queued,false,"queued blocked");
++    eq((await launch).code,"ordinary-departure-pending","dispatch lost ack");eq(f.mode.attempts,2,"queued did not start tx");eq(f.mode.commits,1,"only original dispatch committed");
++  });
++  await test("I01-09 already submitted checkpoint precedes dispatch; actual revision persisted",async()=>{
++    const f=fixture(),hold=gate(),entered=gate();f.mode.afterCallback=async()=>{if(f.mode.attempts===1){entered.open();await hold.wait}};
++    const first=f.G.syncPlayerState(f.u,{force:true});await entered.wait;
++    const launch=f.launch();await until(()=>f.storageMap.size===1);eq(pending(f).expectedRevision,2,"reservation revision");
++    f.mode.beforeCallback=()=>{if(f.mode.attempts===2)eq(pending(f).expectedRevision,3,"actual dispatch revision")};
++    hold.open();eq(await first,true,"prior checkpoint");await launch;eq(f.mode.commits,2,"two authorized commits");eq(pending(f),null,"clear success");
++  });
++  await test("I01-10 retry internal callback preserves original request",async()=>{
++    const f=fixture();f.mode.retry=true;const observed=[];f.mode.beforeCallback=()=>observed.push(pending(f).operationId);await f.launch();eq(observed,["new1","new1"],"stable ID");eq(f.mode.commits,1,"single debit");
++  });
++  await test("I01-11 unknown commit failure remains pending even with missing fleet",async()=>{
++    const f=fixture();f.mode.fail="commit";await rejected(()=>f.launch(),"uncertain");eq(f.state().created,0,"no doc in mock");eq(pending(f).operationId,"new1","no negative inference");
++    f.mode.fail=null;await rejected(()=>f.launch(),"no retry");eq(f.mode.commits,0,"no commits");
++  });
++  await test("I01-12 definitive failure before commit permits new attempt",async()=>{
++    const f=fixture();f.mode.fail="create";await rejected(()=>f.launch(),"known precommit");eq(pending(f),null,"definite failure");f.mode.fail=null;await f.launch();eq(f.mode.commits,1,"new attempt");
++  });
++  await test("I01-13 undefined confirmation remains pending",async()=>{
++    const f=fixture();f.G.syncPlayerState=async()=>undefined;await rejected(()=>f.launch(),"no confirmation");eq(pending(f).operationId,"new1","retained");
++  });
++  await test("I01-14 authorization revoked after uncertain dispatch",async()=>{
++    const f=fixture(),original=f.G.syncPlayerState;let options;
++    f.G.syncPlayerState=(u,o)=>{options=o;return original(u,o)};f.mode.fail="lostAck";await rejected(()=>f.launch(),"lost");
++    f.mode.fail=null;await rejected(()=>original(f.u,options),"same dispatch no longer authorized");eq(f.mode.commits,1,"no re-dispatch");
++  });
++  // I05: terminal receipts and actual E recovery path.
++  const uncertain=async (mode='lostAck',versioned=true)=>{const f=fixture({recovery:true,versioned});f.mode.fail=mode;await rejected(()=>f.launch(),mode);f.mode.fail=null;return f;};
++  const installed=f=>f.W.UniversumUI.state.currentUniverse;
++  const verify=(f,options={})=>f.G.verifyOrdinaryDeparture(installed(f),options);
++  const receipt=f=>f.store.get(f.player).ordinaryDispatchReceipt;
++  await test("I05-01 commit receipt atomic; normal checkpoint acknowledges and preserves",async()=>{
++    const f=fixture({recovery:true});const d=await f.launch();eq(receipt(f).operationId,d.id,"receipt ID");eq(receipt(f).status,"committed","terminal");eq(receipt(f).terminalRevision,3,"terminal revision");eq(receipt(f).acknowledged,false,"initial receipt protected");eq(f.mode.commits,1,"one dispatch commit");await f.G.syncPlayerState(f.u,{force:true});eq(receipt(f).acknowledged,true,"later checkpoint acknowledgement");eq(receipt(f).operationId,d.id,"preserved receipt");
++  });
++  await test("I05-02 lost ack, actual E recovers once, no new debit",async()=>{
++    const f=await uncertain();const id=pending(f).operationId,old=f.u;eq(receipt(f).operationId,id,"same ID");const result=await verify(f);eq(result,{status:"committed",operationId:id},"verified result");eq(installed(f).planets[0].fleet.lightFighter,7,"authoritative stock");eq(installed(f).planets[0].resources,debit,"authoritative resources");eq(installed(f).fleetsInFlight.length,1,"mission recovered");eq(pending(f),null,"pending cleared");eq(await f.G.syncPlayerState(old,{force:true}),false,"retired state blocked");eq(f.mode.commits,1,"no repeated commit");eq(await f.G.syncPlayerState(installed(f),{force:true}),true,"fresh checkpoint resumes");eq(receipt(f).acknowledged,true,"receipt acknowledged");
++  });
++  await test("I05-03 completed and deleted fleet still provable after full reload",async()=>{
++    const f=await uncertain();const id=pending(f).operationId;f.store.delete(f.fleets+id);
++    const reload=fixture({recovery:true,storageMap:f.storageMap,sharedStore:f.store,counter:f.counter});const result=await verify(reload);eq(result.operationId,id,"persisted ID");eq(result.status,"committed","receipt proof");eq(installed(reload).fleetsInFlight.length,0,"no resurrected mission");eq(installed(reload).planets[0].fleet.lightFighter,7,"no second debit");eq(reload.mode.commits,0,"read-only recovery");
++  });
++  await test("I05-04 absent fleet and receipt do not unlock",async()=>{const f=await uncertain("commit");await rejected(()=>verify(f),"no positive proof");eq(pending(f).operationId,"new1","still pending");eq(f.mode.commits,0,"no cancellation without explicit action");});
++  await test("I05-05 explicit fenced cancellation yields terminal negative without debit",async()=>{const f=await uncertain("commit");const before=cp(f.store.get(f.planets+origin));const result=await verify(f,{cancel:true});eq(result.status,"cancelled","negative terminal");eq(receipt(f).status,"cancelled","receipt");eq(receipt(f).terminalRevision,3,"barrier");eq(f.store.get(f.planets+origin),before,"stock unchanged");eq(f.state().created,0,"no mission");eq(installed(f).serviceRevision,3,"fresh revision");eq(pending(f),null,"safe release");});
++  await test("I05-06 cancellation lost ack: retain request, later verify terminal",async()=>{const f=await uncertain("commit");f.mode.fail="lostAck";await rejected(()=>verify(f,{cancel:true}),"lost cancellation ack");eq(receipt(f).status,"cancelled","barrier committed");eq(pending(f).operationId,"new1","retained");f.mode.fail=null;eq((await verify(f)).status,"cancelled","terminal recovered");eq(f.mode.commits,1,"no duplicate barrier");});
++  await test("I05-07 changed revision not evidence of cancellation",async()=>{const f=await uncertain("commit");f.store.get(f.player).serviceRevision++;await rejected(()=>verify(f,{cancel:true}),"revision changed");eq(pending(f).operationId,"new1","still pending");eq(receipt(f),undefined,"no fabricated negative");});
++  await test("I05-08 replaced profile does not permit cancellation",async()=>{const f=await uncertain("commit");f.store.get(f.player).joinedAt=2;await rejected(()=>verify(f,{cancel:true}),"profile recreated");eq(pending(f).operationId,"new1","still pending");});
++  await test("I05-09 legacy commit receipt recoverable; legacy negative remains uncertain",async()=>{const f=await uncertain("lostAck",false);eq(receipt(f).terminalRevision,null,"legacy terminal revision");f.store.delete(f.fleets+"new1");eq((await verify(f)).status,"committed","legacy positive");const n=await uncertain("commit",false);await rejected(()=>verify(n,{cancel:true}),"legacy no fence");eq(pending(n).operationId,"new1","legacy blocked");});
++  await test("I05-10 read failure, cache and write metadata do not unlock",async()=>{const f=await uncertain();f.mode.readFail=true;await rejected(()=>verify(f),"server failure");f.mode.readFail=false;f.mode.cache=f.player;await rejected(()=>verify(f),"cache");f.mode.cache=null;f.mode.pendingWrite=f.player;await rejected(()=>verify(f),"pending metadata");eq(pending(f).operationId,"new1","same ID");eq(f.mode.commits,1,"no repeated dispatch");});
++  await test("I05-11 mismatched proof or contradictory cancelled receipt rejected",async()=>{const f=await uncertain();receipt(f).originKey="bad";await rejected(()=>verify(f),"wrong origin");receipt(f).originKey=origin;receipt(f).status="cancelled";await rejected(()=>verify(f),"fleet contradicts cancellation");eq(pending(f).operationId,"new1","retained");});
++  await test("I05-12 failed install or updater suppression retains pending",async()=>{for(const installFail of ['throw','skip','partial']){const f=await uncertain();f.mode.installFail=installFail;await rejected(()=>verify(f),installFail);eq(pending(f).operationId,"new1","retained");eq(await f.G.syncPlayerState(installed(f),{force:true}),false,"still blocked");f.mode.installFail=null;eq((await verify(f)).status,"committed","retry succeeds");}});
++  await test("I05-13 duplicate verification and account switch",async()=>{const f=await uncertain(),hold=gate(),entered=gate();f.mode.beforeCallback=async()=>{entered.open();await hold.wait};const first=verify(f).catch(e=>e);await entered.wait;await rejected(()=>verify(f),"busy");f.auth.uid="other";hold.open();ok((await first) instanceof Error,"old account not installed");f.auth.uid="me";eq(pending(f).operationId,"new1","original still pending");});
++  await test("I05-14 previous unacknowledged receipt cannot be overwritten without proof",async()=>{const f=fixture({recovery:true});await f.launch();const noStorage=fixture({recovery:true,sharedStore:f.store,counter:f.counter});noStorage.u.serviceRevision=3;await rejected(()=>noStorage.launch(),"protected slot");eq(receipt(f).operationId,"new1","receipt not replaced");eq(noStorage.mode.commits,0,"no new commit");const next=await f.launch();eq(next.id,"new3","known local receipt may be replaced");eq(receipt(f).operationId,next.id,"one receipt slot");});
++  await test("I05-15 recovery local storage failure keeps original request",async()=>{const f=await uncertain();f.storageMode.failSet=true;await rejected(()=>verify(f),"storage error");eq(pending(f).operationId,"new1","retained");f.storageMode.failSet=false;eq((await verify(f)).status,"committed","retry safe");});
++  await test("I05-16 old I01 pending: only positive fleet proof releases",async()=>{const f=await uncertain();const key=[...f.storageMap.keys()][0];const p=JSON.parse(f.storageMap.get(key));delete p.protocol;delete p.armed;delete p.profileJoinedAt;delete p.previousReceiptId;f.storageMap.set(key,JSON.stringify(p));delete f.store.get(f.player).ordinaryDispatchReceipt;const reload=fixture({recovery:true,storageMap:f.storageMap,sharedStore:f.store,counter:f.counter});eq((await verify(reload)).status,"committed","old proof via fleet");});
++  await test("I05-17 late original commit fenced by terminal cancellation",async()=>{const f=fixture({recovery:true}),hold=gate(),entered=gate();f.mode.afterCallback=async()=>{entered.open();await hold.wait};const original=f.launch().catch(e=>e);await entered.wait;const reload=fixture({recovery:true,storageMap:f.storageMap,sharedStore:f.store,counter:f.counter});eq((await verify(reload,{cancel:true})).status,"cancelled","barrier committed first");hold.open();ok((await original) instanceof Error,"old transaction rejected on changed read");eq(f.state().created,0,"no late fleet");eq(f.store.get(f.planets+origin).fleet.lightFighter,10,"no late debit");eq(receipt(f).status,"cancelled","terminal unchanged");});
++  await test("I05-18 verify in lobby guarded; active change prevents stale install",async()=>{const f=await uncertain();f.W.UniversumUI.state.currentUniverse=null;f.W.UniversumUI.state.isMultiplayerMode=false;let current=true;const hold=gate(),entered=gate();f.mode.beforeCallback=async()=>{entered.open();await hold.wait};const first=f.G.verifyOrdinaryDeparture({id:f.u.id},{isCurrent:()=>current}).catch(e=>e);await entered.wait;current=false;hold.open();ok((await first) instanceof Error,"obsolete lobby entry rejected");eq(f.W.UniversumUI.state.currentUniverse,null,"no stale install");eq(pending(f).operationId,"new1","retained");f.mode.beforeCallback=null;eq((await f.G.verifyOrdinaryDeparture({id:f.u.id},{isCurrent:()=>true})).status,"committed","current lobby recovery");});
++  await test("B/C01 direct rename, recall, hangar blocked before writes",async()=>{
++    const f=fixture();f.mode.fail="lostAck";await rejected(()=>f.launch(),"lost ack");const before=JSON.stringify([...f.store]);
++    await rejected(()=>f.G.renameOnlinePlanet(f.u.id,f.p.coords,"changed"),"rename");
++    await rejected(()=>f.G.renameOnlineMoon(f.u.id,f.p.coords,"changed"),"moon");
++    await rejected(()=>f.G.recallOnlineFleet(f.u,"new1"),"recall");
++    await rejected(()=>f.G.changeOnlineMothershipHangar(f.u,0,"hangar1",1),"hangar");
++    eq(JSON.stringify([...f.store]),before,"no direct writes");
++  });
++  await test("B/C02 admitted direct mutation excludes ordinary dispatch until release",async()=>{
++    const f=fixture();const release=f.G.beginOrdinaryMutation(f.u);await rejected(()=>f.launch(),"busy direct mutation");eq(f.mode.commits,0,"no commit");eq(pending(f),null,"no pending record");release();release();await f.launch();eq(f.mode.commits,1,"normal dispatch resumes");
++  });
++  await test("B/C03 normal direct rename still works",async()=>{
++    const f=fixture();await f.G.renameOnlinePlanet(f.u.id,f.p.coords,"changed");eq(f.store.get(f.planets+origin).name,"changed","normal rename");await f.launch();eq(f.mode.commits,1,"lock released");
++  });
++  await test("B/C04 ordinary join cannot bypass pending recovery",async()=>{
++    const f=fixture({recovery:true});f.mode.fail="lostAck";await rejected(()=>f.launch(),"lost ack");const before=JSON.stringify([...f.store]);await rejected(()=>f.G.joinOnlineUniverse(f.u.id),"ordinary join");eq(JSON.stringify([...f.store]),before,"no normal join writes");
++  });
+   return results;
+ }
+ const root = path.join(__dirname, '..');
+-runTests(fs.readFileSync(path.join(root,'modules/online/fleet-control.js'),'utf8'),fs.readFileSync(path.join(root,'modules/online/sync.js'),'utf8')).then(results=>{for(const r of results) console.log((r.pass?'PASS ':'FAIL ')+r.name+(r.error?': '+r.error:''));if(results.some(r=>!r.pass)) process.exitCode=1;}).catch(e=>{console.error(e);process.exitCode=1;});
++runTests(...['fleet-control.js','sync.js','universes.js','galattiche.js'].map(file=>fs.readFileSync(path.join(root,'modules/online',file),'utf8'))).then(results=>{for(const r of results) console.log((r.pass?'PASS ':'FAIL ')+r.name+(r.error?': '+r.error:''));if(results.some(r=>!r.pass)) process.exitCode=1;}).catch(e=>{console.error(e);process.exitCode=1;});
+diff --git a/tests/test_exploration_timing.js b/tests/test_exploration_timing.js
+index 2c8a5a9..1103f32 100644
+--- a/tests/test_exploration_timing.js
++++ b/tests/test_exploration_timing.js
+@@ -153,7 +153,10 @@ async function runOnline(){
+       return job;
+     }
+   };
++  const persistentRequests=new Map();
++  const profile={joinedAt:1};
+   const mpWindow={
++    localStorage:{getItem:k=>persistentRequests.get(k)??null,setItem:(k,v)=>persistentRequests.set(k,String(v)),removeItem:k=>persistentRequests.delete(k)},
+     UniversumData:data,UniversumMissionsCore:C,
+     UniversumGalaxy:{calculateDistance:()=>1000,getFleetSpeedAndFuel:travel},
+     __UniversumMPVariables:{FLEET_SCHEMA_VERSION:3,_ONLINE_SUPPORTED_MISSIONS:new Set(),_mpErrorToastAt:new Map()},
+@@ -164,11 +167,18 @@ async function runOnline(){
+       // La transazione reale viene esercitata da test_atomic_dispatch.js.
+       syncPlayerState:async(u,{dispatch}={})=>{
+         assert.ok(dispatch?.ordinary,'la partenza ordinaria usa dispatch');
++        // Simula soltanto il contratto del checkpoint: la ricevuta viene
++        // prodotta dalle stesse funzioni di protezione del client.
++        const G=mpWindow.__UniversumMPModules;
++        G.prepareOrdinaryDispatch(u,dispatch,'alice');
++        const receipt=G.bindOrdinaryReceipt(u,dispatch,'alice',{exists:true,data:()=>profile});
+         const p=u.planets.find(p=>[p.coords.g,p.coords.s,p.coords.p].join('_')===dispatch.doc.originKey);
+         assert.ok(p,'pianeta di partenza presente');
+         for(const [id,n] of Object.entries(dispatch.doc.ships)) p.fleet[id]-=n;
+         for(const [id,n] of Object.entries(dispatch.debit)) p.resources[id]-=n;
+         docs.set(dispatch.ref.key,{...dispatch.doc});
++        profile.ordinaryDispatchReceipt=receipt;
++        dispatch.outcome.receipt=receipt;
+         return true;
+       },_tsToMs:v=>v?.toMillis?.()||0
+     }
+diff --git a/tests/test_fase3_online.js b/tests/test_fase3_online.js
+index 7561202..098ba5e 100644
+--- a/tests/test_fase3_online.js
++++ b/tests/test_fase3_online.js
+@@ -117,7 +117,10 @@ const base = path.resolve(__dirname, '..');
+ const modulesOnline = ['context.js', 'foundation.js', 'galattiche.js', 'universes.js', 'sync.js', 'fleet-control.js', 'combat-resolver.js', 'sieges.js', 'communications.js', 'bots.js'];
+ 
+ const reconcileCalls = [];
++const persistentRequests = new Map();
+ const win = {
++  // Browser storage is part of the AT05 contract; each harness has its own store.
++  localStorage: {getItem:k=>persistentRequests.get(k)??null,setItem:(k,v)=>persistentRequests.set(k,String(v)),removeItem:k=>persistentRequests.delete(k)},
+   fbAuth: { currentUser: { uid: 'u1', displayName: 'Alice' } },
+   fbDB: db,
+   UniversumUI: { onOnlineReconciled: (info) => reconcileCalls.push(info), state: {} }
+diff --git a/tests/test_firestore_spark.js b/tests/test_firestore_spark.js
+index 1401f14..c7d3903 100644
+--- a/tests/test_firestore_spark.js
++++ b/tests/test_firestore_spark.js
+@@ -139,7 +139,7 @@ function loadModule(file, win, extra = {}) {
+   console.log('✓ lobby: 2 visite=1 lettura lista; aggiorna=lettura fresca');
+ 
+   const runtime=fs.readFileSync(path.join(root,'modules/ui/runtime.js'),'utf8');
+-  assert(runtime.includes('persistUniverseState({ force: false })'),'heartbeat non forzato');
++  assert(/persistUniverseState\(\{\s*force\s*:\s*false\s*\}\)/.test(runtime),'heartbeat non forzato');
+   assert(runtime.includes('resolveArrivedOnlineFleets(uni.id, uni.speed)'),'velocità riusata');
+   assert(runtime.includes('uni.botConfig?.raids'),'BOT pacifici non fanno query di raid');
+   const rules=fs.readFileSync(path.join(root,'firestore.rules'),'utf8');
+diff --git a/tests/test_inbox.js b/tests/test_inbox.js
+index 95efa7c..3d9bb4e 100644
+--- a/tests/test_inbox.js
++++ b/tests/test_inbox.js
+@@ -116,7 +116,10 @@ const base = path.resolve(__dirname, '..');
+ const modulesOnline = ['context.js', 'foundation.js', 'universes.js', 'sync.js', 'fleet-control.js', 'combat-resolver.js', 'sieges.js', 'communications.js', 'bots.js'];
+ 
+ const reconcileCalls = [];
++const persistentRequests = new Map();
+ const win = {
++  // Browser storage is part of the AT05 contract; each harness has its own store.
++  localStorage: {getItem:k=>persistentRequests.get(k)??null,setItem:(k,v)=>persistentRequests.set(k,String(v)),removeItem:k=>persistentRequests.delete(k)},
+   fbAuth: { currentUser: { uid: 'u1', displayName: 'Alice' } },
+   fbDB: db,
+   UniversumUI: { onOnlineReconciled: (info) => reconcileCalls.push(info), state: {} }
+@@ -193,6 +196,7 @@ function ok(name, fn) { return Promise.resolve().then(fn).then(() => { passed++;
+       resources: { metal: 1500, crystal: 600, deuterium: 250 },
+       fleet: { lightFighter: 10 }, defenses: { rocketLauncher: 5 }, buildings: {}
+     }] };
++    win.UniversumUI.state.currentUniverse = uni;
+     await MP.syncPlayerState(uni, { force: true });
+     const d = store.get(P(1, 1, 1));
+     assert.strictEqual(d.resources.metal, 1700, 'base = locale 1500 + inbox 200');
+@@ -285,6 +289,7 @@ function ok(name, fn) { return Promise.resolve().then(fn).then(() => { passed++;
+       { id: 'Casa', name: 'Casa', coords: { g: 1, s: 1, p: 1 }, resources: { metal: 1810, crystal: 600, deuterium: 250 }, fleet: {}, defenses: {}, buildings: {} },
+       { id: 'Colonia', name: 'Colonia', coords: { g: 1, s: 1, p: 2 }, resources: { metal: 5, crystal: 5, deuterium: 5 }, fleet: { lightFighter: 99 }, defenses: {}, buildings: {} }
+     ] };
++    win.UniversumUI.state.currentUniverse = uni;
+     await MP.syncPlayerState(uni, { force: true });
+     const d = store.get(P(1, 1, 2));
+     assert.strictEqual(d.ownerUid, 'u2');
+diff --git a/ui-core.js b/ui-core.js
+index 4e6c326..38e880f 100644
+--- a/ui-core.js
++++ b/ui-core.js
+@@ -288,6 +288,7 @@
+ 
+ 
+   UI.openModal = function (title, bodyHTML) {
++    if (UI.pendingDeparture?.()) return;
+     const modal = document.getElementById('universal-modal');
+     const titleEl = document.getElementById('modal-title');
+     const bodyEl = document.getElementById('modal-body');
+@@ -354,6 +355,74 @@
+   };
+ 
+ 
++  // AT05: ammissione delle azioni volontarie e pannello di recupero comune.
++  UI.pendingDeparture = function (u = UI.state.currentUniverse) {
++    if (!u || !UI.state.isMultiplayerMode) return null;
++    const G=window.__UniversumMPModules;
++    try {
++      const p=G?.ordinaryDepartureStatus?.(u);
++      if (p) return {...p,busy:G.ordinaryDepartureBusy(u)};
++      if (G?.ordinaryCheckpointBlocked?.(u,null)) return {storageUnavailable:true};
++      return null;
++    } catch (error) { return {storageUnavailable:true}; }
++  };
++  UI.blockPendingMutation = function (u = UI.state.currentUniverse) {
++    if (u && UI.state.currentUniverse!==u) {
++      UI.toast('Partita cambiata: riapri la schermata.','info');
++      return true;
++    }
++    if (!UI.pendingDeparture(u)) return false;
++    UI.toast('Partenza in verifica: verifica l’esito prima di continuare.','info');
++    return true;
++  };
++  UI._ordinaryEntryGeneration=0;
++  UI.updateOrdinaryDeparturePanel = function () {
++    const viewport=document.getElementById('game-viewport');
++    if (!viewport) return false;
++    const uni=UI.state.currentUniverse,p=UI.pendingDeparture(uni);
++    let panel=document.getElementById('at05-ordinary-departure-panel');
++    if (!p) {
++      if (panel) { panel.remove(); viewport.classList.remove('hidden'); }
++      return false;
++    }
++    const signature=JSON.stringify([uni?.id,p.operationId,p.busy,p.storageUnavailable,p.armed,p.expectedRevision,p.profileJoinedAt]);
++    if (panel?.dataset.signature===signature) return true;
++    if (!panel) {
++      panel=document.createElement('div');panel.id='at05-ordinary-departure-panel';
++      panel.className='glass-panel';panel.style.padding='18px';viewport.before(panel);
++      UI.closeModal();UI.closeResourceDeposit?.();UI.stopPlanetCanvas?.();UI._resetSyncRetry?.();
++      if (UI._reconcileTimer) { clearTimeout(UI._reconcileTimer);UI._reconcileTimer=null; }
++    }
++    viewport.classList.add('hidden');
++    panel.dataset.signature=signature;
++    const cancellable=p.protocol===2 && p.armed && Number.isSafeInteger(p.expectedRevision) && p.profileJoinedAt!=null;
++    panel.innerHTML=`<h3>PARTENZA IN VERIFICA</h3>
++      <p class="text-muted">${p.storageUnavailable ? 'Memoria locale non disponibile. I salvataggi sono sospesi.' : p.busy ? 'Operazione in corso. Non ripetere l’invio.' : 'La partita è sospesa fino alla verifica dell’esito e al recupero dal server.'}</p>
++      ${p.operationId ? `<p>ID: ${UI.escapeHTML(p.operationId)}</p>` : ''}
++      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
++      <button type="button" class="btn btn-green" data-at05-control="verify" ${p.busy?'disabled':''}>VERIFICA ESITO</button>
++      ${cancellable ? `<button type="button" class="btn btn-red" data-at05-control="cancel" ${p.busy?'disabled':''}>ANNULLA SE DIMOSTRABILE</button>` : ''}
++      <button type="button" class="btn btn-ghost" data-at05-control="exit" ${p.busy?'disabled':''}>TORNA ALLA LOBBY</button></div>`;
++    const act=async cancel=>{
++      if (UI.state.currentUniverse!==uni || !UI.state.isMultiplayerMode) return;
++      if (p.storageUnavailable) { UI.onOrdinaryDepartureChanged(uni); return; }
++      if (cancel && !window.confirm('Annullare soltanto se il server può impedire definitivamente il commit della richiesta?')) return;
++      try {
++        const result=await window.__UniversumMPModules.verifyOrdinaryDeparture(uni,{cancel});
++        UI.toast(result.status==='committed'?'Partenza confermata e partita recuperata.':'Partenza annullata definitivamente.','success');
++      } catch (error) { UI.toast(error.message,'error'); }
++      finally { UI.onOrdinaryDepartureChanged(UI.state.currentUniverse); }
++    };
++    panel.querySelector('[data-at05-control="verify"]')?.addEventListener('click',()=>act(false));
++    panel.querySelector('[data-at05-control="cancel"]')?.addEventListener('click',()=>act(true));
++    panel.querySelector('[data-at05-control="exit"]')?.addEventListener('click',()=>UI.exitActiveGameToLobby());
++    return true;
++  };
++  UI.onOrdinaryDepartureChanged = function (u) {
++    if (!u || UI.state.currentUniverse!==u || !UI.state.isMultiplayerMode) return;
++    const wasBlocked=Boolean(document.getElementById('at05-ordinary-departure-panel'));
++    if (!UI.updateOrdinaryDeparturePanel() && wasBlocked) UI.renderCurrentView?.();
++  };
+   UI.persistUniverseState = async function (opts = {}) {
+     const uni = UI.state.currentUniverse;
+     if (!uni) return;
+@@ -362,6 +431,7 @@
+       await window.UniversumDB.save(uni);
+       return;
+     }
++    if (UI.pendingDeparture(uni)) return false;
+     if (!window.UniversumMP || typeof window.UniversumMP.syncPlayerState !== 'function') return;
+ 
+     const r = UI._syncRetry;
+@@ -378,7 +448,7 @@
+         UI.toast('Sincronizzato', 'success');
+       }
+     } catch (err) {
+-      if (err.code === 'service-conflict' || UI.state.currentUniverse !== uni) throw err;
++      if (err.code === 'service-conflict' || err.code==='ordinary-departure-pending' || UI.state.currentUniverse !== uni || UI.pendingDeparture(uni)) throw err;
+       r.hadFailure = true;
+       console.warn('[Sync] Sincronizzazione online non riuscita:', err);
+       const code = String(err?.code || '');
+@@ -402,7 +472,7 @@
+   UI._reconcileTimer = null;
+ 
+   UI._requestReconcileSync = function () {
+-    if (UI._reconcileTimer) return;
++    if (UI.pendingDeparture() || UI._reconcileTimer) return;
+     UI._reconcileTimer = setTimeout(async () => {
+       UI._reconcileTimer = null;
+       if (!UI.state.isMultiplayerMode || !UI.state.currentUniverse) return;
+diff --git a/ui-social.js b/ui-social.js
+index f79af08..bc74ba8 100644
+--- a/ui-social.js
++++ b/ui-social.js
+@@ -81,6 +81,11 @@
+ 
+     viewport.querySelectorAll('.btn-report-delete').forEach((btn) => {
+       btn.addEventListener('click', async () => {
++        if (UI.blockPendingMutation(uni)) return;
++        if (UI.state.currentUniverse !== uni) {
++          UI.toast('Partita cambiata: riapri la schermata.', 'info');
++          return;
++        }
+         try {
+           if (st.isMultiplayerMode && window.UniversumMP?.deleteReport) {
+             await window.UniversumMP.deleteReport(uni.id, btn.dataset.rid);
+@@ -102,6 +107,11 @@
+     });
+ 
+     document.getElementById('btn-reports-delete-all')?.addEventListener('click', async () => {
++      if (UI.blockPendingMutation(uni)) return;
++      if (UI.state.currentUniverse !== uni) {
++        UI.toast('Partita cambiata: riapri la schermata.', 'info');
++        return;
++      }
+       try {
+         if (st.isMultiplayerMode && window.UniversumMP?.deleteAllReports) {
+           await window.UniversumMP.deleteAllReports(uni.id);

@@ -1,0 +1,6 @@
+tree 2d2fcb783e5b526840bf49b017ffa407977454c7
+parent 4880f936afd3d2f385b3cbab4c9a70d275562de3
+author UNIVERSUM Ordinaria <ordinaria@universum.invalid> 1795796105 +0000
+committer UNIVERSUM Ordinaria <ordinaria@universum.invalid> 1795796105 +0000
+
+AT05: preserve Profonda recovery journal and session safeguards without D
