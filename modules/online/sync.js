@@ -341,7 +341,8 @@
     } finally { if (checkpoints.get(u) === operation) checkpoints.delete(u); }
   }
   function debitFleet(u,p,dispatch,now,validate = true) {
-    window.UniversumServices?.settlePlanet(u,p,now);
+    // Le partenze ordinarie non eseguivano il mantenimento delle specialiste.
+    if (!dispatch.ordinary) window.UniversumServices?.settlePlanet(u,p,now);
     if (dispatch.carrierHangars?.length) {
       if (!window.UniversumHangars) throw conflict();
       window.UniversumHangars.take(p,dispatch.carrierHangars);
@@ -363,13 +364,17 @@
         Object.entries(dispatch.debit).some(([k,n])=>p.resources[k]<n))) throw conflict();
     for (const [id,n] of Object.entries(ships)) p.fleet[id] = Math.max(0,(p.fleet[id] || 0)-n);
     for (const [k,n] of Object.entries(dispatch.debit)) p.resources[k] = Math.max(0,p.resources[k]-n);
-    window.UniversumServices?.settlePlanet(u,p,now);
+    if (!dispatch.ordinary) window.UniversumServices?.settlePlanet(u,p,now);
   }
   async function saveCheckpoint(universeObj, { force = false, dispatch = null, galLaunch = null } = {}) {
     const auth = getAuth();
     const db = getDB();
     const user = auth.currentUser;
     if (!user || !universeObj?.id) return;
+    if (dispatch?.ordinary && (!Number.isSafeInteger(universeObj.serviceRevision) ||
+        universeObj.serviceRevision < 0 || universeObj.serviceRevision >= Number.MAX_SAFE_INTEGER)) {
+      throw new Error('Revisione non valida. Riapri la partita multiplayer.');
+    }
     window.UniversumEngine?.normalizeResearchState(universeObj);
 
     const syncKey = JSON.stringify([user.uid, universeObj.id]);
@@ -413,7 +418,7 @@
       }
       const nowTs = Date.now();
       const flightRefs = player.specialistFlights || [];
-      const checkCapacity = versioned && services && (dispatch || planets.some(p=>p.shipyardQueue?.some(lot=>services.ids.includes(lot.id))));
+      const checkCapacity = versioned && services && ((dispatch && !dispatch.ordinary) || planets.some(p=>p.shipyardQueue?.some(lot=>services.ids.includes(lot.id))));
       let activeRefs = flightRefs;
       const totals = {};
       if (checkCapacity) {
@@ -433,13 +438,16 @@
               (!dest.data().isNpc && !dest.data().ownerUid)) throw conflict();
           if (dispatch.doc.defenderUid !== (dest.data().ownerUid || null)) throw conflict();
           window.UniversumHangars.validateMission(dispatch.doc.ships,dispatch.carrierHangars);
-        } else if (!dispatch.doc.targetGalatticaId && (dispatch.specialist || (!dispatch.doc.originPlanetId && !dispatch.carrierHangars?.length))) {
+        } else if (!dispatch.ordinary && !dispatch.doc.targetGalatticaId && (dispatch.specialist || (!dispatch.doc.originPlanetId && !dispatch.carrierHangars?.length))) {
           const i = entries.findIndex(e=>e.ref.id===dispatch.doc.targetKey);
           if (i < 0 || snaps[i].data()?.ownerUid !== user.uid) throw conflict();
         }
-        if (!dispatch.doc.targetGalatticaId && (dispatch.specialist || (!dispatch.doc.originPlanetId && !dispatch.carrierHangars?.length))) activeRefs = [...activeRefs,dispatch.ref.id];
+        if (!dispatch.ordinary && !dispatch.doc.targetGalatticaId && (dispatch.specialist || (!dispatch.doc.originPlanetId && !dispatch.carrierHangars?.length))) activeRefs = [...activeRefs,dispatch.ref.id];
       }
 
+      // Conserva il calcolo dei punti delle partenze ordinarie sullo stock
+      // dopo l'addebito, senza mutare il pianeta prima del commit.
+      let pointState = universeObj;
       entries.forEach((e, i) => {
         const snap = snaps[i];
         const p = e.p;
@@ -454,7 +462,11 @@
         const sending = dispatch && e.ref.id === dispatch.doc.originKey;
         const dockPlanet=dockState?.planets.find(item=>item.id===p.id);
         const model = sending ? clone(dockPlanet || p) : dockPlanet || p;
-        if (sending) debitFleet(universeObj,model,dispatch,nowTs);
+        if (sending) {
+          debitFleet(universeObj,model,dispatch,nowTs);
+          if (dispatch.ordinary) pointState = {...universeObj,
+            planets:universeObj.planets.map(home=>home===p ? model : home)};
+        }
         const res = Object.assign({}, model.resources);
         const H = window.UniversumHangars;
         let savedHangars = Array.isArray(model.mothershipHangars) ? model.mothershipHangars.slice() : [];
@@ -536,7 +548,7 @@
         researches: universeObj.researches || {},
         researchQueue: universeObj.researchQueue || null,
         researchModelVersion: universeObj.researchModelVersion || 1,
-        points: computePlayerPoints(universeObj),
+        points: computePlayerPoints(pointState),
         planetCount: planets.length - lost.length,
         lastSeen: nowTs
       };
