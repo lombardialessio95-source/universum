@@ -1,6 +1,6 @@
 # UNIVERSUM — STATO DEL PROGETTO E PASSAGGIO DI CONSEGNE
 
-**Revisione:** 1.9 — 26 novembre 2026  
+**Revisione:** 1.10 — 26 novembre 2026  
 **Tipo:** documento di continuità per ChatGPT, Codex e il proprietario del progetto  
 **Repository:** https://github.com/lombardialessio95-source/universum  
 **Riferimento verificato:** branch `main`, commit `67f71b7f2662ad2c345b0e3e8f2ba4ab4202c099` (25 novembre 2026, 21:24 UTC)  
@@ -196,7 +196,7 @@ Questa sezione prevale sui riferimenti storici incompatibili delle sezioni prece
 | D26 edifici colonie online zero | Integrato | b0eecb037b6049c4f76fac9e66668bdc77d050ba |
 | AT02-I01 chiusura forzata senza accredito | Integrato | 8c13541b33ebd1b5d7b98c9dfa02267100f28ff4 |
 | AT21 chiusura missioni dopo errore | Integrato | ca38720f144993a805f84790e15519b7340525cc |
-| AT05 atomicità partenze | Candidata verificata, integrazione sospesa per T09/T10/T18 | 7099402d8596d3a179191b8ff2427ac3145df897 |
+| AT05 atomicità partenze | I03 approvato su candidata, integrazione sospesa per T09/T10/T18 | f70b772f2bebc3b33f170fa5210ac9aca3d24446 |
 | AT03/AT04 validazione creazione/modifica flotte | Aperti | — |
 
 AT02: diff in modules/online/fleet-control.js, impedisce chiusura se manca destinazione valida o se transazione fallisce; verifica proprietà del pianeta in transazione; elimina fallback di chiusura autonoma. Cinque scenari dichiarati superati con Firestore simulato, pipeline verde verificata; non collaudato Firebase reale. AT02-I02: integrazione confermata dal controllo HEAD main. Actions candidata verde; pipeline post-merge e Pages non verificate indipendentemente in questo controllo. Prossimo incarico AT21-I01: prima riproduzione e verifica sovrapposizioni con AT02, senza correzioni ridondanti.
@@ -247,3 +247,7 @@ Main e backup/AT05-I01-ca38720 verificati a ca38720f144993a805f84790e15519b73405
 
 ### AT05-R02 — 27 novembre 2026
 Main ca38720f144993a805f84790e15519b7340525cc, candidata 7099402d8596d3a179191b8ff2427ac3145df897 e backup/AT05-I01-ca38720 verificati direttamente. Diagnosi statica approvata: joinOnlineUniverse usa playerState.serviceRevision || 0, conserva valori truthy non validi; saveCheckpoint condiziona lettura e confronto revisione a Number.isSafeInteger. Percorso senza revisione riprodotto precedentemente con mock, raggiungibilità reale e reload dopo commit incerto non dimostrati. Autorizzato AT05-I03 sulla candidata esistente: guardia esclusiva dispatch.ordinary in saveCheckpoint, prima della normalizzazione/mutazioni e transazione; Number.isSafeInteger(rev) && rev >= 0 && rev < Number.MAX_SAFE_INTEGER; rifiuto esplicito senza azzeramento o conversione. Test mirati su valori invalidi, zero/legacy, revisione valida, assenza di scritture e regressione percorsi speciali. Conservare comportamento del caricamento e altri checkpoint. Nessuna nuova logica idempotenza, nessuna modifica Rules. T09 reload e T18 emulatore ancora aperti; T10 concorrenza reale non certificata. CI verde e release rigenerata prima del push; backup candidata precedente, ZIP/report/SHA. Non integrare su main. Diagnosi R02 nuova esecuzione incompleta; CONTROLLO ha letto codice, non eseguito test. Prossimo AT05-I03, poi valutazione rischi residui.
+
+
+### AT05-I03 — 27 novembre 2026
+Main ca38720f144993a805f84790e15519b7340525cc e backup/AT05-I02-7099402 (7099402d8596d3a179191b8ff2427ac3145df897) verificati. Nuova candidata f70b772f2bebc3b33f170fa5210ac9aca3d24446, candidate/AT05-I03, PR #9 in bozza, CI 45917887025 completata success sullo SHA esatto. Diff rispetto a I02: un commit, quattro righe operative in sync.js prima della normalizzazione e transazione, guardia dispatch?.ordinary con intero sicuro non negativo e incrementabile; test_atomic_dispatch.js, manifest e SW. Test I03 14/14 riferiti, suite CI verde verificata; codice test conferma rifiuti prima di scritture/normalizzazione, revisioni valide, checkpoint e partenze speciali legacy invariati. Release rcb95dd87e6811388701c riferita. Approvato I03 sulla candidata, NON integrare. T09 diagnostico ancora mostra commit avvenuto con risposta persa e stato locale obsoleto; T10 test sequenziale con revisione obsoleta, non concorrenza reale; T18 non eseguito. Prossimo AT05-R03: sola diagnosi T09, tracciare UI chiamante e gestione errore/ricaricamento; valutare verifica server del documento con ID della partenza già generato, distinguere commit confermato, fallimento certo ed esito incerto; non equiparare nuova partenza deliberata dopo reload a retry della stessa richiesta. Proporre soluzione minima, senza modifiche operative o nuovi sistemi/idempotenza persistente non autorizzati. Non ripetere suite. T10/T18 successivi; nessuna modifica Rules o deploy, avvertire proprietario se necessario. ZIP binari e Firebase reale non verificati da CONTROLLO. AT03/AT04 e Suprema restano sospesi.
