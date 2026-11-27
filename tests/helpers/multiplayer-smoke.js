@@ -55,49 +55,12 @@ module.exports = async function multiplayerSmoke(ctx,baseUrl) {
   });
   assert.deepEqual(result.ships,{hephaestusForge:1});assert.equal(result.remaining,3);assert.equal(result.rev,2);assert(result.tracked);
   console.log('SDK: trasferimento registrato.');
-  // The actual dispatch above remains subject to client Rules. For the resolver
-  // fixture only, restore the same valid flight as a historical flight in the
-  // isolated demo emulator. Shift ALL three clock values and departureAt by
-  // the same whole-second offset; do not touch ships, debit, status or ledger.
-  // Use Firestore's actual batchGet readTime, never a forged client clock.
-  const docs=`http://${target.host}/v1/projects/demo-universum/databases/(default)/documents`;
-  const fleetPath=`online_universes/${key}/fleets/${result.fleetId}`;
-  const fullName=`projects/demo-universum/databases/(default)/documents/${fleetPath}`;
-  const headers={Authorization:'Bearer owner','Content-Type':'application/json'};
-  async function serverRead(){
-    const response=await fetch(docs+':batchGet',{method:'POST',headers,body:JSON.stringify({documents:[fullName]}),signal:AbortSignal.timeout(10000)});
-    assert(response.ok,`server clock read ${response.status}`);
-    const raw=await response.json();const rows=Array.isArray(raw)?raw:[raw];
-    const row=rows.find(x=>x.found?.name===fullName);
-    assert(row?.readTime && Number.isFinite(Date.parse(row.readTime)),'server readTime required');
-    return row;
-  }
-  const initial=await serverRead(), f=initial.found.fields;
-  const clocks=['departureTime','arrivalTime','returnTime'];
-  const numeric=v=>Number(v.integerValue??v.doubleValue);
-  const old=Object.fromEntries(clocks.map(k=>[k,numeric(f[k])]));
-  assert(clocks.every(k=>Number.isFinite(old[k])));
-  assert.equal(f.status.stringValue,'outbound');assert.equal(f.resolved.booleanValue,false);
-  const serverMs=Date.parse(initial.readTime);
-  if(old.arrivalTime>serverMs){
-    const shift=(Math.ceil((old.arrivalTime-serverMs)/1000)+1)*1000;
-    const newFields=Object.fromEntries(clocks.map(k=>[k,{doubleValue:old[k]-shift}]));
-    const stamp=f.departureAt.timestampValue;
-    const match=stamp.match(/^(.*?)(\.\d+)?Z$/);assert(match,'persisted departureAt required');
-    newFields.departureAt={timestampValue:new Date(Date.parse(match[1]+'Z')-shift).toISOString().replace('.000Z',(match[2]||'')+'Z')};
-    const query=new URLSearchParams();for(const k of [...clocks,'departureAt'])query.append('updateMask.fieldPaths',k);
-    query.set('currentDocument.updateTime',initial.found.updateTime);
-    const response=await fetch(docs+'/'+fleetPath+'?'+query,{method:'PATCH',headers,body:JSON.stringify({fields:newFields}),signal:AbortSignal.timeout(10000)});
-    assert(response.ok,`historical fixture seed ${response.status}: ${await response.text()}`);
-    console.log('SDK fixture: historical flight, all persisted clocks shifted by',shift,'ms');
-  }
-  const matured=await serverRead(), m=matured.found.fields;
-  assert(numeric(m.arrivalTime)<=Date.parse(matured.readTime),'persisted arrival must be due on real server');
-  assert.equal(numeric(m.arrivalTime)-numeric(m.departureTime),old.arrivalTime-old.departureTime);
-  assert.equal(numeric(m.returnTime)-numeric(m.arrivalTime),old.returnTime-old.arrivalTime);
-  assert.equal(m.status.stringValue,'outbound');assert.equal(m.resolved.booleanValue,false);
-  assert.deepEqual(m.ships,f.ships);assert.deepEqual(m.cargo,f.cargo);
-  console.log('SDK fixture server readTime',matured.readTime,'persisted ETA',numeric(m.arrivalTime));
+  // Prepare the same real, already debited flight in the isolated demo Emulator.
+  // The admin transaction changes only its four clock fields, preserving durations
+  // and fractional timestamp precision. The actual resolver remains unchanged.
+  await require('./historical-specialist-fixture')(key,result.fleetId,{
+    ships:result.ships, cargo:{metal:0,crystal:0,deuterium:0}, originKey:'1_1_2',targetKey:'1_2_2'
+  });
   await winner.evaluate(async key=>{
     await new Promise(resolve=>{
       let own=false,incoming=false;
