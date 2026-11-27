@@ -10,16 +10,16 @@ code=code.replace(/\b([\w.]+) is (number|string|map|timestamp)\b/g,(_,v,t)=>`isT
 const context=vm.createContext({});
 vm.runInContext(`
  const request={auth:{uid:'alice'}};
- const float=Number;
+ const float=Number, int=Math.trunc;
  function isType(v,t){return t==='number'?typeof v==='number':t==='string'?typeof v==='string':t==='timestamp'?v&&v.__ts!==undefined:t==='map'?v!==null&&typeof v==='object'&&!Array.isArray(v)&&v.__ts===undefined:false;}
  Object.defineProperty(Array.prototype,'hasAny',{value:function(keys){return keys.some(k=>this.includes(k));}});
  Object.defineProperty(String.prototype,'matches',{value:function(re){return new RegExp(re).test(this);}});
- Object.defineProperties(Object.prototype,{get:{value:function(k,d){return Object.prototype.hasOwnProperty.call(this,k)?this[k]:d;}},diff:{value:function(o){const n=this;return {affectedKeys:()=>Object.keys({...o,...n}).filter(k=>JSON.stringify(o[k])!==JSON.stringify(n[k]))};}},toMillis:{value:function(){return this.__ts;}}});
+ Object.defineProperties(Object.prototype,{get:{value:function(k,d){return Object.prototype.hasOwnProperty.call(this,k)?this[k]:d;}},diff:{value:function(o){const n=this;return {affectedKeys:()=>Object.keys({...o,...n}).filter(k=>JSON.stringify(o[k])!==JSON.stringify(n[k]))};}},toMillis:{value:function(){return Math.floor(this.__ts);}},nanos:{value:function(){return this.__nanos??(Math.floor(this.__ts)%1000)*1000000;}}});
  ${code}
 `,context);
 const T=1795800000000;
 const cases=require('./helpers/at04_structural_cases')(T);let allowed=0,denied=0;
-const serialize=x=>JSON.stringify(x,(_,v)=>typeof v==='string'&&/^\d{4}-\d\d-\d\dT.*Z$/.test(v)?{__ts:Date.parse(v)}:v);
+const serialize=x=>JSON.stringify(x,(_,v)=>v&&v.__at04Ts?{__ts:v.__at04Ts.seconds*1000+v.__at04Ts.nanoseconds/1000000,__nanos:v.__at04Ts.nanoseconds}:typeof v==='string'&&/^\d{4}-\d\d-\d\dT.*Z$/.test(v)?{__ts:Date.parse(v)}:v);
 for(const c of cases){const next={...c.old,...c.patch};for(const k of c.remove)delete next[k];const result=vm.runInContext(`request.auth.uid=${JSON.stringify(c.uid)};validFleetStructuralUpdate(${serialize(c.old)},${serialize(next)},${T})`,context);assert.equal(result,c.allow,c.name);if(result)allowed++;else denied++;console.log('PASS',result?'allow':'deny',c.name);}
 // All 25 state pairs after due: no backward/terminal revival. No claim about combat outcome.
 const phase={outbound:'IN VIAGGIO',returning:'IN RITORNO',embargo:'IN EMBARGO',occupy:'IN OCCUPAZIONE',completed:'COMPLETATA'};

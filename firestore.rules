@@ -121,9 +121,13 @@ service cloud.firestore {
     function fleetNumericClock(v) {
       return v is number ? v : (v is string && v.matches('^[0-9]+([.][0-9]+)?$') ? float(v) : -1);
     }
+    function fleetTimestampClock(v) {
+      // Match the Web SDK seconds*1000 + nanos/1000000 (Rules toMillis is int).
+      return v.toMillis()-int(v.nanos()/1000000)+v.nanos()/1000000.0;
+    }
     function fleetAliasClock(v) {
       let seconds=v is map ? v.get('seconds',null) : null;
-      return !fleetClockPresent(v) ? 0 : (v is timestamp ? v.toMillis() :
+      return !fleetClockPresent(v) ? 0 : (v is timestamp ? fleetTimestampClock(v) :
         (seconds is number ? seconds*1000 : fleetNumericClock(v)));
     }
     function fleetOldArrival(d) {
@@ -159,7 +163,7 @@ service cloud.firestore {
       let start=old.get('departureAt',null);
       return request.auth.uid==old.attackerUid && start is timestamp
         && old.departureTime is number && old.arrivalTime is number && old.returnTime is number
-        && next.departureTime==start.toMillis()
+        && next.departureTime==fleetTimestampClock(start)
         && next.arrivalTime==next.departureTime+(old.arrivalTime-old.departureTime)
         && next.returnTime==next.arrivalTime+(old.returnTime-old.arrivalTime);
     }
@@ -770,7 +774,7 @@ service cloud.firestore {
         // Questo impedisce a un client malevolo di cambiare attackerUid, targetCoords, originCoords,
         // o di riscrivere ships/cargo con valori inventati durante il volo.
         allow update: if signedIn() && fleetParty()
-          && validFleetStructuralUpdate(resource.data, request.resource.data, request.time.toMillis())
+          && validFleetStructuralUpdate(resource.data, request.resource.data, fleetTimestampClock(request.time))
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(fleetFieldsForUpdate())
           && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['crepuscoloDamaged'])
             || (resource.data.status == 'outbound' && request.resource.data.status in ['returning','embargo','occupy']

@@ -79,6 +79,11 @@ module.exports=function cases(T){
  bad('R06 delete clock',outbound,{}, {remove:['arrivalTime']});
  bad('R06 forged departure align',align,{departureTime:T-58000,arrivalTime:outbound.arrivalTime+2000,returnTime:outbound.returnTime+2000});
  good('exact server departure align',align,{departureTime:T-59000,arrivalTime:outbound.arrivalTime+1000,returnTime:outbound.returnTime+1000});
+ const fraction={seconds:Math.floor((T-59000)/1000),nanoseconds:123456000}, fms=fraction.seconds*1000+fraction.nanoseconds/1000000;
+ const fracOld={...outbound,departureAt:{__at04Ts:fraction}};
+ const fracPatch={departureTime:fms,arrivalTime:fms+(outbound.arrivalTime-outbound.departureTime),returnTime:fms+(outbound.returnTime-outbound.departureTime)};
+ good('fractional SDK departure timestamp alignment',fracOld,fracPatch);
+ bad('rounded timestamp does not authorize shifting durations',fracOld,{departureTime:Math.floor(fms),arrivalTime:Math.floor(fracPatch.arrivalTime),returnTime:Math.floor(fracPatch.returnTime)});
  good('exact exploration server alignment',exAlign,{departureTime:ex.departureTime+1000,arrivalTime:ex.arrivalTime+1000,returnTime:ex.returnTime+1000,zoneArrivalTime:ex.zoneArrivalTime+1000,explorationEndTime:ex.explorationEndTime+1000});
  bad('server alignment changes duration',align,{departureTime:T-59000,arrivalTime:outbound.arrivalTime+2000,returnTime:outbound.returnTime+2000});
  good('legacy numeric string normalization',{...outbound,arrivalTime:String(outbound.arrivalTime),returnTime:String(outbound.returnTime),departureTime:String(outbound.departureTime)},{arrivalTime:outbound.arrivalTime,returnTime:outbound.returnTime,departureTime:outbound.departureTime});
