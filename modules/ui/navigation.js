@@ -76,6 +76,7 @@
     const viewport = document.getElementById('game-viewport');
     const st = UI.state;
     if (!viewport || !st.currentUniverse) return;
+    if (UI.updateOrdinaryDeparturePanel()) return;
 
     if (st.currentView !== 'overview') UI.stopPlanetCanvas?.();
 
@@ -140,6 +141,11 @@
     `);
     document.getElementById('form-online-bot-trade')?.addEventListener('submit', async (e) => {
       e.preventDefault();
+      if (UI.blockPendingMutation(uni)) return;
+      if (UI.state.currentUniverse !== uni || !UI.state.isMultiplayerMode) {
+        UI.toast('Partita cambiata: riapri il modulo commerciale.', 'info');
+        return;
+      }
       const button = e.target.querySelector('button[type="submit"]');
       button.disabled = true;
       try {
@@ -283,6 +289,11 @@
     document.getElementById('btn-overview-open-chat')?.addEventListener('click', () => UI.switchView('chat'));
 
     document.getElementById('btn-overview-turbo')?.addEventListener('click', async () => {
+      if (UI.blockPendingMutation(uni)) return;
+      if (UI.state.currentUniverse !== uni) {
+        UI.toast('Partita cambiata: riapri la schermata.', 'info');
+        return;
+      }
       const res = Engine.activateTurbo(uni);
       await UI.persistUniverseState();
       UI.updateTopBarNumbers();
@@ -292,6 +303,7 @@
     });
 
     document.getElementById('btn-overview-event')?.addEventListener('click', async () => {
+      if (UI.blockPendingMutation(uni)) return;
       const bonusM = Math.floor((1500 + Math.random() * 4500) * Math.sqrt(uni.speed || 1));
       const bonusC = Math.floor((1000 + Math.random() * 3000) * Math.sqrt(uni.speed || 1));
       planet.resources.metal += bonusM;
@@ -338,6 +350,11 @@
     `;
 
     document.getElementById('btn-leave-server-view')?.addEventListener('click', async () => {
+      if (UI.blockPendingMutation(uni)) return;
+      if (UI.state.currentUniverse !== uni || !UI.state.isMultiplayerMode) {
+        UI.toast('Partita cambiata: riapri la schermata.', 'info');
+        return;
+      }
       try {
         await window.UniversumMP.leaveOnlineUniverse(uni.id);
         UI.playSound('success');
@@ -368,6 +385,11 @@
       });
       document.getElementById('btn-cancel-delete-server')?.addEventListener('click', UI.closeModal);
       confirmBtn?.addEventListener('click', async () => {
+        if (UI.blockPendingMutation(uni)) return;
+        if (UI.state.currentUniverse !== uni || !UI.state.isMultiplayerMode) {
+          UI.toast('Partita cambiata: riapri la schermata.', 'info');
+          return;
+        }
         if (confirmInput?.value.trim() !== 'ELIMINA') return;
         try {
           await window.UniversumMP.deleteOnlineUniverse(uni.id);
@@ -383,6 +405,11 @@
     });
 
     document.getElementById('btn-repair-missions')?.addEventListener('click', async () => {
+      if (UI.blockPendingMutation(uni)) return;
+      if (UI.state.currentUniverse !== uni || !UI.state.isMultiplayerMode) {
+        UI.toast('Partita cambiata: riapri la schermata.', 'info');
+        return;
+      }
       try {
         const repaired = window.UniversumMP?.repairStuckMissions
           ? await window.UniversumMP.repairStuckMissions(uni.id)
@@ -397,6 +424,11 @@
     });
 
     document.getElementById('btn-save-now')?.addEventListener('click', async () => {
+      if (UI.blockPendingMutation(uni)) return;
+      if (UI.state.currentUniverse !== uni) {
+        UI.toast('Partita cambiata: riapri la schermata.', 'info');
+        return;
+      }
       await UI.persistUniverseState();
       UI.playSound('success');
       UI.toast(st.isMultiplayerMode ? 'Dati sincronizzati con Firestore!' : 'Partita salvata su IndexedDB!', 'success');

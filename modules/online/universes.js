@@ -374,14 +374,79 @@
   }
 
 
-  async function joinOnlineUniverse(universeId, passcode = '') {
+  // AT05-E: letture di recupero esplicite, nessuna scrittura o migrazione.
+  const recoveryEvidence = new WeakMap();
+  const recoveryChanged = () => Object.assign(Error('Stato del server variato durante il recupero. Riprova la verifica.'),
+    {code:'ordinary-recovery-changed'});
+  function requireServerSnapshot(snap) {
+    if (snap?.metadata?.fromCache !== false || snap.metadata.hasPendingWrites !== false) throw recoveryChanged();
+    return snap;
+  }
+  function canonicalRecoveryValue(value) {
+    return JSON.stringify(value, (key, item) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
+      return Object.fromEntries(Object.keys(item).sort().map(k=>[k,item[k]]));
+    });
+  }
+  function recoverySignature(snap) {
+    if (Array.isArray(snap.docs)) return canonicalRecoveryValue(snap.docs.map(d=>{
+      requireServerSnapshot(d);
+      return [d.id,d.data()];
+    }).sort((a,b)=>a[0].localeCompare(b[0])));
+    return canonicalRecoveryValue([snap.id,snap.exists,snap.exists ? snap.data() : null]);
+  }
+  async function readRecoverySet(db, uniRef, uid, operationId) {
+    const assertAccount=()=>{if (getAuth().currentUser?.uid!==uid) throw recoveryChanged();};
+    const read=async ref=>requireServerSnapshot(await ref.get({source:'server'}));
+    const refs=[uniRef,uniRef.collection('players').doc(uid),
+      uniRef.collection('planets').where('ownerUid','==',uid),
+      uniRef.collection('fleets').where('attackerUid','==',uid).where('resolved','==',false),
+      uniRef.collection('galattiche').where('ownerUid','==',uid)];
+    if (operationId) refs.push(uniRef.collection('fleets').doc(operationId));
+    assertAccount();
+    const first=await Promise.all(refs.map(read));
+    assertAccount();
+    if (!first[0].exists || !first[1].exists) throw recoveryChanged();
+    const signatures=first.map(recoverySignature);
+    // La transazione di sola lettura verifica il contenuto dei documenti noti.
+    // Le query prima/dopo verificano anche l'insieme dei documenti; non si
+    // dichiara uno snapshot atomico globale delle query Firestore Web.
+    const known=new Map();
+    for (const snap of first) for (const doc of snap.docs || [snap]) {
+      requireServerSnapshot(doc);
+      const signature=recoverySignature(doc);
+      if (known.has(doc.ref.path) && known.get(doc.ref.path).signature!==signature) throw recoveryChanged();
+      known.set(doc.ref.path,{ref:doc.ref,signature});
+    }
+    const knownDocuments=[...known.values()];
+    await db.runTransaction(async tx=>{
+      assertAccount();
+      const docs=await Promise.all(knownDocuments.map(item=>tx.get(item.ref)));
+      docs.forEach((doc,i)=>{
+        if (recoverySignature(doc)!==knownDocuments[i].signature) throw recoveryChanged();
+      });
+      assertAccount();
+    });
+    const second=await Promise.all(refs.map(read));
+    assertAccount();
+    if (second.some((snap,i)=>recoverySignature(snap)!==signatures[i])) throw recoveryChanged();
+    const [uni,player,planets,fleets,galattiche,operation]=second;
+    if (planets.docs.some(d=>d.data().ownerUid!==uid) || fleets.docs.some(d=>d.data().attackerUid!==uid || d.data().resolved!==false) ||
+        galattiche.docs.some(d=>d.data().ownerUid!==uid)) throw recoveryChanged();
+    const revision=player.data().serviceRevision ?? 0;
+    if (!Number.isSafeInteger(revision) || revision<0) throw recoveryChanged();
+    return {uni,player,planets,fleets,galattiche,operation};
+  }
+  async function joinOnlineUniverse(universeId, passcode = '', {serverOnly=false,operationId=null} = {}) {
     const auth = getAuth();
     const db = getDB();
     const user = auth.currentUser;
     if (!user) throw new Error('Devi accedere prima di entrare in un universo.');
+    if (!serverOnly) G.assertOrdinaryMutationAllowed?.({id:universeId},user.uid);
 
     const uniRef = db.collection('online_universes').doc(universeId);
-    const uniSnap = await uniRef.get();
+    const recovered=serverOnly ? await readRecoverySet(db,uniRef,user.uid,operationId) : null;
+    const uniSnap = recovered ? recovered.uni : await uniRef.get();
     if (!uniSnap.exists) throw new Error('Universo online non trovato.');
 
     const uniData = uniSnap.data();
@@ -391,12 +456,15 @@
 
     const playerName = user.displayName || user.email.split('@')[0];
     const playerRef = uniRef.collection('players').doc(user.uid);
-    const playerSnap = await playerRef.get();
+    const playerSnap = recovered ? recovered.player : await playerRef.get();
 
     let playerState;
     let myPlanets = [];
 
-    if (!playerSnap.exists) {
+    if (recovered) {
+      playerState=playerSnap.data();
+      myPlanets=recovered.planets.docs.map(d=>d.data());
+    } else if (!playerSnap.exists) {
       await claimServerSlot(db, user.uid, universeId);
       const homeCoords = await findFreeHomeCoords(
         universeId,
@@ -464,35 +532,38 @@
       myPlanets = planetsSnap.docs.map((d) => d.data());
     }
 
-    const activeFleetsSnap = await uniRef.collection('fleets')
+    const activeFleetsSnap = recovered ? recovered.fleets : await uniRef.collection('fleets')
       .where('attackerUid', '==', user.uid)
       .where('resolved', '==', false)
       .get();
 
     const fleetsInFlight = activeFleetsSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
 
-    const msgSnap = await uniRef.collection('messages')
-      .where('recipientUid', '==', user.uid)
-      .orderBy('timestamp', 'desc')
-      .limit(20)
-      .get()
-      .catch(() => ({ docs: [] }));
+    const msgQuery=uniRef.collection('messages').where('recipientUid','==',user.uid).orderBy('timestamp','desc').limit(20);
+    const msgSnap = recovered ? requireServerSnapshot(await msgQuery.get({source:'server'})) :
+      await msgQuery.get().catch(() => ({ docs: [] }));
+    if (recovered) {
+      msgSnap.docs.forEach(requireServerSnapshot);
+      if (getAuth().currentUser?.uid!==user.uid) throw recoveryChanged();
+    }
 
     const messages = msgSnap.docs.map((d) => d.data());
 
-    if (playerSnap.exists) {
-      await claimServerSlot(db, user.uid, universeId, { alreadyMember: true }).catch(() => {});
-    }
-    _invalidateUniCaches(universeId);
-    // Un giocatore appena creato non ha flotte legacy da migrare.
-    if (playerSnap.exists) await migrateOnlineFleets(universeId).catch(() => {});
-    await cleanupPrivateMessagesOnce(db, universeId, user.uid);
+    if (!recovered) {
+      if (playerSnap.exists) {
+        await claimServerSlot(db, user.uid, universeId, { alreadyMember: true }).catch(() => {});
+      }
+      _invalidateUniCaches(universeId);
+      // Un giocatore appena creato non ha flotte legacy da migrare.
+      if (playerSnap.exists) await migrateOnlineFleets(universeId).catch(() => {});
+      await cleanupPrivateMessagesOnce(db, universeId, user.uid);
 
-    // I bot configurabili vengono distribuiti vicino alla prima colonia.
-    if (uniData.botConfig?.density > 0 && myPlanets[0]) {
-      await ensureBotsAroundHome(universeId, myPlanets[0].coords,
-        normalizeBotConfig(uniData.botConfig), uniData)
-        .catch((e) => console.warn('[MP Bot] Generazione bot fallita:', e));
+      // I bot configurabili vengono distribuiti vicino alla prima colonia.
+      if (uniData.botConfig?.density > 0 && myPlanets[0]) {
+        await ensureBotsAroundHome(universeId, myPlanets[0].coords,
+          normalizeBotConfig(uniData.botConfig), uniData)
+          .catch((e) => console.warn('[MP Bot] Generazione bot fallita:', e));
+      }
     }
 
     const output = {
@@ -522,13 +593,23 @@
       spyReports: [],
       messages
     };
-    await G.restoreGalattiche(output,user.uid);
+    const recoveredAt=Date.now();
+    await G.restoreGalattiche(output,user.uid,recovered ? {snapshot:recovered.galattiche,now:recoveredAt} : undefined);
     Object.defineProperty(output,'roomPasscode',{value:passcode});
     window.UniversumEngine?.normalizeResearchState(output);
-    if (playerSnap.exists) G.restoreServices(output,myPlanets,playerState);
+    if (playerSnap.exists) G.restoreServices(output,myPlanets,playerState,
+      recovered ? recoveredAt : undefined,recovered ? {serverRecovery:true} : undefined);
+    if (recovered) {
+      if (getAuth().currentUser?.uid!==user.uid) throw recoveryChanged();
+      const operation=recovered.operation;
+      recoveryEvidence.set(output,Object.freeze({uid:user.uid,universeId,operationId,
+        revision:output.serviceRevision,joinedAt:playerState.joinedAt ?? null,
+        receipt:playerState.ordinaryDispatchReceipt ? Object.freeze({...playerState.ordinaryDispatchReceipt}) : null,
+        fleet:operation?.exists ? Object.freeze({...operation.data(),id:operation.id}) : null}));
+    }
     return output;
   }
 
-  Object.assign(G, { _cacheGet, _invalidateUniCaches, invalidateOnlineUniverseList, getMembership, claimServerSlot, releaseServerSlot, getMyServerMembership, cleanupPrivateMessagesOnce, sanitizeNickname, nicknameToInternalEmail, generatePlanetSpecs, createStarterPlanetDoc, registerOrLogin, getOnlineUniverses, generateNeutralOutpostsOnce, createOnlineUniverse, findFreeHomeCoords, joinOnlineUniverse });
+  Object.assign(G, { ordinaryRecoveryEvidence:u=>recoveryEvidence.get(u) || null, _cacheGet, _invalidateUniCaches, invalidateOnlineUniverseList, getMembership, claimServerSlot, releaseServerSlot, getMyServerMembership, cleanupPrivateMessagesOnce, sanitizeNickname, nicknameToInternalEmail, generatePlanetSpecs, createStarterPlanetDoc, registerOrLogin, getOnlineUniverses, generateNeutralOutpostsOnce, createOnlineUniverse, findFreeHomeCoords, joinOnlineUniverse });
 
 })();

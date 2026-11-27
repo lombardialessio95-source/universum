@@ -20,7 +20,11 @@
 
 
   async function repairStuckMissions(uniId) {
+    const guard=G.ordinaryMutationGuard({id:uniId});
+    try {
+    guard.check();
     await migrateOnlineFleets(uniId, { force: true });
+    guard.check();
     await resolveArrivedOnlineFleets(uniId);
     const db = getDB();
     const uniRef = db.collection('online_universes').doc(uniId);
@@ -36,11 +40,13 @@
       if (fleet.resolved) continue;
       if (fleet.status === 'embargo' || fleet.status === 'occupy') continue;
       if (_fleetDueTime(fleet) <= now) {
+        guard.check();
         await forceCleanupOnlineFleet(uniRef, fleet, d.ref, 'repair-button');
         repaired++;
       }
     }
     return repaired;
+    } finally { guard.release(); }
   }
 
 
@@ -166,6 +172,8 @@
 
 
   async function payOnlineSiegeRansom(uniId, targetCoords) {
+    const guard=G.ordinaryMutationGuard({id:uniId});
+    try {
     const auth = getAuth();
     const db = getDB();
     const user = auth.currentUser;
@@ -191,7 +199,9 @@
       return !ff.resolved && (ff.status === 'embargo' || ff.status === 'occupy');
     });
 
+    guard.check();
     await db.runTransaction(async (tx) => {
+      guard.check();
       const snap = await tx.get(planetRef);
       if (!snap.exists) throw new Error('Pianeta non trovato.');
       const pl = snap.data();
@@ -219,6 +229,7 @@
       if (ransom.metal) payUpd['inbox.resources.metal'] = FV.increment(-Math.round(ransom.metal));
       if (ransom.crystal) payUpd['inbox.resources.crystal'] = FV.increment(-Math.round(ransom.crystal));
       if (ransom.deuterium) payUpd['inbox.resources.deuterium'] = FV.increment(-Math.round(ransom.deuterium));
+      guard.check();
       tx.update(planetRef, payUpd);
 
       if (!hasSiegeFleet && creditRef) {
@@ -243,10 +254,13 @@
     if (paidRansom) {
       await _transitionSiegeFleetToReturning(uniRef, key, { pendingRansom: paidRansom });
     }
+    } finally { guard.release(); }
   }
 
 
   async function liftOnlineSiege(uniId, targetCoords) {
+    const guard=G.ordinaryMutationGuard({id:uniId});
+    try {
     const auth = getAuth();
     const db = getDB();
     const user = auth.currentUser;
@@ -268,7 +282,9 @@
       return !ff.resolved && (ff.status === 'embargo' || ff.status === 'occupy');
     });
 
+    guard.check();
     await db.runTransaction(async (tx) => {
+      guard.check();
       const snap = await tx.get(planetRef);
       if (!snap.exists) throw new Error('Pianeta non trovato.');
       const pl = snap.data();
@@ -280,6 +296,7 @@
       }
 
       const siege = isMyOccupation ? pl.occupation : pl.embargo;
+      guard.check();
       tx.update(planetRef, {
         embargo: isMyEmbargo ? null : pl.embargo,
         occupation: isMyOccupation ? null : pl.occupation
@@ -291,6 +308,7 @@
     });
 
     await _transitionSiegeFleetToReturning(uniRef, key);
+    } finally { guard.release(); }
   }
 
   Object.assign(G, { repairStuckMissions, processAllOccupations, sweepOccupationsThrottled, processOnlineOccupations, _transitionSiegeFleetToReturning, payOnlineSiegeRansom, liftOnlineSiege });

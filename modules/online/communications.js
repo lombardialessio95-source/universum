@@ -29,18 +29,27 @@
 
 
   async function deleteReport(uniId, reportId) {
+    const guard=G.ordinaryMutationGuard({id:uniId});
+    try {
+    guard.check();
     const db = getDB();
     await db.collection('online_universes').doc(uniId).collection('messages').doc(reportId).delete();
+    } finally { guard.release(); }
   }
 
 
   async function deleteAllReports(uniId) {
+    const guard=G.ordinaryMutationGuard({id:uniId});
+    try {
+    guard.check();
     const reports = await getReports(uniId);
+    guard.check();
     const db = getDB();
     const batch = db.batch();
     reports.forEach((r) => batch.delete(db.collection('online_universes').doc(uniId).collection('messages').doc(r.id)));
     await batch.commit();
     return reports.length;
+    } finally { guard.release(); }
   }
 
 
@@ -238,6 +247,8 @@
 
 
   async function leaveOnlineUniverse(uniId) {
+    const guard=G.ordinaryMutationGuard({id:uniId});
+    try {
     const auth = getAuth();
     const db = getDB();
     const user = auth.currentUser;
@@ -245,7 +256,11 @@
 
     const uniRef = db.collection('online_universes').doc(uniId);
     const playerRef = uniRef.collection('players').doc(user.uid);
-    const playerSnap = await playerRef.get();
+    const playerSnap = await playerRef.get({source:'server'});
+    guard.check();
+    if (playerSnap.metadata?.fromCache!==false || playerSnap.metadata.hasPendingWrites!==false) throw Error('Profilo non verificato dal server.');
+    if (playerSnap.data()?.ordinaryDispatchReceipt && playerSnap.data().ordinaryDispatchReceipt.acknowledged!==true)
+      throw Error('Ricevuta partenza non riconciliata: abbandono sospeso.');
     if (!playerSnap.exists) {
       await releaseServerSlot(db, user.uid, uniId);
       return;
@@ -254,6 +269,7 @@
     const planetsSnap = await uniRef.collection('planets').where('ownerUid', '==', user.uid).get();
     const fleetsSnap = await uniRef.collection('fleets').where('attackerUid', '==', user.uid).get().catch(() => ({ docs: [] }));
 
+    guard.check();
     const batch = db.batch();
     planetsSnap.docs.forEach((d) => batch.delete(d.ref));
     fleetsSnap.docs.forEach((d) => batch.delete(d.ref));
@@ -263,10 +279,13 @@
     await uniRef.update({ playerCount: firebase.firestore.FieldValue.increment(-1) }).catch(() => {});
     G.invalidateOnlineUniverseList?.();
     await releaseServerSlot(db, user.uid, uniId);
+    } finally { guard.release(); }
   }
 
 
   async function deleteOnlineUniverse(uniId) {
+    const guard=G.ordinaryMutationGuard({id:uniId});
+    try {
     const auth = getAuth();
     const db = getDB();
     const user = auth.currentUser;
@@ -281,7 +300,13 @@
       throw new Error("Solo l'utente che ha creato il server puo' eliminarlo.");
     }
 
-    const playersSnap = await uniRef.collection('players').get();
+    const playersSnap = await uniRef.collection('players').get({source:'server'});
+    guard.check();
+    if (playersSnap.metadata?.fromCache!==false || playersSnap.metadata.hasPendingWrites!==false ||
+        playersSnap.docs.some(d=>d.metadata?.fromCache!==false || d.metadata.hasPendingWrites!==false))
+      throw Error('Profili non verificati dal server.');
+    if (playersSnap.docs.some(d=>d.data()?.ordinaryDispatchReceipt && d.data().ordinaryDispatchReceipt.acknowledged!==true))
+      throw Error('Ricevuta partenza non riconciliata: eliminazione sospesa.');
     const playerUids = playersSnap.docs.map((d) => d.data()?.uid || d.id);
 
     for (const uid of playerUids) {
@@ -312,6 +337,7 @@
 
     _invalidateUniCaches(uniId);
     _syncLastByUni.delete(uniId);
+    } finally { guard.release(); }
   }
 
 

@@ -93,7 +93,8 @@ const db={
     for(const [key,v] of preview)store.set(key,v);
   }
 };
-const win={fbAuth:{currentUser:{uid:'alice'}},fbDB:db};
+const storage=new Map();
+const win={fbAuth:{currentUser:{uid:'alice'}},fbDB:db,localStorage:{getItem:k=>storage.get(k)??null,setItem:(k,v)=>storage.set(k,String(v)),removeItem:k=>storage.delete(k)}};
 const sandbox={window:win,firebase:{firestore:{FieldValue:op}},console,Date,Math,Promise,Map,Set};
 vm.createContext(sandbox);
 for(const f of ['context.js','foundation.js','sync.js','fleet-control.js','combat-resolver.js'])
@@ -163,7 +164,23 @@ async function run(){
     await G.resolveArrivedOnlineFleets('AT02',1);
     assert.deepEqual(store.get(planetPath).inbox.resources,res);
   });
-  console.log('AT02-I01: '+checked+'/5 scenari superati.');
+  await check('AT05: callback tardivo non modifica la nuova sessione; accredito server invariato',async()=>{
+    store.set(planetPath,planet());const f=seed('late-projection');
+    const old={id:'AT02',fleetsInFlight:[copy(f)],planets:[]},fresh=copy(old);
+    win.UniversumUI={state:{currentUniverse:old,isMultiplayerMode:true}};
+    const run=db.runTransaction;
+    db.runTransaction=async function(work){const result=await run.call(this,work);win.UniversumUI.state.currentUniverse=fresh;return result;};
+    try{await G.resolveArrivedOnlineFleets('AT02',1);}finally{db.runTransaction=run;}
+    assert.equal(fresh.fleetsInFlight.length,1);assert.equal(old.fleetsInFlight.length,1);
+    assert.equal(store.get(fleetPath(f.id)).resolved,true);assert.deepEqual(store.get(planetPath).inbox.resources,res);
+  });
+  await check('AT05: proiezione normale in sessione invariata',async()=>{
+    store.set(planetPath,planet());const f=seed('normal-projection');
+    const u={id:'AT02',fleetsInFlight:[copy(f)],planets:[]};win.UniversumUI={state:{currentUniverse:u,isMultiplayerMode:true}};
+    await G.resolveArrivedOnlineFleets('AT02',1);assert.equal(u.fleetsInFlight.length,0);
+    assert.deepEqual(store.get(planetPath).inbox.resources,res);
+  });
+  console.log('AT02-I01/AT05: '+checked+'/7 scenari superati.');
   if(problems.length){console.error(problems.join('\n'));process.exitCode=1;}
 }
 run().catch(e=>{console.error(e);process.exitCode=1;});

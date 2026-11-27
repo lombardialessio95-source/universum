@@ -153,7 +153,10 @@ async function runOnline(){
       return job;
     }
   };
+  const persistentRequests=new Map();
+  const profile={joinedAt:1};
   const mpWindow={
+    localStorage:{getItem:k=>persistentRequests.get(k)??null,setItem:(k,v)=>persistentRequests.set(k,String(v)),removeItem:k=>persistentRequests.delete(k)},
     UniversumData:data,UniversumMissionsCore:C,
     UniversumGalaxy:{calculateDistance:()=>1000,getFleetSpeedAndFuel:travel},
     __UniversumMPVariables:{FLEET_SCHEMA_VERSION:3,_ONLINE_SUPPORTED_MISSIONS:new Set(),_mpErrorToastAt:new Map()},
@@ -164,11 +167,18 @@ async function runOnline(){
       // La transazione reale viene esercitata da test_atomic_dispatch.js.
       syncPlayerState:async(u,{dispatch}={})=>{
         assert.ok(dispatch?.ordinary,'la partenza ordinaria usa dispatch');
+        // Simula soltanto il contratto del checkpoint: la ricevuta viene
+        // prodotta dalle stesse funzioni di protezione del client.
+        const G=mpWindow.__UniversumMPModules;
+        G.prepareOrdinaryDispatch(u,dispatch,'alice');
+        const receipt=G.bindOrdinaryReceipt(u,dispatch,'alice',{exists:true,data:()=>profile});
         const p=u.planets.find(p=>[p.coords.g,p.coords.s,p.coords.p].join('_')===dispatch.doc.originKey);
         assert.ok(p,'pianeta di partenza presente');
         for(const [id,n] of Object.entries(dispatch.doc.ships)) p.fleet[id]-=n;
         for(const [id,n] of Object.entries(dispatch.debit)) p.resources[id]-=n;
         docs.set(dispatch.ref.key,{...dispatch.doc});
+        profile.ordinaryDispatchReceipt=receipt;
+        dispatch.outcome.receipt=receipt;
         return true;
       },_tsToMs:v=>v?.toMillis?.()||0
     }

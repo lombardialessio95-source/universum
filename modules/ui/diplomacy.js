@@ -61,6 +61,7 @@
       selector.addEventListener('change', renderEstimate);
       renderEstimate();
       button.addEventListener('click', async () => {
+        if (UI.blockPendingMutation(uni)) return;
         if (busy) return;
         const planet = selected();
         if (!planet) return;
@@ -150,6 +151,7 @@
       });
 
       document.getElementById('btn-exec-blackmarket')?.addEventListener('click', async () => {
+        if (UI.blockPendingMutation(uni)) return;
         try {
           const res = Galaxy.blackMarketTrade(
             uni,
@@ -257,6 +259,7 @@
 
     activateMerchant();
     document.getElementById('btn-exec-bot-trade')?.addEventListener('click', async () => {
+      if (UI.blockPendingMutation(uni)) return;
       try {
         const coords = {
           g: Number(document.getElementById('trd-g').value),
@@ -282,6 +285,7 @@
     });
 
     document.getElementById('btn-sign-bot-contract')?.addEventListener('click', async () => {
+      if (UI.blockPendingMutation(uni)) return;
       try {
         const coords = {
           g: Number(document.getElementById('trd-g').value),
@@ -301,6 +305,7 @@
     });
 
     document.getElementById('btn-exec-blackmarket')?.addEventListener('click', async () => {
+      if (UI.blockPendingMutation(uni)) return;
       try {
         const res = Galaxy.blackMarketTrade(
           uni,

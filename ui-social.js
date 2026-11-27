@@ -81,6 +81,11 @@
 
     viewport.querySelectorAll('.btn-report-delete').forEach((btn) => {
       btn.addEventListener('click', async () => {
+        if (UI.blockPendingMutation(uni)) return;
+        if (UI.state.currentUniverse !== uni) {
+          UI.toast('Partita cambiata: riapri la schermata.', 'info');
+          return;
+        }
         try {
           if (st.isMultiplayerMode && window.UniversumMP?.deleteReport) {
             await window.UniversumMP.deleteReport(uni.id, btn.dataset.rid);
@@ -102,6 +107,11 @@
     });
 
     document.getElementById('btn-reports-delete-all')?.addEventListener('click', async () => {
+      if (UI.blockPendingMutation(uni)) return;
+      if (UI.state.currentUniverse !== uni) {
+        UI.toast('Partita cambiata: riapri la schermata.', 'info');
+        return;
+      }
       try {
         if (st.isMultiplayerMode && window.UniversumMP?.deleteAllReports) {
           await window.UniversumMP.deleteAllReports(uni.id);

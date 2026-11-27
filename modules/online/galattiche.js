@@ -22,8 +22,8 @@
     return {ownerUid:data.ownerUid,ownerName:data.ownerName,name:data.state.name || 'Galattica',
       coordKey:data.coordKey,systemKey:data.systemKey,defenses:data.state.defenses || {},destroyed:data.destroyed};
   }
-  async function restoreGalattiche(universe, uid) {
-    const result = await collection(universe.id).where('ownerUid', '==', uid).get();
+  async function restoreGalattiche(universe, uid, {snapshot=null,now=null} = {}) {
+    const result = snapshot || await collection(universe.id).where('ownerUid', '==', uid).get();
     universe.galattiche = [];
     universe.galatticaVersions = {};
     universe.galatticaSignatures = {};
@@ -33,7 +33,7 @@
       const state = data.state;
       universe.galatticaSignatures[doc.id]=JSON.stringify(state);
       window.__UniversumEngineModules.addGalatticaProduction({ ...universe, galattiche: [state] },
-        Math.max(0, (Date.now() - data.updatedAt) / 1000));
+        Math.max(0, ((now ?? Date.now()) - data.updatedAt) / 1000));
       universe.galattiche.push(state);
       universe.galatticaVersions[doc.id] = data.version;
     }
@@ -89,6 +89,8 @@
   }
   async function launchGalattica(u,id,target,mission,selection,cargo,options={}) {
     const uid=G.getAuth().currentUser?.uid;
+    const release=G.beginOrdinaryMutation?.(u,uid) || (()=>{});
+    try {
     if (!uid || !Number.isSafeInteger(u.serviceRevision)) throw Error('Riapri la partita multiplayer.');
     const source=u.galattiche?.find(g=>g.id===id);
     if (!source) throw Error('Galattica di origine non disponibile.');
@@ -112,10 +114,13 @@
     await G.syncPlayerState(u,{force:true,galLaunch:{ref,doc,state,key:doc.originGalatticaKey,expected,before}});
     if (!u.fleetsInFlight.some(f=>f.id===doc.id)) u.fleetsInFlight.push(doc);
     return doc;
+    } finally { release(); }
   }
 
   async function jumpOnlineGalattica(u,id,target) {
     const uid = G.getAuth().currentUser?.uid;
+    const release=G.beginOrdinaryMutation?.(u,uid) || (()=>{});
+    try {
     const source = u.galattiche.find(g=>g.id===id);
     if (!uid || !source || !Number.isSafeInteger(u.serviceRevision)) throw Error('Origine non disponibile.');
     const state = structuredClone(source);
@@ -137,6 +142,7 @@
     await G.syncPlayerState(u,{force:true,galLaunch:change});
     if (change.doc && !u.fleetsInFlight.some(f=>f.id===change.doc.id)) u.fleetsInFlight.push(change.doc);
     return result;
+    } finally { release(); }
   }
   async function returnGalattica(tx,base,ref,fleet,now,speed) {
     const galRef=base.collection('galattiche').doc(fleet.originGalatticaKey);

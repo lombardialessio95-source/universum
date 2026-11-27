@@ -223,7 +223,11 @@
       listEl.innerHTML = limitHeader + universes.map((u) => {
         const isMember = membership.serverIds.includes(u.id);
         const isFounder = myUid && (u.founderUid === myUid || u.ownerUid === myUid);
-        const joinDisabled = !isMember && atLimit;
+        let pending=null;
+        try { pending=window.__UniversumMPModules?.ordinaryDepartureStatus?.({id:u.id},myUid); }
+        catch (error) { pending={storageUnavailable:true}; }
+        const joinDisabled = !pending && !isMember && atLimit;
+        const cancellable=pending?.protocol===2 && pending.armed && Number.isSafeInteger(pending.expectedRevision) && pending.profileJoinedAt!=null;
         const npcBadge = u.npcMode === 'limited'
           ? '<span class="badge badge-neutral">MAX 10 AVAMPOSTI NEUTRALI</span>'
           : '<span class="badge badge-red">100% PvP • ZERO BOT</span>';
@@ -248,9 +252,10 @@
             ${isFounder ? '<span class="badge badge-blue">CREATORE</span>' : ''}
             <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
               <button type="button" class="btn btn-green btn-sm btn-join-online-uni" data-uid="${u.id}" data-locked="${u.hasPasscode ? '1' : '0'}" ${joinDisabled ? 'disabled' : ''}>
-                ${svgIcon('globe')} ${joinDisabled ? 'LIMITE 3 SERVER RAGGIUNTO' : (isMember ? "RIENTRA NELL'UNIVERSO" : "ENTRA NELL'UNIVERSO")}
+                ${svgIcon('globe')} ${pending ? 'VERIFICA PARTENZA' : joinDisabled ? 'LIMITE 3 SERVER RAGGIUNTO' : (isMember ? "RIENTRA NELL'UNIVERSO" : "ENTRA NELL'UNIVERSO")}
               </button>
-              ${isMember ? `<button type="button" class="btn btn-red btn-sm btn-leave-online-uni" data-uid="${u.id}">Abbandona Server</button>` : ''}
+              ${cancellable ? `<button type="button" class="btn btn-red btn-sm btn-join-online-uni" data-uid="${u.id}" data-locked="${u.hasPasscode?'1':'0'}" data-cancel="1">ANNULLA SE DIMOSTRABILE</button>` : ''}
+              ${isMember && !pending ? `<button type="button" class="btn btn-red btn-sm btn-leave-online-uni" data-uid="${u.id}">Abbandona Server</button>` : ''}
             </div>
           </article>
         `;
@@ -262,13 +267,28 @@
           const isLocked = btn.dataset.locked === '1';
 
           const proceedJoin = async (passcode = '') => {
+            const G=window.__UniversumMPModules,u={id:uniId};
             try {
+              if (!myUid || window.fbAuth?.currentUser?.uid!==myUid || UI.state.currentUniverse) throw Error('Selezione non più attiva.');
+              if (G?.ordinaryDepartureBusy?.(u,myUid)) throw Error('Verifica già in corso.');
+              const cancel=btn.dataset.cancel==='1';
+              if (cancel && !window.confirm('Annullare soltanto se il server può impedire definitivamente il commit?')) return;
+              const token=++UI._ordinaryEntryGeneration;
+              const isCurrent=()=>UI._ordinaryEntryGeneration===token && window.fbAuth?.currentUser?.uid===myUid && !UI.state.currentUniverse;
+              if (G?.ordinaryDepartureStatus?.(u,myUid)) {
+                const result=await G.verifyOrdinaryDeparture(u,{passcode,cancel,isCurrent});
+                playSound('complete');toast(result.status==='committed'?'Partenza confermata.':'Partenza annullata definitivamente.','success');
+                return;
+              }
+              if (cancel) throw Error('Nessuna richiesta da annullare.');
               const joinedUni = await window.UniversumMP.joinOnlineUniverse(uniId, passcode);
+              if (!isCurrent()) return;
               playSound('complete');
               startOnlineGame(joinedUni);
             } catch (err) {
               playSound('error');
               toast(err.message, 'error');
+              if (!UI.state.currentUniverse && err.code==='ordinary-departure-pending') await UI.renderOnlineUniversesList(true);
             }
           };
 
@@ -306,6 +326,15 @@
           `);
           document.getElementById('btn-cancel-leave-server')?.addEventListener('click', closeModal);
           document.getElementById('btn-confirm-leave-server')?.addEventListener('click', async () => {
+            if (!myUid || window.fbAuth?.currentUser?.uid !== myUid) {
+              toast('Account cambiato: riapri la conferma.', 'info');
+              return;
+            }
+            // La lobby non ha un universo multiplayer attivo: consulta la stessa mappa pendente per ID.
+            if (window.__UniversumMPModules?.ordinaryCheckpointBlocked?.({id:uniId},null,myUid)) {
+              toast('Partenza in verifica: rientra nell’universo per verificarla.', 'info');
+              return;
+            }
             try {
               await window.UniversumMP.leaveOnlineUniverse(uniId);
               closeModal();
@@ -349,6 +378,11 @@
     document.getElementById('cancel-rename-planet')?.addEventListener('click', UI.closeModal);
     document.getElementById('form-rename-planet')?.addEventListener('submit', async (e) => {
       e.preventDefault();
+      if (UI.blockPendingMutation(uni)) return;
+      if (UI.state.currentUniverse !== uni) {
+        UI.toast('Partita cambiata: riapri la schermata.', 'info');
+        return;
+      }
       try {
         const newName = window.UniversumEngine.renamePlanet(uni, planetIndex, inp.value);
         if (UI.state.isMultiplayerMode && window.UniversumMP?.renameOnlinePlanet) {
@@ -393,6 +427,11 @@
     document.getElementById('cancel-rename-moon')?.addEventListener('click', UI.closeModal);
     document.getElementById('form-rename-moon')?.addEventListener('submit', async (e) => {
       e.preventDefault();
+      if (UI.blockPendingMutation(uni)) return;
+      if (UI.state.currentUniverse !== uni) {
+        UI.toast('Partita cambiata: riapri la schermata.', 'info');
+        return;
+      }
       try {
         const newName = window.UniversumEngine.renameMoon(uni, planetIndex, inp.value);
         if (UI.state.isMultiplayerMode && window.UniversumMP?.renameOnlineMoon) {

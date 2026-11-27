@@ -288,6 +288,7 @@
 
 
   UI.openModal = function (title, bodyHTML) {
+    if (UI.pendingDeparture?.()) return;
     const modal = document.getElementById('universal-modal');
     const titleEl = document.getElementById('modal-title');
     const bodyEl = document.getElementById('modal-body');
@@ -354,6 +355,74 @@
   };
 
 
+  // AT05: ammissione delle azioni volontarie e pannello di recupero comune.
+  UI.pendingDeparture = function (u = UI.state.currentUniverse) {
+    if (!u || !UI.state.isMultiplayerMode) return null;
+    const G=window.__UniversumMPModules;
+    try {
+      const p=G?.ordinaryDepartureStatus?.(u);
+      if (p) return {...p,busy:G.ordinaryDepartureBusy(u)};
+      if (G?.ordinaryCheckpointBlocked?.(u,null)) return {storageUnavailable:true};
+      return null;
+    } catch (error) { return {storageUnavailable:true}; }
+  };
+  UI.blockPendingMutation = function (u = UI.state.currentUniverse) {
+    if (u && UI.state.currentUniverse!==u) {
+      UI.toast('Partita cambiata: riapri la schermata.','info');
+      return true;
+    }
+    if (!UI.pendingDeparture(u)) return false;
+    UI.toast('Partenza in verifica: verifica l’esito prima di continuare.','info');
+    return true;
+  };
+  UI._ordinaryEntryGeneration=0;
+  UI.updateOrdinaryDeparturePanel = function () {
+    const viewport=document.getElementById('game-viewport');
+    if (!viewport) return false;
+    const uni=UI.state.currentUniverse,p=UI.pendingDeparture(uni);
+    let panel=document.getElementById('at05-ordinary-departure-panel');
+    if (!p) {
+      if (panel) { panel.remove(); viewport.classList.remove('hidden'); }
+      return false;
+    }
+    const signature=JSON.stringify([uni?.id,p.operationId,p.busy,p.storageUnavailable,p.armed,p.expectedRevision,p.profileJoinedAt]);
+    if (panel?.dataset.signature===signature) return true;
+    if (!panel) {
+      panel=document.createElement('div');panel.id='at05-ordinary-departure-panel';
+      panel.className='glass-panel';panel.style.padding='18px';viewport.before(panel);
+      UI.closeModal();UI.closeResourceDeposit?.();UI.stopPlanetCanvas?.();UI._resetSyncRetry?.();
+      if (UI._reconcileTimer) { clearTimeout(UI._reconcileTimer);UI._reconcileTimer=null; }
+    }
+    viewport.classList.add('hidden');
+    panel.dataset.signature=signature;
+    const cancellable=p.protocol===2 && p.armed && Number.isSafeInteger(p.expectedRevision) && p.profileJoinedAt!=null;
+    panel.innerHTML=`<h3>PARTENZA IN VERIFICA</h3>
+      <p class="text-muted">${p.storageUnavailable ? 'Memoria locale non disponibile. I salvataggi sono sospesi.' : p.busy ? 'Operazione in corso. Non ripetere l’invio.' : 'La partita è sospesa fino alla verifica dell’esito e al recupero dal server.'}</p>
+      ${p.operationId ? `<p>ID: ${UI.escapeHTML(p.operationId)}</p>` : ''}
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
+      <button type="button" class="btn btn-green" data-at05-control="verify" ${p.busy?'disabled':''}>VERIFICA ESITO</button>
+      ${cancellable ? `<button type="button" class="btn btn-red" data-at05-control="cancel" ${p.busy?'disabled':''}>ANNULLA SE DIMOSTRABILE</button>` : ''}
+      <button type="button" class="btn btn-ghost" data-at05-control="exit" ${p.busy?'disabled':''}>TORNA ALLA LOBBY</button></div>`;
+    const act=async cancel=>{
+      if (UI.state.currentUniverse!==uni || !UI.state.isMultiplayerMode) return;
+      if (p.storageUnavailable) { UI.onOrdinaryDepartureChanged(uni); return; }
+      if (cancel && !window.confirm('Annullare soltanto se il server può impedire definitivamente il commit della richiesta?')) return;
+      try {
+        const result=await window.__UniversumMPModules.verifyOrdinaryDeparture(uni,{cancel});
+        UI.toast(result.status==='committed'?'Partenza confermata e partita recuperata.':'Partenza annullata definitivamente.','success');
+      } catch (error) { UI.toast(error.message,'error'); }
+      finally { UI.onOrdinaryDepartureChanged(UI.state.currentUniverse); }
+    };
+    panel.querySelector('[data-at05-control="verify"]')?.addEventListener('click',()=>act(false));
+    panel.querySelector('[data-at05-control="cancel"]')?.addEventListener('click',()=>act(true));
+    panel.querySelector('[data-at05-control="exit"]')?.addEventListener('click',()=>UI.exitActiveGameToLobby());
+    return true;
+  };
+  UI.onOrdinaryDepartureChanged = function (u) {
+    if (!u || UI.state.currentUniverse!==u || !UI.state.isMultiplayerMode) return;
+    const wasBlocked=Boolean(document.getElementById('at05-ordinary-departure-panel'));
+    if (!UI.updateOrdinaryDeparturePanel() && wasBlocked) UI.renderCurrentView?.();
+  };
   UI.persistUniverseState = async function (opts = {}) {
     const uni = UI.state.currentUniverse;
     if (!uni) return;
@@ -362,6 +431,7 @@
       await window.UniversumDB.save(uni);
       return;
     }
+    if (UI.pendingDeparture(uni)) return false;
     if (!window.UniversumMP || typeof window.UniversumMP.syncPlayerState !== 'function') return;
 
     const r = UI._syncRetry;
@@ -378,7 +448,7 @@
         UI.toast('Sincronizzato', 'success');
       }
     } catch (err) {
-      if (err.code === 'service-conflict' || UI.state.currentUniverse !== uni) throw err;
+      if (err.code === 'service-conflict' || err.code==='ordinary-departure-pending' || UI.state.currentUniverse !== uni || UI.pendingDeparture(uni)) throw err;
       r.hadFailure = true;
       console.warn('[Sync] Sincronizzazione online non riuscita:', err);
       const code = String(err?.code || '');
@@ -402,7 +472,7 @@
   UI._reconcileTimer = null;
 
   UI._requestReconcileSync = function () {
-    if (UI._reconcileTimer) return;
+    if (UI.pendingDeparture() || UI._reconcileTimer) return;
     UI._reconcileTimer = setTimeout(async () => {
       UI._reconcileTimer = null;
       if (!UI.state.isMultiplayerMode || !UI.state.currentUniverse) return;

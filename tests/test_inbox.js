@@ -116,7 +116,10 @@ const base = path.resolve(__dirname, '..');
 const modulesOnline = ['context.js', 'foundation.js', 'universes.js', 'sync.js', 'fleet-control.js', 'combat-resolver.js', 'sieges.js', 'communications.js', 'bots.js'];
 
 const reconcileCalls = [];
+const persistentRequests = new Map();
 const win = {
+  // Browser storage is part of the AT05 contract; each harness has its own store.
+  localStorage: {getItem:k=>persistentRequests.get(k)??null,setItem:(k,v)=>persistentRequests.set(k,String(v)),removeItem:k=>persistentRequests.delete(k)},
   fbAuth: { currentUser: { uid: 'u1', displayName: 'Alice' } },
   fbDB: db,
   UniversumUI: { onOnlineReconciled: (info) => reconcileCalls.push(info), state: {} }
@@ -193,6 +196,7 @@ function ok(name, fn) { return Promise.resolve().then(fn).then(() => { passed++;
       resources: { metal: 1500, crystal: 600, deuterium: 250 },
       fleet: { lightFighter: 10 }, defenses: { rocketLauncher: 5 }, buildings: {}
     }] };
+    win.UniversumUI.state.currentUniverse = uni;
     await MP.syncPlayerState(uni, { force: true });
     const d = store.get(P(1, 1, 1));
     assert.strictEqual(d.resources.metal, 1700, 'base = locale 1500 + inbox 200');
@@ -285,6 +289,7 @@ function ok(name, fn) { return Promise.resolve().then(fn).then(() => { passed++;
       { id: 'Casa', name: 'Casa', coords: { g: 1, s: 1, p: 1 }, resources: { metal: 1810, crystal: 600, deuterium: 250 }, fleet: {}, defenses: {}, buildings: {} },
       { id: 'Colonia', name: 'Colonia', coords: { g: 1, s: 1, p: 2 }, resources: { metal: 5, crystal: 5, deuterium: 5 }, fleet: { lightFighter: 99 }, defenses: {}, buildings: {} }
     ] };
+    win.UniversumUI.state.currentUniverse = uni;
     await MP.syncPlayerState(uni, { force: true });
     const d = store.get(P(1, 1, 2));
     assert.strictEqual(d.ownerUid, 'u2');

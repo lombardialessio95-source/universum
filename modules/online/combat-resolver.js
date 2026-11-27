@@ -44,6 +44,11 @@
   }
 
   async function _resolveArrivedOnlineFleetsImpl(uniId, knownSpeed) {
+    // AT05: le risoluzioni server proseguono, ma un callback tardivo non
+    // deve proiettare un risultato sulla partita sostituita dal recupero.
+    const projectionUniverse = window.UniversumUI?.state?.currentUniverse;
+    const projectionUid = getAuth().currentUser?.uid;
+    const projectionEpoch = G.ordinaryRecoveryEpoch?.(projectionUniverse,projectionUid);
     const db = getDB();
     const uniRef = db.collection('online_universes').doc(uniId);
     const now = Date.now();
@@ -699,7 +704,11 @@
           }
         });
 
-        const localUni = window.UniversumUI?.state?.currentUniverse;
+        const currentLocal = window.UniversumUI?.state?.currentUniverse;
+        const localUni = currentLocal && currentLocal===projectionUniverse && currentLocal.id===uniId &&
+          getAuth().currentUser?.uid===projectionUid &&
+          G.ordinaryRecoveryEpoch?.(currentLocal,projectionUid)===projectionEpoch &&
+          !G.ordinaryCheckpointBlocked?.(currentLocal,null,projectionUid) ? currentLocal : null;
         if (localUni?.id===uniId && galCredit && localUni.galatticaVersions?.[galCredit.key]===galCredit.previous) {
           const gal=localUni.galattiche.find(g=>g.id===galCredit.id);
           if (gal) {

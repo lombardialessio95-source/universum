@@ -215,6 +215,8 @@
   // La flotta del mercante non è una flotta PvP reale: risolve un attacco orbitale
   // su commissione e ritira tutti i detriti; difese, edifici e pianeta restano intatti.
   async function hireOnlineMoonMerchant(universeObj, coords) {
+    const guard=G.ordinaryMutationGuard(universeObj);
+    try {
     const user = getAuth().currentUser;
     if (!user) throw new Error('Utente non autenticato.');
     if (!universeObj?.id || universeObj.creativeMode) throw new Error('Servizio disponibile solo negli universi Normali.');
@@ -222,7 +224,9 @@
     if (!mm) throw new Error('Servizio Mercante di Lune non disponibile.');
     const planetRef = getDB().collection('online_universes').doc(universeObj.id)
       .collection('planets').doc(coordsToKey(coords));
+    guard.check();
     const outcome = await getDB().runTransaction(async (tx) => {
+      guard.check();
       const snap = await tx.get(planetRef);
       if (!snap.exists || snap.data().ownerUid !== user.uid) throw new Error('Il pianeta non appartiene al tuo impero.');
       const stored = snap.data();
@@ -237,6 +241,7 @@
         updates[`inbox.fleet.${shipId}`] = FV.increment(-qty);
       }
       if (success) updates.moon = mm.createMoonData();
+      guard.check();
       tx.update(planetRef, updates);
       return { ...check, success, coords, charged: mm.FEE };
     });
@@ -246,10 +251,13 @@
       body: mm.report(outcome), timestamp: Date.now()
     }).catch((e) => console.warn('[MoonMerchant] Report non salvato:', e));
     return outcome;
+    } finally { guard.release(); }
   }
 
 
   async function tradeWithOnlineBot(universeObj, botCoords, giveRes, giveAmount, getRes) {
+    const guard=G.ordinaryMutationGuard(universeObj);
+    try {
     const auth = getAuth();
     const db = getDB();
     const user = auth.currentUser;
@@ -280,7 +288,9 @@
     if (received <= 0) throw new Error('Quantità troppo bassa.');
 
     const FV = firebase.firestore.FieldValue;
+    guard.check();
     await db.runTransaction(async (tx) => {
+      guard.check();
       const homeSnap = await tx.get(homeRef);
       const freshBot = await tx.get(botRef);
       if (!homeSnap.exists || !freshBot.exists) throw new Error('Dati non disponibili.');
@@ -301,6 +311,7 @@
         [`inbox.resources.${giveRes}`]: FV.increment(-amount),
         [`inbox.resources.${getRes}`]: FV.increment(received)
       };
+      guard.check();
       tx.update(homeRef, updHome);
       tx.update(botRef, {
         [`resources.${giveRes}`]: FV.increment(amount),
@@ -310,6 +321,7 @@
     });
 
     return { given: amount, received };
+    } finally { guard.release(); }
   }
 
 

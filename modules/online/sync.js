@@ -13,9 +13,9 @@
 
 
 
-  function calculateLiveResources(planetDoc, speed = 10) {
+  function calculateLiveResources(planetDoc, speed = 10, recovery = null) {
     if (!planetDoc) return planetDoc;
-    const now = Date.now();
+    const now = recovery?.now ?? Date.now();
     const last = Number(planetDoc.lastUpdated || now);
     const elapsedHours = Math.max(0, (now - last) / 3600000);
 
@@ -28,7 +28,7 @@
       const ownUid = window.fbAuth?.currentUser?.uid;
       // La tecnologia energetica è già nello stato della propria partita:
       // nessuna lettura aggiuntiva di documenti Firestore.
-      const prodResearches = cloned.researches || (ownUid && cloned.ownerUid === ownUid && active?.researches) || {};
+      const prodResearches = recovery ? recovery.researches : cloned.researches || (ownUid && cloned.ownerUid === ownUid && active?.researches) || {};
       // Calcolo puro: divide l'intervallo anche se il combustibile termina durante l'assenza.
       // Stessa regola usata dal tick offline: la produzione positiva si ferma
       // alla capienza, i trasporti preesistenti oltre soglia non vengono tagliati
@@ -96,12 +96,12 @@
     const order = 1+events.reduce((n,e)=>Math.max(n,e.order || 0),0);
     upd['inbox.serviceEvents.' + services.uid()] = {at,order,fleet,resources,defenses};
   }
-  function restoreServices(u, planets, player, now = Date.now()) {
+  function restoreServices(u, planets, player, now = Date.now(), {serverRecovery=false} = {}) {
     const engine = window.UniversumEngine;
     const services = window.UniversumServices;
     const events = planets.flatMap(p=>Object.entries(p.inbox?.serviceEvents || {}).map(([key,event])=>({p,key,event})));
     if (!engine || !services || (!events.length && !services.hasServices({planets}))) {
-      u.planets = planets.map(p=>calculateLiveResources(p,u.speed));
+      u.planets = planets.map(p=>calculateLiveResources(p,u.speed,serverRecovery ? {now,researches:u.researches || {}} : null));
       return;
     }
     u.planets = planets;
@@ -318,8 +318,21 @@
 
   async function syncPlayerState(u, options = {}) {
     if (!u) return;
+    const uid=getAuth().currentUser?.uid;
+    const epoch=G.ordinaryRecoveryEpoch?.(u,uid);
+    const blocked=()=>G.ordinaryRecoveryEpoch?.(u,uid)!==epoch || G.ordinaryCheckpointBlocked?.(u,options.dispatch,uid);
+    const rejectBlocked=()=>{
+      if (options.dispatch || options.galLaunch) throw Object.assign(Error('Partenza in verifica.'),{code:'ordinary-departure-pending'});
+      return false;
+    };
+    // Controllo all’accodamento e all’esecuzione: un checkpoint vecchio
+    // non può diventare autorizzato soltanto perché era già nella coda.
+    if (blocked()) return rejectBlocked();
     const previous = checkpoints.get(u);
-    const operation = (previous || Promise.resolve()).catch(()=>{}).then(()=>saveCheckpoint(u,options));
+    const operation = (previous || Promise.resolve()).catch(()=>{}).then(()=>{
+      if (getAuth().currentUser?.uid!==uid || blocked()) return rejectBlocked();
+      return saveCheckpoint(u,{...options,recoveryEpoch:epoch});
+    });
     checkpoints.set(u,operation);
     try { return await operation; }
     catch (error) {
@@ -330,7 +343,7 @@
         const fresh = ref && await ref.get({source:'server'}).catch(()=>null);
         if (fresh?.exists && fresh.data().serviceRevision !== u.serviceRevision) error = conflict();
       }
-      if (error.code === 'service-conflict' && window.UniversumUI?.state?.currentUniverse === u) {
+      if (!options.dispatch?.outcome && !blocked() && error.code === 'service-conflict' && window.UniversumUI?.state?.currentUniverse === u) {
         const ui = window.UniversumUI;
         ui.toast(error.message,'error');
         await ui.exitToLobbyAfterServerRemoval();
@@ -366,11 +379,16 @@
     for (const [k,n] of Object.entries(dispatch.debit)) p.resources[k] = Math.max(0,p.resources[k]-n);
     if (!dispatch.ordinary) window.UniversumServices?.settlePlanet(u,p,now);
   }
-  async function saveCheckpoint(universeObj, { force = false, dispatch = null, galLaunch = null } = {}) {
+  async function saveCheckpoint(universeObj, { force = false, dispatch = null, galLaunch = null, recoveryEpoch } = {}) {
     const auth = getAuth();
     const db = getDB();
     const user = auth.currentUser;
     if (!user || !universeObj?.id) return;
+    if (G.ordinaryCheckpointBlocked?.(universeObj,dispatch,user.uid)) {
+      if (dispatch || galLaunch) throw Object.assign(Error('Partenza in verifica.'),{code:'ordinary-departure-pending'});
+      return false;
+    }
+    if (dispatch?.ordinary && dispatch.outcome) G.prepareOrdinaryDispatch(universeObj,dispatch,user.uid);
     window.UniversumEngine?.normalizeResearchState(universeObj);
 
     const syncKey = JSON.stringify([user.uid, universeObj.id]);
@@ -393,15 +411,26 @@
     let moonUpdates = [];
     let dockState,galWrites;
 
-    await db.runTransaction(async (tx) => {
+    const outcome=dispatch?.ordinary ? dispatch.outcome : null;
+    if (dispatch?.ordinary && !outcome) throw Error('Dispatch ordinario non autorizzato.');
+    let terminalReceipt;
+    const checkpointBlocked=()=>G.ordinaryRecoveryEpoch?.(universeObj,user.uid)!==recoveryEpoch ||
+      G.ordinaryCheckpointBlocked?.(universeObj,dispatch,user.uid);
+    try { await db.runTransaction(async (tx) => {
+      if (getAuth().currentUser?.uid!==user.uid || checkpointBlocked())
+        throw Object.assign(Error('Checkpoint non autorizzato.'),{code:'ordinary-departure-pending'});
       reconciled = [];
       lost = [];
       moonUpdates = [];
       const entries = planets.map((p) => ({ p, ref: planetsCol.doc(coordsToKey(p.coords)) }));
       const snaps = await Promise.all(entries.map((e) => tx.get(e.ref)));
-      const playerSnap = versioned ? await tx.get(playerRef) : null;
+      const playerSnap = versioned || dispatch?.ordinary ? await tx.get(playerRef) : null;
       const player = playerSnap?.data() || {};
       if (versioned && (player.serviceRevision || 0) !== expected) throw conflict();
+      if (dispatch?.ordinary && !versioned && player.serviceRevision!=null) throw conflict();
+      if (dispatch?.ordinary && versioned && (!Number.isSafeInteger(expected) || expected<0 || expected>=Number.MAX_SAFE_INTEGER)) throw conflict();
+      terminalReceipt=dispatch?.ordinary ? G.bindOrdinaryReceipt(universeObj,dispatch,user.uid,playerSnap) :
+        playerSnap?.exists ? G.ordinaryReceiptAcknowledgement?.(universeObj,player,user.uid) : null;
       if (galLaunch && ((universeObj.galatticaVersions?.[galLaunch.key] || 0)!==galLaunch.expected ||
           JSON.stringify({...universeObj.galattiche.find(g=>g.id===galLaunch.state.id),resources:null})!==JSON.stringify({...JSON.parse(galLaunch.before),resources:null}))) throw conflict();
       galWrites=(universeObj.galattiche?.length || Object.keys(universeObj.galatticaVersions || {}).length) ? await G.prepareGalattiche(tx,universeObj,user.uid,galLaunch) : [];
@@ -534,6 +563,7 @@
       if (galLaunch?.ref) tx.set(galLaunch.ref,galLaunch.doc);
       if (dispatch) tx.set(dispatch.ref,dispatch.doc);
       const playerPayload = {
+        ...(terminalReceipt ? {ordinaryDispatchReceipt:terminalReceipt} : {}),
         ...(versioned ? {serviceRevision:expected+1,serviceCheckpoint:nowTs,
           checkpointPlanets:entries.filter((e,i)=>snaps[i].data()?.ownerUid===user.uid).map(e=>e.ref.id),
           specialistBuilt:universeObj.specialistBuilt || {}, specialistFlights:activeRefs} : {}),
@@ -550,7 +580,16 @@
       };
       if (playerSnap?.exists) tx.update(playerRef,playerPayload);
       else tx.set(playerRef,playerPayload,{merge:true});
-    });
+      if (getAuth().currentUser?.uid!==user.uid || checkpointBlocked())
+        throw Object.assign(Error('Checkpoint non autorizzato.'),{code:'ordinary-departure-pending'});
+      if (outcome) outcome.callbackReady=true;
+    }); } catch (error) {
+      if (outcome && !outcome.callbackReady) outcome.definitePreCommitFailure=true;
+      throw error;
+    }
+    if (outcome) outcome.receipt=terminalReceipt;
+    if (getAuth().currentUser?.uid!==user.uid || G.ordinaryRecoveryEpoch?.(universeObj,user.uid)!==recoveryEpoch)
+      throw Object.assign(Error('Stato del checkpoint non più attivo.'),{code:'ordinary-departure-pending'});
     if (versioned) universeObj.serviceRevision = expected+1;
     for (const write of galWrites) {
       universeObj.galatticaVersions ||= {};
@@ -603,7 +642,8 @@
     if (lost.length > 0) {
       universeObj.planets = (universeObj.planets || []).filter((p) => !lost.includes(p));
     }
-    if (reconciled.length > 0 || lost.length > 0 || moonUpdates.length > 0) {
+    if ((reconciled.length > 0 || lost.length > 0 || moonUpdates.length > 0) &&
+        (!window.UniversumUI?.state || window.UniversumUI.state.currentUniverse===universeObj)) {
       try {
         window.UniversumUI?.onOnlineReconciled?.({ reconciled, lost });
       } catch (e) {
@@ -623,6 +663,7 @@
     return db.collection('online_universes').doc(universeObj.id).collection('planets')
       .where('ownerUid', '==', user.uid)
       .onSnapshot((snap) => {
+        if (getAuth().currentUser?.uid!==user.uid || (window.UniversumUI && window.UniversumUI.state?.currentUniverse!==universeObj)) return;
         const gained = [];
         let needSync = false;
         for (const ch of snap.docChanges()) {
@@ -649,21 +690,27 @@
 
 
   async function renameOnlinePlanet(uniId, coords, newName) {
+    const release=G.beginOrdinaryMutation?.({id:uniId}) || (()=>{});
+    try {
     const db = getDB();
     const key = coordsToKey(coords);
     await db.collection('online_universes').doc(uniId).collection('planets').doc(key).update({
       name: newName,
       planetName: newName
     });
+    } finally { release(); }
   }
 
 
   async function renameOnlineMoon(uniId, coords, newMoonName) {
+    const release=G.beginOrdinaryMutation?.({id:uniId}) || (()=>{});
+    try {
     const db = getDB();
     const key = coordsToKey(coords);
     await db.collection('online_universes').doc(uniId).collection('planets').doc(key).update({
       'moon.name': newMoonName
     });
+    } finally { release(); }
   }
 
 
@@ -754,11 +801,14 @@
   async function changeOnlineMothershipHangar(u,planetIndex,id,amount) {
     const user=getAuth().currentUser, db=getDB(), H=window.UniversumHangars;
     if (!user || !u?.id || !H || !Number.isSafeInteger(amount) || !amount) throw Error('Operazione hangar non valida.');
+    const release=G.beginOrdinaryMutation?.(u,user.uid) || (()=>{});
+    try {
     const planet=u.planets[planetIndex];
     if (!planet) throw Error('Pianeta selezionato non disponibile.');
     // Prima conclude qualsiasi checkpoint della partita: i due client non devono
     // usare due versioni diverse del campo fleet mentre spostano i caccia.
-    await syncPlayerState(u,{force:true});
+    if (await syncPlayerState(u,{force:true})!==true) throw Error('Checkpoint hangar non confermato.');
+    G.assertOrdinaryMutationAllowed?.(u,user.uid);
     const uni=db.collection('online_universes').doc(u.id);
     const ref=uni.collection('planets').doc(coordsToKey(planet.coords));
     const player=uni.collection('players').doc(user.uid);
@@ -776,16 +826,20 @@
           Object.keys(data.inbox?.hangarLosses || {}).length ||
           Number(data.inbox?.fleet?.lightFighter || 0) !== 0 ||
           Number(data.inbox?.fleet?.mothership || 0) !== 0) throw conflict();
+      if (getAuth().currentUser?.uid!==user.uid) throw Error('Account cambiato.');
+      G.assertOrdinaryMutationAllowed?.(u,user.uid);
       H.changeLoad(before,id,amount);
       accepted={fleet:before.fleet,hangars:before.mothershipHangars};
       tx.update(ref,{fleet:before.fleet,mothershipHangars:before.mothershipHangars,
         serviceRevision:expected+1,lastUpdated:Date.now()});
       tx.update(player,{serviceRevision:expected+1,serviceCheckpoint:Date.now()});
     });
+    if (getAuth().currentUser?.uid!==user.uid || G.ordinaryCheckpointBlocked?.(u,null,user.uid)) throw Error('Stato hangar non più attivo.');
     planet.fleet.lightFighter=accepted.fleet.lightFighter;
     planet.mothershipHangars=accepted.hangars;
     u.serviceRevision=expected+1;
     return true;
+    } finally { release(); }
   }
 
   Object.assign(G, { changeOnlineMothershipHangar, combatPlanet, restoreServices, calculateLiveResources, computePlayerPoints, _applyUnitDelta, _hasInbox, _effectivePlanetView, _snapshotForDiff, _writePlanetResult, _inboxCredit, _resolveCreditRef, syncPlayerState, listenOwnPlanets, renameOnlinePlanet, renameOnlineMoon, getOnlineSystem, fetchOnlineSystem });

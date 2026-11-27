@@ -139,7 +139,7 @@ function loadModule(file, win, extra = {}) {
   console.log('✓ lobby: 2 visite=1 lettura lista; aggiorna=lettura fresca');
 
   const runtime=fs.readFileSync(path.join(root,'modules/ui/runtime.js'),'utf8');
-  assert(runtime.includes('persistUniverseState({ force: false })'),'heartbeat non forzato');
+  assert(/persistUniverseState\(\{\s*force\s*:\s*false\s*\}\)/.test(runtime),'heartbeat non forzato');
   assert(runtime.includes('resolveArrivedOnlineFleets(uni.id, uni.speed)'),'velocità riusata');
   assert(runtime.includes('uni.botConfig?.raids'),'BOT pacifici non fanno query di raid');
   const rules=fs.readFileSync(path.join(root,'firestore.rules'),'utf8');

@@ -39,11 +39,279 @@
 
 
 
+  // AT05-I05: richiesta persistente e ricevuta terminale a spazio costante.
+  const ordinaryDepartures = new Map();
+  const ordinaryRecoveries = new Set();
+  const ordinaryMutations = new Map();
+  const retiredDepartureStates = new WeakSet();
+  const recoveryEpochs = new Map();
+  const departureKey = (u,uid=getAuth().currentUser?.uid) =>
+    'universum:ordinary-departure:v1:'+JSON.stringify([uid,u.id]);
+  const terminalStatuses=new Set(['committed','cancelled']);
+  function pendingDepartureError(p) {
+    return Object.assign(Error('Partenza in verifica. Non ripetere l’invio.'),
+      {code:'ordinary-departure-pending',fleetId:p?.operationId || null});
+  }
+  function storageError(cause) {
+    return Object.assign(Error('Memoria locale indisponibile: impossibile garantire una partenza sicura.'),
+      {code:'ordinary-departure-storage',cause});
+  }
+  const validRevision=n=>Number.isSafeInteger(n) && n>=0 && n<Number.MAX_SAFE_INTEGER;
+  function readStoredDeparture(u,uid) {
+    const key=departureKey(u,uid);
+    try {
+      const raw=window.localStorage.getItem(key);
+      const active=ordinaryDepartures.get(key);
+      if (raw===null) return active ? {...active.record,missing:true} : null;
+      const record=JSON.parse(raw);
+      if (!record || record.accountUid!==uid || record.universeId!==u.id ||
+          typeof record.operationId!=='string' || !record.operationId || record.operationId.includes('/') ||
+          typeof record.originKey!=='string' || !record.originKey ||
+          !(record.expectedRevision===null || validRevision(record.expectedRevision)) ||
+          !['pending','settled'].includes(record.status) ||
+          (record.status==='settled' && (!terminalStatuses.has(record.terminalStatus) ||
+            !(record.terminalRevision===null || Number.isSafeInteger(record.terminalRevision))))) throw Error('Richiesta persistente non valida.');
+      // Una scrittura locale parzialmente riuscita non libera la sessione attiva.
+      if (active && record.status==='settled') return {...active.record,missing:true};
+      return record;
+    } catch (error) { throw storageError(error); }
+  }
+  function readOrdinaryDeparture(u,uid) {
+    const record=readStoredDeparture(u,uid);
+    return record?.status==='pending' ? record : null;
+  }
+  function ordinaryDepartureStatus(u,uid=getAuth().currentUser?.uid) {
+    if (!u?.id || !uid) return null;
+    return readOrdinaryDeparture(u,uid);
+  }
+  function ordinaryDepartureBusy(u,uid=getAuth().currentUser?.uid) {
+    if (!u?.id || !uid) return false;
+    const key=departureKey(u,uid);
+    return ordinaryRecoveries.has(key) || Boolean(ordinaryDepartures.get(key)?.busy);
+  }
+  function ordinaryDepartureInitialBusy(u,uid=getAuth().currentUser?.uid) {
+    return Boolean(u?.id && uid && ordinaryDepartures.get(departureKey(u,uid))?.busy);
+  }
+  function notifyOrdinaryDepartureChanged(u) {
+    try { window.UniversumUI?.onOrdinaryDepartureChanged?.(u); }
+    catch (error) { console.warn('[AT05] Aggiornamento pannello:',error); }
+  }
+  function beginOrdinaryMutation(u,uid=getAuth().currentUser?.uid) {
+    if (!u?.id || !uid || getAuth().currentUser?.uid!==uid) throw Error('Account non attivo.');
+    assertOrdinaryMutationAllowed(u,uid);
+    const key=departureKey(u,uid);
+    ordinaryMutations.set(key,(ordinaryMutations.get(key)||0)+1);
+    let released=false;
+    return ()=>{
+      if (released) return;
+      released=true;
+      const count=ordinaryMutations.get(key)||0;
+      if (count<=1) ordinaryMutations.delete(key);
+      else ordinaryMutations.set(key,count-1);
+    };
+  }
+  // AT05: protezione delle API volontarie che non passano dal checkpoint.
+  function ordinaryMutationGuard(u,uid=getAuth().currentUser?.uid) {
+    const release=beginOrdinaryMutation(u,uid);
+    const epoch=ordinaryRecoveryEpoch(u,uid);
+    const active=window.UniversumUI?.state?.currentUniverse;
+    return {release,check(){
+      if (getAuth().currentUser?.uid!==uid || ordinaryRecoveryEpoch(u,uid)!==epoch ||
+          window.UniversumUI?.state?.currentUniverse!==active) throw pendingDepartureError(null);
+      assertOrdinaryMutationAllowed(u,uid);
+    }};
+  }
+  function ordinaryRecoveryEpoch(u,uid=getAuth().currentUser?.uid) {
+    return u?.id && uid ? recoveryEpochs.get(departureKey(u,uid)) || 0 : 0;
+  }
+  function ordinaryCheckpointBlocked(u,dispatch,uid=getAuth().currentUser?.uid) {
+    if (!u?.id || !uid) return false;
+    if (retiredDepartureStates.has(u)) return true;
+    try {
+      const p=readOrdinaryDeparture(u,uid);
+      if (!p) return false;
+      const active=ordinaryDepartures.get(departureKey(u,uid));
+      return !(active && dispatch?.ordinary && dispatch===active.dispatch &&
+        active.universe===u && !p.missing && JSON.stringify(p)===JSON.stringify(active.record));
+    } catch (error) { return true; }
+  }
+  function assertOrdinaryMutationAllowed(u,uid=getAuth().currentUser?.uid) {
+    if (ordinaryCheckpointBlocked(u,null,uid)) throw pendingDepartureError(ordinaryDepartureStatus(u,uid));
+  }
+  function writeDeparture(key,record) {
+    try {
+      const raw=JSON.stringify(record);
+      window.localStorage.setItem(key,raw);
+      if (window.localStorage.getItem(key)!==raw) throw Error('Scrittura locale non verificata.');
+    } catch (error) { throw storageError(error); }
+  }
+  function assertDepartureRecord(request) {
+    if (window.localStorage.getItem(request.key)!==JSON.stringify(request.record)) throw pendingDepartureError(request.record);
+  }
+  function reserveOrdinaryDeparture(u,uid,dispatch) {
+    const previous=readStoredDeparture(u,uid);
+    if (previous?.status==='pending') throw pendingDepartureError(previous);
+    const key=departureKey(u,uid);
+    if (ordinaryMutations.has(key)) throw Error('Operazione in corso. Attendi prima di inviare la flotta.');
+    const record={accountUid:uid,universeId:u.id,operationId:dispatch.ref.id,
+      originKey:dispatch.doc.originKey,expectedRevision:validRevision(u.serviceRevision)?u.serviceRevision:null,
+      status:'pending',protocol:2,armed:false};
+    writeDeparture(key,record);
+    const request={key,record,universe:u,dispatch,previous,busy:true};
+    ordinaryDepartures.set(key,request);
+    notifyOrdinaryDepartureChanged(u);
+    return request;
+  }
+  function prepareOrdinaryDispatch(u,dispatch,uid) {
+    const request=ordinaryDepartures.get(departureKey(u,uid));
+    if (!request || request.dispatch!==dispatch || ordinaryCheckpointBlocked(u,dispatch,uid))
+      throw pendingDepartureError(request?.record);
+    const expected=validRevision(u.serviceRevision)?u.serviceRevision:null;
+    if (expected===request.record.expectedRevision) return;
+    const record={...request.record,expectedRevision:expected};
+    writeDeparture(request.key,record);
+    request.record=record;
+  }
+  function receiptMatches(record,receipt) {
+    return Boolean(receipt && receipt.operationId===record.operationId && receipt.originKey===record.originKey &&
+      receipt.expectedRevision===record.expectedRevision && terminalStatuses.has(receipt.status) &&
+      receipt.terminalRevision===(record.expectedRevision===null ? null : record.expectedRevision+1) &&
+      (record.profileJoinedAt===undefined || receipt.profileJoinedAt===record.profileJoinedAt));
+  }
+  function settledMatches(record,receipt) {
+    return record?.status==='settled' && receiptMatches(record,receipt) &&
+      record.terminalStatus===receipt.status && record.terminalRevision===receipt.terminalRevision;
+  }
+  function bindOrdinaryReceipt(u,dispatch,uid,playerSnap) {
+    const request=ordinaryDepartures.get(departureKey(u,uid));
+    if (!request || request.dispatch!==dispatch || ordinaryCheckpointBlocked(u,dispatch,uid) || !playerSnap?.exists)
+      throw pendingDepartureError(request?.record);
+    const player=playerSnap.data();
+    const previous=player.ordinaryDispatchReceipt || null;
+    // La ricevuta non ancora riconciliata non può essere sovrascritta.
+    if (previous && previous.acknowledged!==true && !settledMatches(request.previous,previous))
+      throw Object.assign(Error('Ricevuta precedente non riconciliata.'),{code:'ordinary-receipt-unacknowledged'});
+    if (previous?.operationId===request.record.operationId) throw pendingDepartureError(request.record);
+    const joinedAt=Number.isSafeInteger(player.joinedAt) ? player.joinedAt : null;
+    const record={...request.record,armed:true,profileJoinedAt:joinedAt,previousReceiptId:previous?.operationId || null};
+    if (request.record.armed && JSON.stringify(record)!==JSON.stringify(request.record)) throw pendingDepartureError(request.record);
+    if (!request.record.armed) {
+      writeDeparture(request.key,record);
+      request.record=record;
+    }
+    return {operationId:record.operationId,originKey:record.originKey,expectedRevision:record.expectedRevision,
+      terminalRevision:record.expectedRevision===null ? null : record.expectedRevision+1,
+      profileJoinedAt:joinedAt,status:'committed',acknowledged:false};
+  }
+  function ordinaryReceiptAcknowledgement(u,player,uid) {
+    const record=readStoredDeparture(u,uid);
+    const receipt=player.ordinaryDispatchReceipt;
+    return receipt && receipt.acknowledged!==true && settledMatches(record,receipt) ? {...receipt,acknowledged:true} : null;
+  }
+  function clearOrdinaryDeparture(request) {
+    // Soltanto fallimento certamente precedente a qualunque commit.
+    try {
+      assertDepartureRecord(request);
+      if (request.previous) writeDeparture(request.key,request.previous);
+      else {
+        window.localStorage.removeItem(request.key);
+        if (window.localStorage.getItem(request.key)!==null) throw Error('Rimozione locale non verificata.');
+      }
+      ordinaryDepartures.delete(request.key);
+    } catch (error) { throw storageError(error); }
+  }
+  function settleOrdinaryDeparture(request,receipt) {
+    if (!receiptMatches(request.record,receipt)) throw pendingDepartureError(request.record);
+    assertDepartureRecord(request);
+    // Prima la conferma persistente; la ricevuta server rimane fino al prossimo checkpoint.
+    const record={...request.record,status:'settled',terminalStatus:receipt.status,terminalRevision:receipt.terminalRevision};
+    writeDeparture(request.key,record);
+    ordinaryDepartures.delete(request.key);
+  }
+  function verifyTerminalEvidence(record,evidence) {
+    if (!evidence || evidence.uid!==record.accountUid || evidence.universeId!==record.universeId ||
+        evidence.operationId!==record.operationId || !Number.isSafeInteger(evidence.revision)) throw pendingDepartureError(record);
+    if (record.profileJoinedAt!=null && evidence.joinedAt!==record.profileJoinedAt) throw pendingDepartureError(record);
+    const fleet=evidence.fleet;
+    if (fleet && (fleet.id!==record.operationId || fleet.attackerUid!==record.accountUid || fleet.originKey!==record.originKey))
+      throw pendingDepartureError(record);
+    if (receiptMatches(record,evidence.receipt)) {
+      if (evidence.receipt.status==='cancelled' && fleet) throw pendingDepartureError(record);
+      if (evidence.receipt.terminalRevision!==null && evidence.revision<evidence.receipt.terminalRevision) throw pendingDepartureError(record);
+      return evidence.receipt;
+    }
+    // Compatibilità con richieste I01 anteriori al protocollo ricevute:
+    // solo presenza positiva della flotta, mai assenza come prova negativa.
+    if (record.protocol!==2 && fleet && (record.expectedRevision===null || evidence.revision>record.expectedRevision))
+      return {operationId:record.operationId,originKey:record.originKey,expectedRevision:record.expectedRevision,
+        terminalRevision:record.expectedRevision===null ? null : record.expectedRevision+1,status:'committed'};
+    throw pendingDepartureError(record);
+  }
+  async function cancelUncertainDeparture(request,passcode,stillCurrent) {
+    const {record}=request;
+    if (record.protocol!==2 || record.armed!==true || !validRevision(record.expectedRevision) || record.profileJoinedAt==null)
+      throw pendingDepartureError(record);
+    const uid=record.accountUid;
+    const db=getDB(),uni=db.collection('online_universes').doc(record.universeId);
+    const playerRef=uni.collection('players').doc(uid),fleetRef=uni.collection('fleets').doc(record.operationId);
+    await db.runTransaction(async tx=>{
+      if (!stillCurrent()) throw pendingDepartureError(record);
+      assertDepartureRecord(request);
+      const [universe,player,fleet]=await Promise.all([tx.get(uni),tx.get(playerRef),tx.get(fleetRef)]);
+      if (!universe.exists || !player.exists || player.data().joinedAt!==record.profileJoinedAt) throw pendingDepartureError(record);
+      if (universe.data().passcode && universe.data().passcode!==String(passcode || '').trim()) throw Error('Codice stanza errato.');
+      const data=player.data(),receipt=data.ordinaryDispatchReceipt;
+      if (receiptMatches(record,receipt)) return; // esito già terminale, nessuna nuova scrittura
+      if (fleet.exists || (data.serviceRevision ?? 0)!==record.expectedRevision ||
+          (receipt?.operationId || null)!==record.previousReceiptId) throw pendingDepartureError(record);
+      if (!stillCurrent()) throw pendingDepartureError(record);
+      assertDepartureRecord(request);
+      // Barriera sulla stessa revisione letta dal dispatch originale. Non
+      // accredita risorse e non crea una flotta: rende impossibile il commit tardivo.
+      tx.update(playerRef,{serviceRevision:record.expectedRevision+1,ordinaryDispatchReceipt:{
+        operationId:record.operationId,originKey:record.originKey,expectedRevision:record.expectedRevision,
+        terminalRevision:record.expectedRevision+1,profileJoinedAt:record.profileJoinedAt,status:'cancelled',acknowledged:false}});
+    });
+  }
+  async function verifyOrdinaryDeparture(u,{cancel=false,passcode=u?.roomPasscode,isCurrent=null}={}) {
+    const uid=getAuth().currentUser?.uid;
+    const record=ordinaryDepartureStatus(u,uid);
+    if (!record || record.missing) throw pendingDepartureError(record);
+    const key=departureKey(u,uid),activeRequest=ordinaryDepartures.get(key);
+    if (ordinaryRecoveries.has(key) || activeRequest?.busy || activeRequest?.dispatch) throw pendingDepartureError(record);
+    const ui=window.UniversumUI,active=ui?.state?.currentUniverse;
+    const stillCurrent=()=>getAuth().currentUser?.uid===uid && ui?.state?.currentUniverse===active &&
+      (active ? active===u && ui.state.isMultiplayerMode : !ui?.state?.isMultiplayerMode && typeof isCurrent==='function' && isCurrent());
+    if (!stillCurrent()) throw pendingDepartureError(record);
+    ordinaryRecoveries.add(key);
+    notifyOrdinaryDepartureChanged(active);
+    const request={key,record,universe:active};
+    try {
+      assertDepartureRecord(request);
+      if (cancel) await cancelUncertainDeparture(request,passcode,stillCurrent);
+      if (!stillCurrent()) throw pendingDepartureError(record);
+      const fresh=await G.joinOnlineUniverse(u.id,passcode,{serverOnly:true,operationId:record.operationId});
+      const receipt=verifyTerminalEvidence(record,G.ordinaryRecoveryEvidence(fresh));
+      if (!stillCurrent()) throw pendingDepartureError(record);
+      assertDepartureRecord(request);
+      if (active) retiredDepartureStates.add(active);
+      if (activeRequest?.universe) retiredDepartureStates.add(activeRequest.universe);
+      recoveryEpochs.set(key,ordinaryRecoveryEpoch(u,uid)+1);
+      ui.startOnlineGame(fresh);
+      if (getAuth().currentUser?.uid!==uid || ui.state.currentUniverse!==fresh || !ui.state.isMultiplayerMode)
+        throw pendingDepartureError(record);
+      settleOrdinaryDeparture(request,receipt);
+      return {status:receipt.status,operationId:record.operationId};
+    } finally { ordinaryRecoveries.delete(key); notifyOrdinaryDepartureChanged(ui?.state?.currentUniverse); }
+  }
   async function launchOnlineFleet(universeObj, originPlanetIndex, targetCoords, mission, shipsSelected, cargo = {}, options = {}) {
     const auth = getAuth();
     const db = getDB();
     const user = auth.currentUser;
     if (!user) throw new Error('Utente non autenticato.');
+    assertOrdinaryMutationAllowed(universeObj,user.uid);
+    const epoch=ordinaryRecoveryEpoch(universeObj,user.uid);
+    const wasActive=window.UniversumUI?.state?.currentUniverse===universeObj;
 
     const planet = universeObj.planets[originPlanetIndex];
     if (!planet) throw new Error('Pianeta di partenza non valido.');
@@ -203,41 +471,65 @@
 
     const ordinary = !(targeted || dockDispatch || specialist || carrierHangars.length);
     const ref = uniRef.collection('fleets').doc();
-    const committed = await syncPlayerState(universeObj,{force:true,dispatch:{ref,doc:fleetDoc,
-      ordinary,carrierHangars,specialist:Boolean(specialist),
-      debit:{metal:cargoM,crystal:cargoC,deuterium:cargoD+flightStats.fuelCost+blackHoleExtra}}});
-    if (ordinary && committed !== true) throw new Error('Partenza non confermata.');
-    fleetDoc.id = ref.id;
-
+    if (getAuth().currentUser?.uid!==user.uid) throw Error('Account cambiato durante la partenza.');
+    if (ordinaryRecoveryEpoch(universeObj,user.uid)!==epoch) throw pendingDepartureError(null);
+    assertOrdinaryMutationAllowed(universeObj,user.uid);
+    const dispatch={ref,doc:fleetDoc,ordinary,carrierHangars,specialist:Boolean(specialist),
+      debit:{metal:cargoM,crystal:cargoC,deuterium:cargoD+flightStats.fuelCost+blackHoleExtra}};
+    const request=ordinary ? reserveOrdinaryDeparture(universeObj,user.uid,dispatch) : null;
+    if (request) dispatch.outcome={};
     try {
-      const savedSnap = await ref.get();
-      const serverDepartureMs = _tsToMs(savedSnap.exists ? savedSnap.data()?.departureAt : null);
-      if (serverDepartureMs > 0) {
-        const durationMs = arrivalTime - now;
-        const returnDurationMs = returnTime - arrivalTime;
-        fleetDoc.departureTime = serverDepartureMs;
-        if (timeline) {
-          Object.assign(fleetDoc, MCore.buildExplorationTimeline(
-            serverDepartureMs, flightStats.durationSec, holdDurationSec));
-        } else {
-          fleetDoc.arrivalTime = serverDepartureMs + durationMs;
-          fleetDoc.returnTime = fleetDoc.arrivalTime + returnDurationMs;
-        }
-        await ref.update({
-          departureTime: fleetDoc.departureTime,
-          arrivalTime: fleetDoc.arrivalTime,
-          returnTime: fleetDoc.returnTime,
-          ...(timeline ? {
-            zoneArrivalTime: fleetDoc.zoneArrivalTime,
-            explorationEndTime: fleetDoc.explorationEndTime
-          } : {})
-        });
+      let committed;
+      try {
+        committed=await syncPlayerState(universeObj,{force:true,dispatch});
+      } catch (error) {
+        // Un callback mai concluso non ha consegnato scritture al commit SDK.
+        // Se il callback è stato concluso almeno una volta, non dedurre l’esito.
+        if (request && dispatch.outcome.definitePreCommitFailure) clearOrdinaryDeparture(request);
+        else if (request) throw pendingDepartureError(request.record);
+        throw error;
+      } finally {
+        // Il privilegio vale soltanto per la chiamata iniziale, non per un retry.
+        if (request) request.dispatch=null;
       }
-    } catch (e) { /* fallback ai tempi gia' salvati */ }
+      if (ordinary && (committed !== true || getAuth().currentUser?.uid!==user.uid)) throw pendingDepartureError(request.record);
+      fleetDoc.id = ref.id;
 
-    if (!universeObj.fleetsInFlight.some(f=>f.id===ref.id)) universeObj.fleetsInFlight.push(fleetDoc);
+      try {
+        const savedSnap = await ref.get();
+        const serverDepartureMs = _tsToMs(savedSnap.exists ? savedSnap.data()?.departureAt : null);
+        if (serverDepartureMs > 0 && getAuth().currentUser?.uid===user.uid && ordinaryRecoveryEpoch(universeObj,user.uid)===epoch) {
+          const durationMs = arrivalTime - now;
+          const returnDurationMs = returnTime - arrivalTime;
+          fleetDoc.departureTime = serverDepartureMs;
+          if (timeline) {
+            Object.assign(fleetDoc, MCore.buildExplorationTimeline(
+              serverDepartureMs, flightStats.durationSec, holdDurationSec));
+          } else {
+            fleetDoc.arrivalTime = serverDepartureMs + durationMs;
+            fleetDoc.returnTime = fleetDoc.arrivalTime + returnDurationMs;
+          }
+          await ref.update({
+            departureTime: fleetDoc.departureTime,
+            arrivalTime: fleetDoc.arrivalTime,
+            returnTime: fleetDoc.returnTime,
+            ...(timeline ? {
+              zoneArrivalTime: fleetDoc.zoneArrivalTime,
+              explorationEndTime: fleetDoc.explorationEndTime
+            } : {})
+          });
+        }
+      } catch (e) { /* fallback ai tempi gia' salvati */ }
 
-    return fleetDoc;
+      if (!universeObj.fleetsInFlight.some(f=>f.id===ref.id)) universeObj.fleetsInFlight.push(fleetDoc);
+      if (request) {
+        if (getAuth().currentUser?.uid!==user.uid || (wasActive && window.UniversumUI?.state?.currentUniverse!==universeObj))
+          throw pendingDepartureError(request.record);
+        settleOrdinaryDeparture(request,dispatch.outcome.receipt);
+      }
+
+      return fleetDoc;
+    } finally { if (request) { request.busy=false; notifyOrdinaryDepartureChanged(universeObj); } }
   }
 
 
@@ -246,7 +538,8 @@
     const db = getDB();
     const user = auth.currentUser;
     if (!user || !universeObj?.id) throw new Error('Utente non autenticato.');
-
+    const releaseMutation=beginOrdinaryMutation(universeObj,user.uid);
+    try {
     const uniRef = db.collection('online_universes').doc(universeObj.id);
     const fleetRef = uniRef.collection('fleets').doc(fleetId);
     let newArrival = 0;
@@ -267,6 +560,8 @@
         ? MCore.getRecallDurationMs(fleet, now)
         : Math.max(2000, now - Number(fleet.departureTime || now));
       newArrival = now + durationMs;
+      if (getAuth().currentUser?.uid!==user.uid) throw Error('Account cambiato.');
+      assertOrdinaryMutationAllowed(universeObj,user.uid);
       tx.update(fleetRef, {
         status: 'returning',
         phase: 'IN RITORNO',
@@ -276,6 +571,7 @@
       });
     });
 
+    if (getAuth().currentUser?.uid!==user.uid || ordinaryCheckpointBlocked(universeObj,null,user.uid)) return;
     const local = (universeObj.fleetsInFlight || []).find((f) => f.id === fleetId);
     if (local) {
       local.status = 'returning';
@@ -286,6 +582,7 @@
       local.arrivalTime = newArrival;
       local.returnTime = newArrival;
     }
+    } finally { releaseMutation(); }
   }
 
   function _mpNotifyError(context, err) {
@@ -476,6 +773,6 @@
     }
   }
 
-  Object.assign(G, { launchOnlineFleet, recallOnlineFleet, _mpNotifyError, listenOwnFleets, listenIncomingFleets, getLiveFleetDocs, clearLiveFleetDocs, _cleanupReasonText, forceCleanupOnlineFleet, processEmbargoFleets });
+  Object.assign(G, { launchOnlineFleet, ordinaryDepartureStatus, ordinaryDepartureBusy, ordinaryDepartureInitialBusy, beginOrdinaryMutation, ordinaryMutationGuard, ordinaryCheckpointBlocked, ordinaryRecoveryEpoch, assertOrdinaryMutationAllowed, prepareOrdinaryDispatch, bindOrdinaryReceipt, ordinaryReceiptAcknowledgement, verifyOrdinaryDeparture, recallOnlineFleet, _mpNotifyError, listenOwnFleets, listenIncomingFleets, getLiveFleetDocs, clearLiveFleetDocs, _cleanupReasonText, forceCleanupOnlineFleet, processEmbargoFleets });
 
 })();

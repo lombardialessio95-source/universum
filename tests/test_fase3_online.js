@@ -117,7 +117,10 @@ const base = path.resolve(__dirname, '..');
 const modulesOnline = ['context.js', 'foundation.js', 'galattiche.js', 'universes.js', 'sync.js', 'fleet-control.js', 'combat-resolver.js', 'sieges.js', 'communications.js', 'bots.js'];
 
 const reconcileCalls = [];
+const persistentRequests = new Map();
 const win = {
+  // Browser storage is part of the AT05 contract; each harness has its own store.
+  localStorage: {getItem:k=>persistentRequests.get(k)??null,setItem:(k,v)=>persistentRequests.set(k,String(v)),removeItem:k=>persistentRequests.delete(k)},
   fbAuth: { currentUser: { uid: 'u1', displayName: 'Alice' } },
   fbDB: db,
   UniversumUI: { onOnlineReconciled: (info) => reconcileCalls.push(info), state: {} }
