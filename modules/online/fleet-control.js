@@ -515,6 +515,12 @@
     if (specialist) {
       const capacity = Object.entries(cleanShips).reduce((n,[id,q])=>n + q*(window.UniversumData.SHIPS[id]?.cargo || 0),0);
       if (cargoM+cargoC+cargoD > Math.max(0,capacity-flightStats.fuelCost)) throw Error('Capacità della stiva superata.');
+    } else if (!dockDispatch && !carrierHangars.length) {
+      // R10: ordinary planetary departures must reserve travel fuel in the
+      // same cargo capacity as the offline engine. The black-hole fee is
+      // a separate resource debit, not transported cargo.
+      const capacity = Object.entries(cleanShips).reduce((n,[id,q])=>n + q*(window.UniversumData.SHIPS[id]?.cargo || 0),0);
+      if (cargoM+cargoC+cargoD+flightStats.fuelCost > capacity) throw Error('Capacità di carico delle navi insufficiente per risorse + carburante.');
     }
     const targetKey = coordsToKey(targetCoords);
     if (specialist && originKey === targetKey) throw Error('Scegli una colonia di destinazione diversa.');

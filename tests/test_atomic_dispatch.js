@@ -8,7 +8,7 @@ async function runTests(fleetSource,syncSource,universesSource,galatticheSource)
   const eq=(x,y,label)=>{if(JSON.stringify(x)!==JSON.stringify(y))throw Error(label+": "+JSON.stringify(x)+" != "+JSON.stringify(y))};
   const ok=(x,label)=>{if(!x)throw Error(label)};
   const origin="1_1_1", own="1_1_2", enemy="1_1_3", empty="1_1_4";
-  function fixture({versioned=true,queue=false,initial=10,uid="me",uniId="u",storageMap=new Map(),sharedStore=null,counter={next:0},recovery=false}={}) {
+  function fixture({versioned=true,queue=false,initial=10,uid="me",uniId="u",storageMap=new Map(),sharedStore=null,counter={next:0},recovery=false,realCatalog=false}={}) {
     const storageMode={};
     const localStorage={get length(){return storageMap.size},key:i=>[...storageMap.keys()][i]??null,getItem:k=>{if(storageMode.failGet)throw Error("storage read denied");return storageMap.get(k)??null},
       setItem:(k,v)=>{if(storageMode.failSet)throw Error("storage quota");if(!storageMode.dropWrite)storageMap.set(k,String(v))},
@@ -63,6 +63,13 @@ async function runTests(fleetSource,syncSource,universesSource,galatticheSource)
       UniversumMissionsCore:{getMaxFleetSlots:()=>100,getMaxExploreHours:()=>4,getExplorationHoldDurationSec:(u,h)=>h*3600,buildExplorationTimeline:(now,d,h)=>({departureTime:now,zoneArrivalTime:now+d*1000,explorationEndTime:now+(d+h)*1000,arrivalTime:now+(d+h)*1000,returnTime:now+(2*d+h)*1000,travelDurationMs:d*1000,explorationHoldMs:h*1000,returnTravelDurationMs:d*1000})},
       UniversumServices:{ids,forge:ids[0],oracle:ids[1],transfer:(u,m,t,ships)=>ids.some(id=>ships[id]),settlePlanet:()=>{mode.settles++}},
       UniversumHangars:{select:p=>cp(p.mothershipHangars),take:(p,hs)=>{p.mothershipHangars=p.mothershipHangars.filter(h=>!hs.some(x=>x.id===h.id))},normalizePlanet:()=>{},validateMission:()=>{},verifyManifest:x=>x}};
+    if (realCatalog) {
+      W.__UniversumCatalog={}; W.__UniversumGalaxyModules={};
+      for (const file of ['modules/data/ships.js','modules/data/megastructures.js','data.js','modules/galaxy/fleet-dispatch.js','modules/galaxy/megastructures.js'])
+        new Function('window',fs.readFileSync(path.join(__dirname,'..',file),'utf8'))(W);
+      for (const id of ['calculateDistance','getFleetSpeedAndFuel','getInvictusJumpCost'])
+        W.UniversumGalaxy[id]=W.__UniversumGalaxyModules[id];
+    }
     const firebase={firestore:{FieldValue:{serverTimestamp:()=>null,delete:()=>null}}};
     new Function("window","firebase",syncSource)(W,firebase);
     new Function("window","firebase",fleetSource)(W,firebase);
@@ -77,6 +84,21 @@ async function runTests(fleetSource,syncSource,universesSource,galatticheSource)
   }
   async function rejected(f,label){let error;try{await f()}catch(e){error=e}ok(error,label+" expected rejection");return error}
   async function test(name,fn){try{await fn();results.push({name,pass:true})}catch(e){results.push({name,pass:false,error:String(e)})}}
+  // R10: real catalog and travel formulas; only storage/transaction and service adapters are mocked.
+  const r10=(f,cargo,ships={lightFighter:3},opts={},target={g:1,s:1,p:3},mission='attack')=>f.G.launchOnlineFleet(f.u,0,target,mission,ships,cargo,opts);
+  const r10Fuel=(f,ships,target,pct=100)=>f.W.UniversumGalaxy.getFleetSpeedAndFuel(f.u,ships,f.W.UniversumGalaxy.calculateDistance(f.p.coords,target),pct).fuelCost;
+  async function r10Reject(f,fn){const before=f.state(),storage=[...f.storageMap];const e=await rejected(fn,'R10');ok(/Capacità di carico|Capacità della stiva|Stiva Nave Madre/.test(e.message),'capacity rejection: '+e.message);eq(f.state(),before,'no local or remote mutation');eq([...f.storageMap],storage,'no reservation');eq([f.mode.attempts,f.mode.commits,f.mode.writes.length],[0,0,0],'no transaction');}
+  await test('R10 real catalog exact boundary: 150 capacity - 2 fuel = 148',async()=>{const f=fixture({realCatalog:true});eq(r10Fuel(f,{lightFighter:3},{g:1,s:1,p:3}),2,'original fuel');const d=await r10(f,{metal:148});eq(d.cargo.metal,148,'exact load');eq(f.state().remote.resources.deuterium,99998,'fuel debited');eq(f.mode.commits,1,'one commit');});
+  await test('R10 real catalog boundary + 1 rejected before reservation',async()=>{const f=fixture({realCatalog:true});await r10Reject(f,()=>r10(f,{metal:149}));});
+  await test('R10 mixed metal/crystal/deuterium exact',async()=>{const f=fixture({realCatalog:true});await r10(f,{metal:70,crystal:70,deuterium:8});eq(f.state().remote.resources,{metal:930,crystal:930,deuterium:99990},'actual debits');});
+  await test('R10 mixed total + 1 rejected',async()=>{const f=fixture({realCatalog:true});await r10Reject(f,()=>r10(f,{metal:70,crystal:70,deuterium:9}));});
+  await test('R10 low speed allows one more cargo when formula permits',async()=>{const f=fixture({realCatalog:true});eq(r10Fuel(f,{lightFighter:3},{g:1,s:1,p:3},10),1,'minimum fuel');await r10(f,{metal:149},{lightFighter:3},{fuelPercent:10});eq(f.state().remote.resources.deuterium,99999,'minimum debit');});
+  await test('R10 intergalactic fighter without room even for fuel rejected',async()=>{const f=fixture({realCatalog:true});const target={g:9,s:1,p:3};const ships={lightFighter:1};ok(r10Fuel(f,ships,target)>50,'travel exceeds stowage');await r10Reject(f,()=>r10(f,{},ships,{},target));});
+  await test('R10 black-hole fee not treated as cargo',async()=>{const f=fixture({realCatalog:true});const target={g:1,s:1,p:4};const fuel=r10Fuel(f,{lightFighter:3},target);await r10(f,{metal:150-fuel},{lightFighter:3},{blackHole:true},target,'explore');eq(f.state().remote.resources.deuterium,100000-fuel-50000,'separate fee');});
+  await test('R10 empty specialist transfer retains zero-capacity exception',async()=>{const f=fixture({realCatalog:true});await r10(f,{}, {hephaestusForge:1},{},{g:1,s:1,p:2},'deploy');eq(f.state().remote.fleet.hephaestusForge,0,'specialist dispatched');});
+  await test('R10 zero-capacity specialist with cargo rejected',async()=>{const f=fixture({realCatalog:true});await r10Reject(f,()=>r10(f,{metal:1},{hephaestusForge:1},{},{g:1,s:1,p:2},'deploy'));});
+  await test('R10 Invictus supplement remains included',async()=>{const f=fixture({realCatalog:true});const target={g:1,s:4,p:1};const ships={invictus:1};const fuel=r10Fuel(f,ships,target)+f.W.UniversumGalaxy.getInvictusJumpCost(f.p.coords,target,1);const cap=f.W.UniversumData.SHIPS.invictus.cargo;eq(f.W.UniversumGalaxy.getInvictusJumpCost(f.p.coords,target,1),5000,'original supplement');f.p.resources.metal=cap*2;f.store.get(f.planets+origin).resources.metal=cap*2;await r10Reject(f,()=>r10(f,{metal:cap-fuel+1},ships,{},target));});
+  await test('R10 carrier hangar does not enlarge resource stowage',async()=>{const f=fixture({realCatalog:true});const ships={mothership:1},target={g:1,s:1,p:3};const fuel=r10Fuel(f,ships,target);const cap=f.W.UniversumData.SHIPS.mothership.cargo;f.p.resources.metal=cap*2;f.store.get(f.planets+origin).resources.metal=cap*2;await r10Reject(f,()=>r10(f,{metal:cap-fuel+1},ships,{},target));});
   const debit={metal:900,crystal:950,deuterium:99940};
   await test("T01/T11 attack succeeds, atomic planet+fleet+player",async()=>{const f=fixture();const d=await f.launch();const s=f.state();eq(s.local.fleet.lightFighter,7,"local ships");eq(s.remote.fleet.lightFighter,7,"remote ships");eq(s.local.resources,debit,"local resources");eq(s.remote.resources,debit,"remote resources");eq([s.created,s.flights,f.mode.commits,f.mode.calls],[1,1,1,0],"one commit");ok(f.mode.writes.includes(f.fleets+d.id),"fleet in tx");ok(f.mode.writes.includes(f.planets+origin),"planet in tx");ok(f.mode.writes.includes(f.player),"player in tx");eq(d.defenderUid,"enemy","enemy destination");eq(s.player.specialistFlights,["existing"],"specialist registry");eq(f.mode.settles,0,"no new specialist upkeep");eq(s.player.points,f.G.computePlayerPoints(f.u),"points after debit");});
   await test("T02/T04/T05/T06 create fails, no losses",async()=>{const f=fixture();const before=f.state();f.mode.fail="create";await rejected(()=>f.launch(),"create");eq(f.state(),before,"full conservation");eq(f.mode.commits,0,"no commit");});
