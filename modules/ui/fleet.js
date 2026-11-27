@@ -11,6 +11,8 @@
     const { escapeHTML, formatNum, formatDuration, svgIcon, artTag } = UI;
     const st = UI.state;
     const uni = st.currentUniverse;
+    const departure=()=>st.isMultiplayerMode ? window.__UniversumMPModules?.ordinaryDepartureStatus?.(uni) : null;
+    const pending=departure();
     const Data = window.UniversumData;
     const Galaxy = window.UniversumGalaxy;
     const MCore = window.UniversumMissionsCore;
@@ -255,8 +257,9 @@
             <div>Bottino teorico massimo: <strong>${formatNum(raidManifest.reduce((n,h)=>n+h.fighters,0)*1000)}</strong> risorse, soggetto a stiva e protezione nemica.</div>
             ${raidError?`<div class="text-danger">Requisiti mancanti: ${escapeHTML(raidError)}</div>`:''}
           </div>` : ''}
-          <button type="button" id="btn-launch-fleet" class="btn btn-green" style="width:100%;" ${usedSlots >= maxSlots || (st.fleetMission==='incursion' && raidError) ? 'disabled' : ''}>
-            ${svgIcon('rocket')} ${usedSlots >= maxSlots ? `SLOT FLOTTA PIENI (${usedSlots}/${maxSlots})` : 'INVIA FLOTTA IN MISSIONE'}
+          ${pending ? '<p class="text-muted">Partenza in verifica. Non effettuare altre operazioni finché lo stato non è riallineato.</p>' : ''}
+          <button type="button" id="btn-launch-fleet" class="btn btn-green" style="width:100%;" ${(pending ? pending.busy : usedSlots >= maxSlots || (st.fleetMission==='incursion' && raidError)) ? 'disabled' : ''}>
+            ${svgIcon('rocket')} ${pending ? (pending.busy ? 'VERIFICA IN CORSO' : 'VERIFICA PARTENZA') : usedSlots >= maxSlots ? `SLOT FLOTTA PIENI (${usedSlots}/${maxSlots})` : 'INVIA FLOTTA IN MISSIONE'}
           </button>
         </div>
       </div>
@@ -417,9 +420,15 @@
       } catch (error) { UI.toast(error.message, 'error'); }
     });
     document.getElementById('btn-launch-fleet')?.addEventListener('click', async () => {
-      syncTarget();
+      if (st.currentUniverse!==uni || departure()?.busy) return;
+      const button=document.getElementById('btn-launch-fleet');
+      if (st.isMultiplayerMode && button) button.disabled=true;
       try {
         let missionObj;
+        if (departure()) {
+          missionObj=await window.__UniversumMPModules.verifyOrdinaryDeparture(uni);
+        } else {
+        syncTarget();
         const opts = {
           targetGalatticaId: viewport.querySelector('#gal-target')?.value,
           blackHole: st.fleetBlackHole,
@@ -462,7 +471,9 @@
           );
           await window.UniversumDB.save(uni);
         }
+        }
 
+        if (st.currentUniverse?.id!==uni.id) return;
         st.fleetSelection = {};
         st.fleetHangarIds = [];
         st.fleetCargo = { metal: 0, crystal: 0, deuterium: 0 };
@@ -471,8 +482,10 @@
         UI.toast(`Flotta inviata verso [${missionObj.targetCoords.g}:${missionObj.targetCoords.s}:${missionObj.targetCoords.p}]!`, 'success');
         UI.switchView('movements');
       } catch (err) {
-        UI.playSound('error');
-        UI.toast(err.message, 'error');
+        if (err.code==='ordinary-departure-pending') UI.toast(err.message,'info');
+        else { UI.playSound('error'); UI.toast(err.message, 'error'); }
+      } finally {
+        if (st.currentUniverse?.id===uni.id && st.currentView==='fleet' && st.isMultiplayerMode) UI.renderCurrentView();
       }
     });
   };
