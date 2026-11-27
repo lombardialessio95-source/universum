@@ -813,7 +813,7 @@
     try {
       await db.runTransaction(async (tx) => {
         const freshSnap = await tx.get(fleetRef);
-        if (!freshSnap.exists || freshSnap.data().resolved) return;
+        if (!freshSnap.exists || freshSnap.data().resolved || freshSnap.data().status === 'completed') return;
         const fresh = freshSnap.data();
         const homeSnap = await tx.get(creditRef);
         if (!homeSnap.exists || homeSnap.data().ownerUid !== fresh.attackerUid) {
