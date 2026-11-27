@@ -384,3 +384,7 @@ Rapporto ripresentato: integrazione 7e33137e40b56d06d82402eaccb6afeb23edec42, ba
 
 ### AT05-I02 — recupero candidata
 Verificati main e backup/AT05-I01-ca38720 a ca38720f144993a805f84790e15519b7340525cc; candidate/AT05-I02 a 7099402d8596d3a179191b8ff2427ac3145df897, due commit avanti. Sei file modificati: fleet-control.js, sync.js, release-manifest.json, sw.js, test_atomic_dispatch.js, test_exploration_timing.js. Confronto statico mostra A–E e ulteriori adattamenti: esclusione settlePlanet per ordinary, calcolo punti su copia post-addebito, controllo committed===true, mock timeline aggiornato. Richiesta giustificazione e regressioni per questi adattamenti, nessuna approvazione integrazione. Test, ZIP, manifest, SW e CI da confermare; rischi commit ambiguo e concorrenza ancora aperti. Nessuna modifica codice o Rules da CONTROLLO.
+
+
+### AT05-I02 — collaudo ancora incompleto
+Ordinaria non ha consegnato nuovi risultati di collaudo, ZIP o verifica CI. Candidata dichiarata invariata 7099402d8596d3a179191b8ff2427ac3145df897. CONTROLLO non approva integrazione; prossimo incarico circoscritto alla sola esecuzione di tests/test_atomic_dispatch.js sulla candidata esatta e consegna dell'output, exit code e scenari. Se ambiente impedisce esecuzione, indicare blocco concreto. Nessun nuovo intervento sul codice, Rules o main. Gli altri controlli restano aperti.
