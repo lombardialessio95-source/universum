@@ -123,7 +123,7 @@ service cloud.firestore {
     }
     function fleetTimestampClock(v) {
       // Match the Web SDK seconds*1000 + nanos/1000000 (Rules toMillis is int).
-      return v.toMillis()-int(v.nanos()/1000000)+v.nanos()/1000000.0;
+      return v.toMillis() - int(v.nanos() / 1000000) + v.nanos() / 1000000.0;
     }
     function fleetAliasClock(v) {
       let seconds=v is map ? v.get('seconds',null) : null;
