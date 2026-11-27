@@ -105,6 +105,33 @@ async function run() {
   assert.equal(returned.returnReserve,undefined);
   assert.equal(returned.resources.metal,8000);
   assert.equal((await destination.get()).data().inbox.resources.metal,-8000);
+  await inventory.update({ships:[{...returned,operatingFuel:200000}]});
+  const firstDue = launched.arrivalAt + 2*hour;
+  await destination.update({defenseQueue:[{id:'rocketLauncher',remaining:2,
+    unitDurationSec:1800,nextUnitEndTime:firstDue}]});
+  const secondLaunch = await startStagingSiege(db,{...command,siegeId:'interposed'},()=>T+2*hour);
+  const secondLive={...options,siegeId:secondLaunch.siegeId,uid:'defender'};
+  await recoverAtLogin(db,secondLive,()=>secondLaunch.arrivalAt);
+  const secondPrivate=base.collection('supremaRecoveryPrivate').doc(secondLaunch.siegeId);
+  assert.equal(secondLaunch.arrivalAt,firstDue);
+  let currentQueue=(await destination.get()).data().defenseQueue;
+  assert.equal(currentQueue[0].remaining,1);
+  assert.equal(currentQueue[0].nextUnitEndTime,firstDue+hour/2);
+  const simultaneous=await Promise.all(roster.map(uid=>
+    recoverAtLogin(db,{...secondLive,uid},()=>firstDue+hour)));
+  assert.equal(simultaneous.reduce((sum,result)=>sum+result.applied,0),1);
+  assert.deepEqual((await destination.get()).data().defenseQueue,[]);
+  const previous=(await secondPrivate.get()).data();
+  await destination.update({'defenses.rocketLauncher':20});
+  const changed=(await destination.get()).data();
+  for (const actor of roster) {
+    await assert.rejects(()=>recoverAtLogin(db,{...secondLive,uid:actor},()=>secondLaunch.arrivalAt+2*hour),
+      {code:'failed-precondition'});
+  }
+  assert.deepEqual((await secondPrivate.get()).data(),previous);
+  assert.deepEqual((await destination.get()).data(),changed);
+  assert.equal((await secondPrivate.collection('receipts').get()).size,2);
+  console.log('Checkpoint interposto: due recuperi respinti, dati e ricevute invariati.');
   console.log('Emulatore Firestore: lancio, addebito, ondata sul pianeta, ritorno e replay verificati.');
   console.log('Emulatore Firestore: recupero con il solo difensore, concorrenza, due ricevute e riservatezza verificati.');
 }

@@ -72,7 +72,7 @@ function startStagingSiege(db,command,clock=Date.now) {
     const inboxFuel=(origin.inbox?.resources?.deuterium || 0)+settledOrigin.resources.deuterium-unchangedFuel;
     tx.update(originRef,{'inbox.resources.deuterium':inboxFuel});
     tx.update(inventoryRef,{ships:remaining});
-    tx.set(targetLock,{siegeId});
+    tx.set(targetLock,{siegeId,planetVersion:targetDoc.updateTime});
     tx.set(privateRef,{
       attackerUid:uid,defenderUid:target.ownerUid,originKey,targetDocKey:targetKey,revision:0,
       pending:[{id:'wave-0',kind:'wave',sequence:0,at:battle.arrival}],battle,supremes:ships
