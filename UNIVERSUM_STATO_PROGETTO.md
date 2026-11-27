@@ -1,6 +1,6 @@
 # UNIVERSUM — STATO DEL PROGETTO E PASSAGGIO DI CONSEGNE
 
-**Revisione:** 1.54 — 26 novembre 2026  
+**Revisione:** 1.55 — 26 novembre 2026  
 **Tipo:** documento di continuità per ChatGPT, Codex e il proprietario del progetto  
 **Repository:** https://github.com/lombardialessio95-source/universum  
 **Riferimento verificato:** branch `main`, commit `67f71b7f2662ad2c345b0e3e8f2ba4ab4202c099` (25 novembre 2026, 21:24 UTC)  
@@ -466,3 +466,7 @@ Rapporto Ordinaria: candidata locale a6be85f1119ce63629c71126427e92a870a5a162 tr
 
 ### AT03-I03 — blocco di trasferimento checkpoint I02
 Ordinaria riferisce SHA locale a6be85f1119ce63629c71126427e92a870a5a162 non accessibile via GitHub (422), confermato direttamente da CONTROLLO; ZIP progetto datato non idoneo; nessuna modifica o test R10 avviati. Main ricontrollato invariato. CONTROLLO conferma che I02 era candidato esclusivamente locale, non usare ZIP obsoleto o ricostruire correzioni da memoria. Recuperare bundle originale I02 dalla consegna della sessione precedente, verificare SHA, tree caa1a8a4a7c1faba9b6be2a49ad4d86de1186885, cronologia e backup, poi riprendere R10 con autorizzazione rev1.53 invariata. Per passaggi successivi allegare bundle cumulativo del checkpoint al nuovo agente/sessione insieme al prompt; non rendere necessario un push per ogni micropasso. Nessuna integrazione main, Rules, deploy o nuovi interventi. Nessun progresso tecnico R10.
+
+
+### Direttiva permanente — rapporto verificabile per ogni intervento (27/11/2026)
+Approvata da CONTROLLO su indicazione del proprietario. Programmazione ordinaria e profonda devono consegnare un rapporto dettagliato come file scaricabile (Markdown o documento equivalente), anche in caso di esito parziale, sospeso o fallito. Non basta il riepilogo in chat. Contenuto obbligatorio: identità della base e candidata, perimetro autorizzato; implementazione con modifiche, file e motivazioni; collaudo con test superati, falliti e non eseguibili, ambiente e risultati verificabili; regressioni sulle correzioni precedenti; sicurezza e prestazioni (Firebase Rules, atomicità, CPU/GPU/memoria ove pertinenti, distinguere misure da stime); criticità residue e decisioni da sottoporre a CONTROLLO; consegna ZIP, checkpoint Git cumulativo con backup e SHA-256, Rules integrali quando pertinenti, log/patch/prove utili alla verifica indipendente; esito conclusivo completato, parzialmente completato, sospeso o fallito. Per artefatti non prodotti dichiarare il motivo; non inventare risultati o hash. Conservare checkpoint e backup precedenti. Il rapporto deve essere autosufficiente per la verifica di CONTROLLO; nessuna approvazione definitiva basata sul solo riepilogo. Nessuna autorizzazione implicita a modificare gameplay, main, Rules pubblicate o workflow. Direttiva applicabile da subito anche ad AT03-I03 in corso, senza ampliare l'incarico R10. I bundle e ZIP I02 sono stati forniti dal proprietario nella conversazione; il nuovo esecutore deve verificare direttamente identità e integrità del bundle prima di riprendere (non considerare un allegato come prova di collaudo). Nessuna nuova implementazione autorizzata da questa direttiva.
