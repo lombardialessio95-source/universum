@@ -73,7 +73,7 @@ const win={__UniversumMPModules:G,
   },
   UniversumEngine:{normalizeResearchState:()=>{}}
 };
-const firebase={firestore:{FieldValue:{increment:n=>n}}};
+const firebase={firestore:{FieldValue:{increment:n=>n,serverTimestamp:()=>({seconds:1,nanoseconds:0})}}};
 vm.runInNewContext(online,{window:win,console,firebase,Date,Math});
 const uniRef='online_universes/d07room';
 store.set(uniRef,{name:'D07',speed:1,galaxies:1,systemsPerGalaxy:20,playerCount:0});

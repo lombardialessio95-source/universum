@@ -329,7 +329,9 @@
     // non può diventare autorizzato soltanto perché era già nella coda.
     if (blocked()) return rejectBlocked();
     const previous = checkpoints.get(u);
-    const operation = (previous || Promise.resolve()).catch(()=>{}).then(()=>{
+    const operation = (previous || Promise.resolve()).catch(()=>{}).then(async()=>{
+      if (getAuth().currentUser?.uid!==uid || blocked()) return rejectBlocked();
+      if (!options.dispatch?.ordinary) await G.acknowledgeSettledDeparture?.(u,uid);
       if (getAuth().currentUser?.uid!==uid || blocked()) return rejectBlocked();
       return saveCheckpoint(u,{...options,recoveryEpoch:epoch});
     });
@@ -413,7 +415,7 @@
 
     const outcome=dispatch?.ordinary ? dispatch.outcome : null;
     if (dispatch?.ordinary && !outcome) throw Error('Dispatch ordinario non autorizzato.');
-    let terminalReceipt;
+    let terminalReceipt, debitProof;
     const checkpointBlocked=()=>G.ordinaryRecoveryEpoch?.(universeObj,user.uid)!==recoveryEpoch ||
       G.ordinaryCheckpointBlocked?.(universeObj,dispatch,user.uid);
     try { await db.runTransaction(async (tx) => {
@@ -424,13 +426,17 @@
       moonUpdates = [];
       const entries = planets.map((p) => ({ p, ref: planetsCol.doc(coordsToKey(p.coords)) }));
       const snaps = await Promise.all(entries.map((e) => tx.get(e.ref)));
-      const playerSnap = versioned || dispatch?.ordinary ? await tx.get(playerRef) : null;
+      const identitySnap=await tx.get(playerRef);
+      const identity=identitySnap?.data() || {};
+      const profileCreated=identity.at05ProfileCreatedAt;
+      if ((universeObj.at05ProfileIncarnation ?? null)!==(profileCreated==null ? null : `${profileCreated.seconds}:${profileCreated.nanoseconds}`)) throw conflict();
+      const playerSnap = versioned || dispatch?.ordinary ? identitySnap : null;
       const player = playerSnap?.data() || {};
       if (versioned && (player.serviceRevision || 0) !== expected) throw conflict();
-      if (dispatch?.ordinary && !versioned && player.serviceRevision!=null) throw conflict();
+      if (!versioned && (identity.serviceRevision!=null || identity.ordinaryDispatchReceipt)) throw conflict();
       if (dispatch?.ordinary && versioned && (!Number.isSafeInteger(expected) || expected<0 || expected>=Number.MAX_SAFE_INTEGER)) throw conflict();
-      terminalReceipt=dispatch?.ordinary ? G.bindOrdinaryReceipt(universeObj,dispatch,user.uid,playerSnap) :
-        playerSnap?.exists ? G.ordinaryReceiptAcknowledgement?.(universeObj,player,user.uid) : null;
+      terminalReceipt=dispatch?.ordinary ? G.bindOrdinaryReceipt(universeObj,dispatch,user.uid,playerSnap) : null;
+      if (!dispatch?.ordinary && identity.ordinaryDispatchReceipt?.acknowledged===false) throw Object.assign(Error('Ricevuta da riconciliare.'),{code:'ordinary-departure-pending'});
       if (galLaunch && ((universeObj.galatticaVersions?.[galLaunch.key] || 0)!==galLaunch.expected ||
           JSON.stringify({...universeObj.galattiche.find(g=>g.id===galLaunch.state.id),resources:null})!==JSON.stringify({...JSON.parse(galLaunch.before),resources:null}))) throw conflict();
       galWrites=(universeObj.galattiche?.length || Object.keys(universeObj.galatticaVersions || {}).length) ? await G.prepareGalattiche(tx,universeObj,user.uid,galLaunch) : [];
@@ -488,6 +494,10 @@
         const dockPlanet=dockState?.planets.find(item=>item.id===p.id);
         const model = sending ? clone(dockPlanet || p) : dockPlanet || p;
         if (sending) {
+          if (dispatch.ordinary) debitProof={
+            shipsBefore:Object.fromEntries(Object.keys(dispatch.doc.ships).map(id=>[id,Math.floor(Number(model.fleet[id]||0)+Number(inbox.fleet?.[id]||0))])),
+            resourcesBefore:Object.fromEntries(_INBOX_RES_KEYS.map(k=>[k,Math.floor(Number(model.resources[k]||0)+Number(inbox.resources?.[k]||0))])),
+            resourcesDebit:{...dispatch.debit}};
           debitFleet(universeObj,model,dispatch,nowTs);
           if (dispatch.ordinary) pointState = {...universeObj,
             planets:universeObj.planets.map(home=>home===p ? model : home)};
@@ -522,6 +532,7 @@
           mothershipHangars: savedHangars,
           ...(model.services ? {services:model.services} : {}),
           ...(versioned ? {serviceRevision:expected+1} : {}),
+          ...(sending && dispatch.ordinary ? {ordinaryDispatchId:dispatch.ref.id} : {}),
           buildQueue: p.buildQueue || [],
           shipyardQueue: p.shipyardQueue || [],
           defenseQueue: p.defenseQueue || [],
@@ -562,6 +573,7 @@
       }
       if (galLaunch?.ref) tx.set(galLaunch.ref,galLaunch.doc);
       if (dispatch) tx.set(dispatch.ref,dispatch.doc);
+      if (dispatch?.ordinary) tx.set(uniRef.collection('ordinaryDispatchOps').doc(dispatch.ref.id),{uid:user.uid,receipt:terminalReceipt,proof:debitProof});
       const playerPayload = {
         ...(terminalReceipt ? {ordinaryDispatchReceipt:terminalReceipt} : {}),
         ...(versioned ? {serviceRevision:expected+1,serviceCheckpoint:nowTs,

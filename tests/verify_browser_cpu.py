@@ -78,7 +78,8 @@ def main():
           window.UniversumUI={state:{currentView:'overview',planetAnimId:null},
             stopChatListeners(){},updateCommBadges(){},playSound(){},
             refreshPlanetSelector(){},updateTopBarNumbers(){},switchView(){},
-            startGameLoop(){},toast(){},renderCurrentView(){}};
+            startGameLoop(){},toast(){},renderCurrentView(){},
+            _ordinaryEntryGeneration:0,updateOrdinaryDeparturePanel(){return false;}};
           window.UniversumEngine={processOfflineProgress:()=>({offlineSeconds:0})};
           window.UniversumGalaxy={processFleetsAndBots(){}};
         }''')

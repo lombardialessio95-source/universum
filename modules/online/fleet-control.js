@@ -43,6 +43,8 @@
   const ordinaryDepartures = new Map();
   const ordinaryRecoveries = new Set();
   const ordinaryMutations = new Map();
+  const ordinaryAdmissions = new Map();
+  const acknowledgedReceipts = new Map();
   const retiredDepartureStates = new WeakSet();
   const recoveryEpochs = new Map();
   const departureKey = (u,uid=getAuth().currentUser?.uid) =>
@@ -82,15 +84,15 @@
   }
   function ordinaryDepartureStatus(u,uid=getAuth().currentUser?.uid) {
     if (!u?.id || !uid) return null;
-    return readOrdinaryDeparture(u,uid);
+    return readOrdinaryDeparture(u,uid) || (ordinaryAdmissions.has(departureKey(u,uid)) ? {accountUid:uid,universeId:u.id,admissionOnly:true} : null);
   }
   function ordinaryDepartureBusy(u,uid=getAuth().currentUser?.uid) {
     if (!u?.id || !uid) return false;
     const key=departureKey(u,uid);
-    return ordinaryRecoveries.has(key) || Boolean(ordinaryDepartures.get(key)?.busy);
+    return ordinaryRecoveries.has(key) || ordinaryAdmissions.has(key) || Boolean(ordinaryDepartures.get(key)?.busy);
   }
   function ordinaryDepartureInitialBusy(u,uid=getAuth().currentUser?.uid) {
-    return Boolean(u?.id && uid && ordinaryDepartures.get(departureKey(u,uid))?.busy);
+    return Boolean(u?.id && uid && (ordinaryAdmissions.has(departureKey(u,uid)) || ordinaryDepartures.get(departureKey(u,uid))?.busy));
   }
   function notifyOrdinaryDepartureChanged(u) {
     try { window.UniversumUI?.onOrdinaryDepartureChanged?.(u); }
@@ -124,19 +126,19 @@
   function ordinaryRecoveryEpoch(u,uid=getAuth().currentUser?.uid) {
     return u?.id && uid ? recoveryEpochs.get(departureKey(u,uid)) || 0 : 0;
   }
-  function ordinaryCheckpointBlocked(u,dispatch,uid=getAuth().currentUser?.uid) {
+  function ordinaryCheckpointBlocked(u,dispatch,uid=getAuth().currentUser?.uid,admission=null) {
     if (!u?.id || !uid) return false;
     if (retiredDepartureStates.has(u)) return true;
     try {
       const p=readOrdinaryDeparture(u,uid);
-      if (!p) return false;
+      if (!p) return ordinaryAdmissions.has(departureKey(u,uid)) && ordinaryAdmissions.get(departureKey(u,uid))!==admission;
       const active=ordinaryDepartures.get(departureKey(u,uid));
       return !(active && dispatch?.ordinary && dispatch===active.dispatch &&
         active.universe===u && !p.missing && JSON.stringify(p)===JSON.stringify(active.record));
     } catch (error) { return true; }
   }
-  function assertOrdinaryMutationAllowed(u,uid=getAuth().currentUser?.uid) {
-    if (ordinaryCheckpointBlocked(u,null,uid)) throw pendingDepartureError(ordinaryDepartureStatus(u,uid));
+  function assertOrdinaryMutationAllowed(u,uid=getAuth().currentUser?.uid,admission=null) {
+    if (ordinaryCheckpointBlocked(u,null,uid,admission)) throw pendingDepartureError(ordinaryDepartureStatus(u,uid));
   }
   function writeDeparture(key,record) {
     try {
@@ -172,11 +174,13 @@
     writeDeparture(request.key,record);
     request.record=record;
   }
+  const incarnation = value => value == null ? null : `${value.seconds}:${value.nanoseconds}`;
   function receiptMatches(record,receipt) {
     return Boolean(receipt && receipt.operationId===record.operationId && receipt.originKey===record.originKey &&
       receipt.expectedRevision===record.expectedRevision && terminalStatuses.has(receipt.status) &&
       receipt.terminalRevision===(record.expectedRevision===null ? null : record.expectedRevision+1) &&
-      (record.profileJoinedAt===undefined || receipt.profileJoinedAt===record.profileJoinedAt));
+      (record.profileJoinedAt===undefined || receipt.profileJoinedAt===record.profileJoinedAt) &&
+      (record.profileIncarnation===undefined || incarnation(receipt.profileCreatedAt)===record.profileIncarnation));
   }
   function settledMatches(record,receipt) {
     return record?.status==='settled' && receiptMatches(record,receipt) &&
@@ -189,11 +193,11 @@
     const player=playerSnap.data();
     const previous=player.ordinaryDispatchReceipt || null;
     // La ricevuta non ancora riconciliata non può essere sovrascritta.
-    if (previous && previous.acknowledged!==true && !settledMatches(request.previous,previous))
+    if (previous && previous.acknowledged!==true)
       throw Object.assign(Error('Ricevuta precedente non riconciliata.'),{code:'ordinary-receipt-unacknowledged'});
     if (previous?.operationId===request.record.operationId) throw pendingDepartureError(request.record);
     const joinedAt=Number.isSafeInteger(player.joinedAt) ? player.joinedAt : null;
-    const record={...request.record,armed:true,profileJoinedAt:joinedAt,previousReceiptId:previous?.operationId || null};
+    const record={...request.record,armed:true,profileJoinedAt:joinedAt,profileIncarnation:incarnation(player.at05ProfileCreatedAt),previousReceiptId:previous?.operationId || null};
     if (request.record.armed && JSON.stringify(record)!==JSON.stringify(request.record)) throw pendingDepartureError(request.record);
     if (!request.record.armed) {
       writeDeparture(request.key,record);
@@ -201,12 +205,42 @@
     }
     return {operationId:record.operationId,originKey:record.originKey,expectedRevision:record.expectedRevision,
       terminalRevision:record.expectedRevision===null ? null : record.expectedRevision+1,
-      profileJoinedAt:joinedAt,status:'committed',acknowledged:false};
+      profileJoinedAt:joinedAt,profileCreatedAt:player.at05ProfileCreatedAt ?? null,status:'committed',acknowledged:false};
   }
   function ordinaryReceiptAcknowledgement(u,player,uid) {
     const record=readStoredDeparture(u,uid);
     const receipt=player.ordinaryDispatchReceipt;
     return receipt && receipt.acknowledged!==true && settledMatches(record,receipt) ? {...receipt,acknowledged:true} : null;
+  }
+  // L'ack non è un checkpoint: non può modificare risorse, revisione o esito.
+  async function acknowledgeSettledDeparture(u,uid,admission=null) {
+    const record=readStoredDeparture(u,uid);
+    if (record?.status!=='settled' || acknowledgedReceipts.get(departureKey(u,uid))===record.operationId) return;
+    const ref=getDB().collection('online_universes').doc(u.id).collection('players').doc(uid);
+    const result=await getDB().runTransaction(async tx=>{
+      if (getAuth().currentUser?.uid!==uid || ordinaryCheckpointBlocked(u,null,uid,admission)) throw pendingDepartureError(record);
+      const snap=await tx.get(ref);
+      if (!snap.exists || incarnation(snap.data().at05ProfileCreatedAt)!==(record.profileIncarnation ?? null)) throw pendingDepartureError(record);
+      const data=snap.data();
+      if (validRevision(u.serviceRevision) ? (data.serviceRevision ?? 0)!==u.serviceRevision : data.serviceRevision!=null) return false;
+      const receipt=data.ordinaryDispatchReceipt;
+      if (!settledMatches(record,receipt)) return false;
+      if (receipt.acknowledged!==true) tx.update(ref,{ordinaryDispatchReceipt:{...receipt,acknowledged:true}});
+      return true;
+    });
+    if (result) acknowledgedReceipts.set(departureKey(u,uid),record.operationId);
+  }
+  function adoptOrdinaryReceipt(u,uid,player,raise=true) {
+    const r=player.ordinaryDispatchReceipt;
+    if (!r || r.acknowledged===true) return;
+    if (getAuth().currentUser?.uid!==uid || !terminalStatuses.has(r.status) ||
+        typeof r.operationId!=='string' || !r.operationId || r.operationId.includes('/') ||
+        typeof r.originKey!=='string' || r.profileJoinedAt!==(player.joinedAt ?? null) ||
+        incarnation(r.profileCreatedAt)!==incarnation(player.at05ProfileCreatedAt)) throw pendingDepartureError(r);
+    if (!readOrdinaryDeparture(u,uid)) writeDeparture(departureKey(u,uid),{
+      accountUid:uid,universeId:u.id,operationId:r.operationId,originKey:r.originKey,expectedRevision:r.expectedRevision,
+      status:'pending',protocol:2,armed:true,profileJoinedAt:r.profileJoinedAt,profileIncarnation:incarnation(r.profileCreatedAt),previousReceiptId:r.operationId});
+    if (raise) throw pendingDepartureError(r);
   }
   function clearOrdinaryDeparture(request) {
     // Soltanto fallimento certamente precedente a qualunque commit.
@@ -232,13 +266,18 @@
     if (!evidence || evidence.uid!==record.accountUid || evidence.universeId!==record.universeId ||
         evidence.operationId!==record.operationId || !Number.isSafeInteger(evidence.revision)) throw pendingDepartureError(record);
     if (record.profileJoinedAt!=null && evidence.joinedAt!==record.profileJoinedAt) throw pendingDepartureError(record);
+    if (incarnation(evidence.profileCreatedAt)!==(record.profileIncarnation ?? null)) throw pendingDepartureError(record);
     const fleet=evidence.fleet;
     if (fleet && (fleet.id!==record.operationId || fleet.attackerUid!==record.accountUid || fleet.originKey!==record.originKey))
       throw pendingDepartureError(record);
-    if (receiptMatches(record,evidence.receipt)) {
-      if (evidence.receipt.status==='cancelled' && fleet) throw pendingDepartureError(record);
-      if (evidence.receipt.terminalRevision!==null && evidence.revision<evidence.receipt.terminalRevision) throw pendingDepartureError(record);
-      return evidence.receipt;
+    if (evidence.operationReceipt && evidence.receipt?.operationId===record.operationId &&
+        (!receiptMatches(record,evidence.receipt) || evidence.receipt.status!==evidence.operationReceipt.status))
+      throw pendingDepartureError(record);
+    const terminal=evidence.operationReceipt || evidence.receipt;
+    if (receiptMatches(record,terminal)) {
+      if (terminal.status==='cancelled' && fleet) throw pendingDepartureError(record);
+      if (terminal.terminalRevision!==null && evidence.revision<terminal.terminalRevision) throw pendingDepartureError(record);
+      return terminal;
     }
     // Compatibilità con richieste I01 anteriori al protocollo ricevute:
     // solo presenza positiva della flotta, mai assenza come prova negativa.
@@ -257,20 +296,27 @@
     await db.runTransaction(async tx=>{
       if (!stillCurrent()) throw pendingDepartureError(record);
       assertDepartureRecord(request);
-      const [universe,player,fleet]=await Promise.all([tx.get(uni),tx.get(playerRef),tx.get(fleetRef)]);
-      if (!universe.exists || !player.exists || player.data().joinedAt!==record.profileJoinedAt) throw pendingDepartureError(record);
+      const opRef=uni.collection('ordinaryDispatchOps').doc(record.operationId);
+      const [universe,player,fleet,operation]=await Promise.all([tx.get(uni),tx.get(playerRef),tx.get(fleetRef),tx.get(opRef)]);
+      if (!universe.exists || !player.exists || player.data().joinedAt!==record.profileJoinedAt || incarnation(player.data().at05ProfileCreatedAt)!==(record.profileIncarnation ?? null)) throw pendingDepartureError(record);
       if (universe.data().passcode && universe.data().passcode!==String(passcode || '').trim()) throw Error('Codice stanza errato.');
       const data=player.data(),receipt=data.ordinaryDispatchReceipt;
+      if (operation.exists) {
+        if (operation.data().uid===uid && receiptMatches(record,operation.data().receipt)) return;
+        throw pendingDepartureError(record);
+      }
       if (receiptMatches(record,receipt)) return; // esito già terminale, nessuna nuova scrittura
+      if (receipt && receipt.acknowledged!==true) throw pendingDepartureError(record);
       if (fleet.exists || (data.serviceRevision ?? 0)!==record.expectedRevision ||
           (receipt?.operationId || null)!==record.previousReceiptId) throw pendingDepartureError(record);
       if (!stillCurrent()) throw pendingDepartureError(record);
       assertDepartureRecord(request);
       // Barriera sulla stessa revisione letta dal dispatch originale. Non
       // accredita risorse e non crea una flotta: rende impossibile il commit tardivo.
-      tx.update(playerRef,{serviceRevision:record.expectedRevision+1,ordinaryDispatchReceipt:{
-        operationId:record.operationId,originKey:record.originKey,expectedRevision:record.expectedRevision,
-        terminalRevision:record.expectedRevision+1,profileJoinedAt:record.profileJoinedAt,status:'cancelled',acknowledged:false}});
+      const terminal={operationId:record.operationId,originKey:record.originKey,expectedRevision:record.expectedRevision,
+        terminalRevision:record.expectedRevision+1,profileJoinedAt:record.profileJoinedAt,profileCreatedAt:data.at05ProfileCreatedAt ?? null,status:'cancelled',acknowledged:false};
+      tx.set(opRef,{uid,receipt:terminal});
+      tx.update(playerRef,{serviceRevision:record.expectedRevision+1,ordinaryDispatchReceipt:terminal});
     });
   }
   async function verifyOrdinaryDeparture(u,{cancel=false,passcode=u?.roomPasscode,isCurrent=null}={}) {
@@ -291,7 +337,8 @@
       if (cancel) await cancelUncertainDeparture(request,passcode,stillCurrent);
       if (!stillCurrent()) throw pendingDepartureError(record);
       const fresh=await G.joinOnlineUniverse(u.id,passcode,{serverOnly:true,operationId:record.operationId});
-      const receipt=verifyTerminalEvidence(record,G.ordinaryRecoveryEvidence(fresh));
+      const evidence=G.ordinaryRecoveryEvidence(fresh);
+      const receipt=verifyTerminalEvidence(record,evidence);
       if (!stillCurrent()) throw pendingDepartureError(record);
       assertDepartureRecord(request);
       if (active) retiredDepartureStates.add(active);
@@ -301,15 +348,33 @@
       if (getAuth().currentUser?.uid!==uid || ui.state.currentUniverse!==fresh || !ui.state.isMultiplayerMode)
         throw pendingDepartureError(record);
       settleOrdinaryDeparture(request,receipt);
+      if (evidence.receipt?.operationId!==record.operationId && evidence.receipt?.acknowledged===false)
+        adoptOrdinaryReceipt(fresh,uid,{ordinaryDispatchReceipt:evidence.receipt,joinedAt:evidence.joinedAt,at05ProfileCreatedAt:evidence.profileCreatedAt},false);
       return {status:receipt.status,operationId:record.operationId};
     } finally { ordinaryRecoveries.delete(key); notifyOrdinaryDepartureChanged(ui?.state?.currentUniverse); }
   }
   async function launchOnlineFleet(universeObj, originPlanetIndex, targetCoords, mission, shipsSelected, cargo = {}, options = {}) {
+    const uid=getAuth().currentUser?.uid;
+    if (!uid || !universeObj?.id) throw Error('Utente non autenticato.');
+    const key=departureKey(universeObj,uid);
+    if (ordinaryAdmissions.has(key)) throw pendingDepartureError(null);
+    const likelyOrdinary=mission!=='destroyGalattica' && !['invictus','crepuscolo','hephaestusForge','prometheusOracle','mothership'].some(id=>Number(shipsSelected?.[id])>0);
+    const admission=likelyOrdinary ? {} : null;
+    if (likelyOrdinary) {
+      assertOrdinaryMutationAllowed(universeObj,uid);
+      if (ordinaryMutations.has(key)) throw Error('Operazione in corso. Attendi prima di inviare la flotta.');
+      ordinaryAdmissions.set(key,admission);
+      notifyOrdinaryDepartureChanged(universeObj);
+    }
+    try { return await launchOnlineFleetImpl(universeObj,originPlanetIndex,targetCoords,mission,shipsSelected,cargo,options,admission); }
+    finally { if (likelyOrdinary) {ordinaryAdmissions.delete(key);notifyOrdinaryDepartureChanged(universeObj);} }
+  }
+  async function launchOnlineFleetImpl(universeObj, originPlanetIndex, targetCoords, mission, shipsSelected, cargo, options,admission) {
     const auth = getAuth();
     const db = getDB();
     const user = auth.currentUser;
     if (!user) throw new Error('Utente non autenticato.');
-    assertOrdinaryMutationAllowed(universeObj,user.uid);
+    assertOrdinaryMutationAllowed(universeObj,user.uid,admission);
     const epoch=ordinaryRecoveryEpoch(universeObj,user.uid);
     const wasActive=window.UniversumUI?.state?.currentUniverse===universeObj;
 
@@ -470,10 +535,15 @@
     };
 
     const ordinary = !(targeted || dockDispatch || specialist || carrierHangars.length);
+    if (ordinary && universeObj.serviceRevision!==undefined && !validRevision(universeObj.serviceRevision))
+      throw Error('Revisione non valida. Riapri la partita multiplayer.');
+    if (ordinary && readStoredDeparture(universeObj,user.uid)?.status==='settled')
+      await acknowledgeSettledDeparture(universeObj,user.uid,admission);
+    if (wasActive && window.UniversumUI?.state?.currentUniverse!==universeObj) throw pendingDepartureError(null);
     const ref = uniRef.collection('fleets').doc();
     if (getAuth().currentUser?.uid!==user.uid) throw Error('Account cambiato durante la partenza.');
     if (ordinaryRecoveryEpoch(universeObj,user.uid)!==epoch) throw pendingDepartureError(null);
-    assertOrdinaryMutationAllowed(universeObj,user.uid);
+    assertOrdinaryMutationAllowed(universeObj,user.uid,admission);
     const dispatch={ref,doc:fleetDoc,ordinary,carrierHangars,specialist:Boolean(specialist),
       debit:{metal:cargoM,crystal:cargoC,deuterium:cargoD+flightStats.fuelCost+blackHoleExtra}};
     const request=ordinary ? reserveOrdinaryDeparture(universeObj,user.uid,dispatch) : null;
@@ -773,6 +843,6 @@
     }
   }
 
-  Object.assign(G, { launchOnlineFleet, ordinaryDepartureStatus, ordinaryDepartureBusy, ordinaryDepartureInitialBusy, beginOrdinaryMutation, ordinaryMutationGuard, ordinaryCheckpointBlocked, ordinaryRecoveryEpoch, assertOrdinaryMutationAllowed, prepareOrdinaryDispatch, bindOrdinaryReceipt, ordinaryReceiptAcknowledgement, verifyOrdinaryDeparture, recallOnlineFleet, _mpNotifyError, listenOwnFleets, listenIncomingFleets, getLiveFleetDocs, clearLiveFleetDocs, _cleanupReasonText, forceCleanupOnlineFleet, processEmbargoFleets });
+  Object.assign(G, { launchOnlineFleet, ordinaryDepartureStatus, ordinaryDepartureBusy, ordinaryDepartureInitialBusy, beginOrdinaryMutation, ordinaryMutationGuard, ordinaryCheckpointBlocked, ordinaryRecoveryEpoch, assertOrdinaryMutationAllowed, prepareOrdinaryDispatch, bindOrdinaryReceipt, ordinaryReceiptAcknowledgement, acknowledgeSettledDeparture, adoptOrdinaryReceipt, verifyOrdinaryDeparture, recallOnlineFleet, _mpNotifyError, listenOwnFleets, listenIncomingFleets, getLiveFleetDocs, clearLiveFleetDocs, _cleanupReasonText, forceCleanupOnlineFleet, processEmbargoFleets });
 
 })();

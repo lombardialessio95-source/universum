@@ -103,10 +103,179 @@ service cloud.firestore {
     }
 
     function validOwnerCheckpoint(uniId) {
-      return !('serviceRevision' in resource.data)
-        || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['lastUpdated','serviceRevision'])
+      let changed=request.resource.data.diff(resource.data).affectedKeys();
+      let protectedOrigin=('ordinaryDispatchId' in resource.data)
+        && resource.data.ordinaryDispatchId==request.resource.data.get('ordinaryDispatchId','')
+        && resource.data.get('isNpc',false)==false;
+      // A settled receipt never makes an old, unversioned stock checkpoint valid.
+      // Inbox credits and other non-checkpoint updates retain the legacy path.
+      return ((!protectedOrigin && (!('serviceRevision' in resource.data)
+          || !changed.hasAny(['lastUpdated','serviceRevision'])))
+        || (protectedOrigin && !changed.hasAny(['lastUpdated','serviceRevision','resources','fleet','defenses','mothershipHangars','buildQueue','shipyardQueue','defenseQueue','services','bacinoSpaziale'])))
         || (request.resource.data.serviceRevision == getAfter(/databases/$(database)/documents/online_universes/$(uniId)/players/$(request.auth.uid)).data.serviceRevision
           && request.resource.data.serviceRevision == get(/databases/$(database)/documents/online_universes/$(uniId)/players/$(request.auth.uid)).data.get('serviceRevision',0) + 1);
+    }
+
+    // AT05: terminal evidence is independent of the lifetime of the fleet/profile.
+    function opPath(uniId, opId) {
+      return /databases/$(database)/documents/online_universes/$(uniId)/ordinaryDispatchOps/$(opId);
+    }
+    function pilotPath(uniId, uid) {
+      return /databases/$(database)/documents/online_universes/$(uniId)/players/$(uid);
+    }
+    function flightPath(uniId, opId) {
+      return /databases/$(database)/documents/online_universes/$(uniId)/fleets/$(opId);
+    }
+    function originPath(uniId, key) {
+      return /databases/$(database)/documents/online_universes/$(uniId)/planets/$(key);
+    }
+    function ordinaryHumanFleet(d) {
+      return !('originGalatticaKey' in d)
+        && !('targetGalatticaId' in d)
+        && !d.ships.keys().hasAny(['hephaestusForge','prometheusOracle','invictus','crepuscolo'])
+        && d.get('carrierHangars', []).size() == 0;
+    }
+    // Reject empty/mislabelled exemptions, preserve the original special paths.
+    function validSpecialDispatch(uniId, d) {
+      return ('originGalatticaKey' in d)
+        || (d.get('targetGalatticaId', '') is string && d.get('targetGalatticaId', '') != ''
+          && d.mission == 'destroyMoon' && d.ships.get('deathStar',0) > 0
+          && get(/databases/$(database)/documents/online_universes/$(uniId)/galatticheMap/$(d.targetGalatticaId)).data.ownerUid == d.defenderUid
+          && d.defenderUid != request.auth.uid
+          && get(/databases/$(database)/documents/online_universes/$(uniId)/galatticheMap/$(d.targetGalatticaId)).data.coordKey == d.targetKey)
+        || d.ships.get('hephaestusForge',0) > 0 || d.ships.get('prometheusOracle',0) > 0
+        || (('originPlanetId' in d) && ('birthBacinoAt' in d)
+          && (d.ships.get('invictus',0)>0 || d.ships.get('crepuscolo',0)>0)
+          && get(originPath(uniId,d.originKey)).data.id == d.originPlanetId
+          && get(originPath(uniId,d.originKey)).data.bacinoSpaziale.status=='active'
+          && getAfter(originPath(uniId,d.originKey)).data.bacinoSpaziale!=get(originPath(uniId,d.originKey)).data.bacinoSpaziale)
+        || (d.ships.get('mothership',0)>0 && d.get('carrierHangars',[]).size()==d.ships.mothership);
+    }
+    function validTerminalShape(r, before, after) {
+      return r is map && r.keys().hasOnly(['operationId','originKey','expectedRevision','terminalRevision','profileJoinedAt','profileCreatedAt','status','acknowledged'])
+        && r.operationId is string && r.operationId.size()>0 && r.originKey is string
+        && r.profileJoinedAt == before.get('joinedAt',null)
+        && r.get('profileCreatedAt',null) == before.get('at05ProfileCreatedAt',null)
+        && r.acknowledged == false && r.status in ['committed','cancelled']
+        && (r.status!='cancelled' || after.diff(before).affectedKeys().hasOnly(['serviceRevision','ordinaryDispatchReceipt']))
+        && ((r.expectedRevision is int && r.expectedRevision>=0 && r.expectedRevision<9007199254740991
+          && r.expectedRevision==before.get('serviceRevision',0)
+          && r.terminalRevision==r.expectedRevision+1 && after.serviceRevision==r.terminalRevision)
+          || (r.status=='committed' && r.expectedRevision==null && r.terminalRevision==null
+            && !('serviceRevision' in before) && !('serviceRevision' in after)
+            && before.get('ordinaryDispatchReceipt',null)==null));
+    }
+    function nonnegative(n) { return n<0 ? 0 : n; }
+    function shipDebited(q, balance, available) {
+      return q is int && q>0 && balance>=0 && balance+q<=available;
+    }
+    function resourceDebited(after,proof,id) {
+      return proof.resourcesBefore[id] is int && proof.resourcesDebit[id] is int && proof.resourcesDebit[id]>=0
+        && after.resources[id]==nonnegative(proof.resourcesBefore[id]-proof.resourcesDebit[id]);
+    }
+    function validDebitProof(f,proof,before,after) {
+      let ships=f.ships;
+      let stock=before.fleet;
+      let inbox=before.get('inbox',{}).get('fleet',{});
+      let final=after.fleet;
+      let projected=proof.shipsBefore;
+      let queued=before.get('shipyardQueue',[]).size()>0;
+      return proof.keys().hasOnly(['shipsBefore','resourcesBefore','resourcesDebit'])
+        && ships.size()>0 && ships.keys().hasOnly(['smallCargo','largeCargo','lightFighter','heavyFighter','cruiser','battleship','bomber','battlecruiser','colonyShip','recycler','espionageProbe','mothership','deathStar'])
+        && proof.shipsBefore.keys()==ships.keys()
+        && proof.resourcesDebit.keys().hasOnly(['metal','crystal','deuterium'])
+        && proof.resourcesBefore.keys().hasOnly(['metal','crystal','deuterium'])
+        && proof.resourcesDebit.metal==f.cargo.metal && proof.resourcesDebit.crystal==f.cargo.crystal
+        && proof.resourcesDebit.deuterium>=f.cargo.deuterium+1+(f.mission=='expedition' && f.get('blackHole',false) ? 50000 : 0)
+        && resourceDebited(after,proof,'metal') && resourceDebited(after,proof,'crystal') && resourceDebited(after,proof,'deuterium')
+        && (!('smallCargo' in ships) || shipDebited(ships.smallCargo,final.smallCargo,queued ? projected.smallCargo : stock.get('smallCargo',0)+inbox.get('smallCargo',0)))
+        && (!('largeCargo' in ships) || shipDebited(ships.largeCargo,final.largeCargo,queued ? projected.largeCargo : stock.get('largeCargo',0)+inbox.get('largeCargo',0)))
+        && (!('lightFighter' in ships) || shipDebited(ships.lightFighter,final.lightFighter,queued ? projected.lightFighter : stock.get('lightFighter',0)+inbox.get('lightFighter',0)))
+        && (!('heavyFighter' in ships) || shipDebited(ships.heavyFighter,final.heavyFighter,queued ? projected.heavyFighter : stock.get('heavyFighter',0)+inbox.get('heavyFighter',0)))
+        && (!('cruiser' in ships) || shipDebited(ships.cruiser,final.cruiser,queued ? projected.cruiser : stock.get('cruiser',0)+inbox.get('cruiser',0)))
+        && (!('battleship' in ships) || shipDebited(ships.battleship,final.battleship,queued ? projected.battleship : stock.get('battleship',0)+inbox.get('battleship',0)));
+    }
+    function remainingShipDebits(uniId, opId, before, after) {
+      let proof=getAfter(opPath(uniId,opId)).data.proof;
+      let ships=getAfter(flightPath(uniId,opId)).data.ships;
+      let stock=before.fleet;
+      let inbox=before.get('inbox',{}).get('fleet',{});
+      let final=after.fleet;
+      let projected=proof.shipsBefore;
+      let queued=before.get('shipyardQueue',[]).size()>0;
+      return (!('bomber' in ships) || shipDebited(ships.bomber,final.bomber,queued ? projected.bomber : stock.get('bomber',0)+inbox.get('bomber',0)))
+        && (!('battlecruiser' in ships) || shipDebited(ships.battlecruiser,final.battlecruiser,queued ? projected.battlecruiser : stock.get('battlecruiser',0)+inbox.get('battlecruiser',0)))
+        && (!('colonyShip' in ships) || shipDebited(ships.colonyShip,final.colonyShip,queued ? projected.colonyShip : stock.get('colonyShip',0)+inbox.get('colonyShip',0)))
+        && (!('recycler' in ships) || shipDebited(ships.recycler,final.recycler,queued ? projected.recycler : stock.get('recycler',0)+inbox.get('recycler',0)))
+        && (!('espionageProbe' in ships) || shipDebited(ships.espionageProbe,final.espionageProbe,queued ? projected.espionageProbe : stock.get('espionageProbe',0)+inbox.get('espionageProbe',0)))
+        && (!('mothership' in ships) || shipDebited(ships.mothership,final.mothership,queued ? projected.mothership : stock.get('mothership',0)+inbox.get('mothership',0)))
+        && (!('deathStar' in ships) || shipDebited(ships.deathStar,final.deathStar,queued ? projected.deathStar : stock.get('deathStar',0)+inbox.get('deathStar',0)));
+    }
+    function originCheckpointMatches(uniId, r, uid, f, proof) {
+      let p=originPath(uniId,r.originKey);
+      let before=get(p).data;
+      let after=getAfter(p).data;
+      return before.ownerUid==uid && after.ownerUid==uid
+        && after.ordinaryDispatchId==r.operationId && before.get('ordinaryDispatchId','')!=r.operationId
+        && (r.terminalRevision==null || after.serviceRevision==r.terminalRevision)
+        && validDebitProof(f,proof,before,after);
+    }
+    function terminalEffects(uniId, r, uid, proof) {
+      let f=flightPath(uniId,r.operationId);
+      let origin=originPath(uniId,r.originKey);
+      return !exists(f) && (r.status=='cancelled' ? (!existsAfter(f)
+          && exists(origin)==existsAfter(origin) && (!exists(origin) || get(origin).data==getAfter(origin).data))
+        : (existsAfter(f) && getAfter(f).data.attackerUid==uid
+          && getAfter(f).data.originKey==r.originKey && ordinaryHumanFleet(getAfter(f).data)
+          && originCheckpointMatches(uniId,r,uid,getAfter(f).data,proof)));
+    }
+    function newTerminal(uniId, uid, before, after, r) {
+      let op=opPath(uniId,r.operationId);
+      return !exists(op) && getAfter(op).data.receipt==r;
+    }
+    function validReceiptTransition(uniId, uid) {
+      let before=resource.data;
+      let after=request.resource.data;
+      let old=before.get('ordinaryDispatchReceipt',null);
+      let next=after.get('ordinaryDispatchReceipt',null);
+      return after.get('at05ProfileCreatedAt',null)==before.get('at05ProfileCreatedAt',null)
+        && after.get('joinedAt',null)==before.get('joinedAt',null)
+        && ((old==next && (old==null || (old.acknowledged==true && after.get('serviceRevision',-1) is int && after.serviceRevision>0) || after.diff(before).affectedKeys().hasOnly(['lastSeen','nickname'])))
+          || (next is map && (old==null || (old.acknowledged==true && old.operationId!=next.operationId))
+            && newTerminal(uniId,uid,before,after,next)));
+    }
+    function validReceiptAck() {
+      let old=resource.data.get('ordinaryDispatchReceipt',null);
+      let next=request.resource.data.get('ordinaryDispatchReceipt',null);
+      return old is map && next is map && old.acknowledged==false && next.acknowledged==true
+        && next.diff(old).affectedKeys().hasOnly(['acknowledged'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['ordinaryDispatchReceipt']);
+    }
+    function validOriginStamp(uniId, planetId) {
+      let old=resource.data.get('ordinaryDispatchId','');
+      let next=request.resource.data.get('ordinaryDispatchId','');
+      return old==next || (next is string && next!=''
+        && !exists(opPath(uniId,next)) && existsAfter(opPath(uniId,next))
+        && getAfter(opPath(uniId,next)).data.uid==request.auth.uid
+        && getAfter(opPath(uniId,next)).data.receipt.originKey==planetId
+        && getAfter(opPath(uniId,next)).data.receipt.status=='committed'
+        && remainingShipDebits(uniId,next,resource.data,request.resource.data));
+    }
+    function validOrdinaryCreate(uniId, fleetId) {
+      let op=getAfter(opPath(uniId,fleetId)).data;
+      return op.uid==request.auth.uid && op.receipt.status=='committed';
+    }
+    function validOperationCreate(uniId, operationId) {
+      let d=request.resource.data;
+      let p=pilotPath(uniId,request.auth.uid);
+      let before=get(p).data;
+      let after=getAfter(p).data;
+      let old=before.get('ordinaryDispatchReceipt',null);
+      return d.keys().hasOnly(['uid','receipt','proof']) && d.uid==request.auth.uid
+        && (d.receipt.status=='committed' ? d.proof is map : !('proof' in d))
+        && d.receipt.operationId==operationId && after.ordinaryDispatchReceipt==d.receipt
+        && (old==null || (old.acknowledged==true && old.operationId!=operationId))
+        && validTerminalShape(d.receipt,before,after) && terminalEffects(uniId,d.receipt,request.auth.uid,d.get('proof',{}));
     }
 
     function validHumanFleetCreate(uniId) {
@@ -220,17 +389,28 @@ service cloud.firestore {
 
       match /players/{playerId} {
         allow read: if signedIn();
-        allow create: if signedIn() && request.auth.uid == playerId && underServerLimit(uniId);
+        allow create: if signedIn() && request.auth.uid == playerId && underServerLimit(uniId)
+          && request.resource.data.at05ProfileCreatedAt == request.time && request.resource.data.joinedAt is int
+          && !('ordinaryDispatchReceipt' in request.resource.data);
         allow update: if signedIn() && request.auth.uid == playerId
-          && (!('serviceRevision' in resource.data) ||
+          && (validReceiptAck() || ((!('serviceRevision' in resource.data) ||
             request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastSeen','nickname']) ||
-            request.resource.data.serviceRevision == resource.data.serviceRevision + 1);
-        allow delete: if signedIn() && request.auth.uid == playerId;
+            request.resource.data.serviceRevision == resource.data.serviceRevision + 1)
+          && validReceiptTransition(uniId,playerId)));
+        allow delete: if signedIn() && request.auth.uid == playerId
+          && (resource.data.get('ordinaryDispatchReceipt',null)==null || resource.data.ordinaryDispatchReceipt.acknowledged==true);
+      }
+
+      match /ordinaryDispatchOps/{operationId} {
+        allow get: if signedIn() && (resource==null || resource.data.uid==request.auth.uid);
+        allow list: if false;
+        allow create: if signedIn() && validOperationCreate(uniId,operationId);
+        allow update, delete: if false;
       }
 
       match /planets/{planetId} {
         allow read: if signedIn();
-        allow create: if signedIn() && (
+        allow create: if signedIn() && !('ordinaryDispatchId' in request.resource.data) && (
           request.resource.data.ownerUid == request.auth.uid
           || (request.resource.data.isNpc == true && isFounder(uniId))
           || (request.resource.data.isNpc == true
@@ -240,7 +420,7 @@ service cloud.firestore {
         );
         allow update: if signedIn()
           && (
-            (resource.data.ownerUid == request.auth.uid && validOwnerCheckpoint(uniId))
+            (resource.data.ownerUid == request.auth.uid && validOwnerCheckpoint(uniId) && validOriginStamp(uniId,planetId))
             || (resource.data.ownerUid != request.auth.uid
               && request.resource.data.diff(resource.data).affectedKeys().hasOnly(planetFieldsForOthers())
               && (request.resource.data.get('inbox', {}).get('dockReturns', {}) == resource.data.get('inbox', {}).get('dockReturns', {})
@@ -316,7 +496,10 @@ service cloud.firestore {
       match /fleets/{fleetId} {
         allow read: if signedIn();
         allow create: if signedIn()
-          && (validHumanFleetCreate(uniId) || validNpcRaidCreate(uniId, fleetId));
+          && !exists(opPath(uniId,fleetId))
+          && ((validHumanFleetCreate(uniId) && (ordinaryHumanFleet(request.resource.data)
+            ? validOrdinaryCreate(uniId,fleetId) : validSpecialDispatch(uniId,request.resource.data)))
+            || validNpcRaidCreate(uniId, fleetId));
         // P-R3: aggiornamento consentito a chiunque autenticato, MA solo sui campi di risoluzione.
         // Questo impedisce a un client malevolo di cambiare attackerUid, targetCoords, originCoords,
         // o di riscrivere ships/cargo con valori inventati durante il volo.

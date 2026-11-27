@@ -155,6 +155,7 @@ async function runOnline(){
   };
   const persistentRequests=new Map();
   const profile={joinedAt:1};
+  docs.set("online_universes/u1/players/alice",profile);
   const mpWindow={
     localStorage:{getItem:k=>persistentRequests.get(k)??null,setItem:(k,v)=>persistentRequests.set(k,String(v)),removeItem:k=>persistentRequests.delete(k)},
     UniversumData:data,UniversumMissionsCore:C,

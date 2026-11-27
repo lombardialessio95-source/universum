@@ -402,7 +402,7 @@
       uniRef.collection('planets').where('ownerUid','==',uid),
       uniRef.collection('fleets').where('attackerUid','==',uid).where('resolved','==',false),
       uniRef.collection('galattiche').where('ownerUid','==',uid)];
-    if (operationId) refs.push(uniRef.collection('fleets').doc(operationId));
+    if (operationId) refs.push(uniRef.collection('fleets').doc(operationId),uniRef.collection('ordinaryDispatchOps').doc(operationId));
     assertAccount();
     const first=await Promise.all(refs.map(read));
     assertAccount();
@@ -430,12 +430,20 @@
     const second=await Promise.all(refs.map(read));
     assertAccount();
     if (second.some((snap,i)=>recoverySignature(snap)!==signatures[i])) throw recoveryChanged();
-    const [uni,player,planets,fleets,galattiche,operation]=second;
+    const [uni,player,planets,fleets,galattiche,operation,terminalOperation]=second;
+    if (terminalOperation?.exists && terminalOperation.data().uid!==uid) throw recoveryChanged();
     if (planets.docs.some(d=>d.data().ownerUid!==uid) || fleets.docs.some(d=>d.data().attackerUid!==uid || d.data().resolved!==false) ||
         galattiche.docs.some(d=>d.data().ownerUid!==uid)) throw recoveryChanged();
     const revision=player.data().serviceRevision ?? 0;
     if (!Number.isSafeInteger(revision) || revision<0) throw recoveryChanged();
-    return {uni,player,planets,fleets,galattiche,operation};
+    // Ultima verifica dopo la costruzione del modello, non prima delle await accessorie.
+    const validate=async()=>{
+      assertAccount();
+      const final=await Promise.all(refs.map(read));
+      assertAccount();
+      if (final.some((snap,i)=>recoverySignature(snap)!==signatures[i])) throw recoveryChanged();
+    };
+    return {uni,player,planets,fleets,galattiche,operation,terminalOperation,validate};
   }
   async function joinOnlineUniverse(universeId, passcode = '', {serverOnly=false,operationId=null} = {}) {
     const auth = getAuth();
@@ -456,7 +464,11 @@
 
     const playerName = user.displayName || user.email.split('@')[0];
     const playerRef = uniRef.collection('players').doc(user.uid);
-    const playerSnap = recovered ? recovered.player : await playerRef.get();
+    const playerSnap = recovered ? recovered.player : await playerRef.get({source:'server'});
+    if (!recovered && playerSnap.exists && playerSnap.data()?.ordinaryDispatchReceipt?.acknowledged===false) {
+      requireServerSnapshot(playerSnap);
+      G.adoptOrdinaryReceipt({id:universeId},user.uid,playerSnap.data());
+    }
 
     let playerState;
     let myPlanets = [];
@@ -512,9 +524,13 @@
         points: 0,
         planetCount: 1,
         joinedAt: Date.now(),
+        at05ProfileCreatedAt: firebase.firestore.FieldValue.serverTimestamp(),
         lastSeen: Date.now()
       };
       await playerRef.set(playerState);
+      const createdProfile=await playerRef.get({source:'server'});
+      if (!createdProfile.exists) throw recoveryChanged();
+      playerState=createdProfile.data();
 
       await uniRef.update({
         playerCount: firebase.firestore.FieldValue.increment(1)
@@ -569,6 +585,7 @@
     const output = {
       id: universeId,
       serviceRevision: playerState.serviceRevision || 0,
+      at05ProfileIncarnation: playerState.at05ProfileCreatedAt==null ? null : `${playerState.at05ProfileCreatedAt.seconds}:${playerState.at05ProfileCreatedAt.nanoseconds}`,
       specialistBuilt: playerState.specialistBuilt || {},
       researchModelVersion: playerState.researchModelVersion || 0,
       founderUid: uniData.founderUid || uniData.ownerUid || null,
@@ -600,10 +617,12 @@
     if (playerSnap.exists) G.restoreServices(output,myPlanets,playerState,
       recovered ? recoveredAt : undefined,recovered ? {serverRecovery:true} : undefined);
     if (recovered) {
+      await recovered.validate();
       if (getAuth().currentUser?.uid!==user.uid) throw recoveryChanged();
       const operation=recovered.operation;
       recoveryEvidence.set(output,Object.freeze({uid:user.uid,universeId,operationId,
-        revision:output.serviceRevision,joinedAt:playerState.joinedAt ?? null,
+        revision:output.serviceRevision,joinedAt:playerState.joinedAt ?? null,profileCreatedAt:playerState.at05ProfileCreatedAt ?? null,
+        operationReceipt:recovered.terminalOperation?.exists ? Object.freeze({...recovered.terminalOperation.data().receipt}) : null,
         receipt:playerState.ordinaryDispatchReceipt ? Object.freeze({...playerState.ordinaryDispatchReceipt}) : null,
         fleet:operation?.exists ? Object.freeze({...operation.data(),id:operation.id}) : null}));
     }
