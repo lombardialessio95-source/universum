@@ -330,7 +330,9 @@
         const fresh = ref && await ref.get({source:'server'}).catch(()=>null);
         if (fresh?.exists && fresh.data().serviceRevision !== u.serviceRevision) error = conflict();
       }
-      if (error.code === 'service-conflict' && window.UniversumUI?.state?.currentUniverse === u) {
+      const uncertainOrdinary=options.dispatch?.ordinary && options.dispatch.outcome?.mayHaveCommitted &&
+        !options.dispatch.outcome.definiteFailure;
+      if (!uncertainOrdinary && error.code === 'service-conflict' && window.UniversumUI?.state?.currentUniverse === u) {
         const ui = window.UniversumUI;
         ui.toast(error.message,'error');
         await ui.exitToLobbyAfterServerRemoval();
@@ -341,7 +343,8 @@
     } finally { if (checkpoints.get(u) === operation) checkpoints.delete(u); }
   }
   function debitFleet(u,p,dispatch,now,validate = true) {
-    window.UniversumServices?.settlePlanet(u,p,now);
+    // Le partenze ordinarie non eseguivano il mantenimento delle specialiste.
+    if (!dispatch.ordinary) window.UniversumServices?.settlePlanet(u,p,now);
     if (dispatch.carrierHangars?.length) {
       if (!window.UniversumHangars) throw conflict();
       window.UniversumHangars.take(p,dispatch.carrierHangars);
@@ -363,13 +366,21 @@
         Object.entries(dispatch.debit).some(([k,n])=>p.resources[k]<n))) throw conflict();
     for (const [id,n] of Object.entries(ships)) p.fleet[id] = Math.max(0,(p.fleet[id] || 0)-n);
     for (const [k,n] of Object.entries(dispatch.debit)) p.resources[k] = Math.max(0,p.resources[k]-n);
-    window.UniversumServices?.settlePlanet(u,p,now);
+    if (!dispatch.ordinary) window.UniversumServices?.settlePlanet(u,p,now);
   }
   async function saveCheckpoint(universeObj, { force = false, dispatch = null, galLaunch = null } = {}) {
     const auth = getAuth();
     const db = getDB();
     const user = auth.currentUser;
     if (!user || !universeObj?.id) return;
+    if (G.ordinaryCheckpointBlocked?.(universeObj,dispatch)) {
+      if (!dispatch && !galLaunch) return false;
+      throw Error('Partenza in verifica: riallinea la partita prima di continuare.');
+    }
+    if (dispatch?.ordinary && (!Number.isSafeInteger(universeObj.serviceRevision) ||
+        universeObj.serviceRevision < 0 || universeObj.serviceRevision >= Number.MAX_SAFE_INTEGER)) {
+      throw new Error('Revisione non valida. Riapri la partita multiplayer.');
+    }
     window.UniversumEngine?.normalizeResearchState(universeObj);
 
     const syncKey = JSON.stringify([user.uid, universeObj.id]);
@@ -392,7 +403,10 @@
     let moonUpdates = [];
     let dockState,galWrites;
 
-    await db.runTransaction(async (tx) => {
+    const outcome=dispatch?.ordinary ? dispatch.outcome : null;
+    if (outcome) outcome.expectedRevision=expected;
+    try { await db.runTransaction(async (tx) => {
+      if (outcome) outcome.attempts=(outcome.attempts || 0)+1;
       reconciled = [];
       lost = [];
       moonUpdates = [];
@@ -413,7 +427,7 @@
       }
       const nowTs = Date.now();
       const flightRefs = player.specialistFlights || [];
-      const checkCapacity = versioned && services && (dispatch || planets.some(p=>p.shipyardQueue?.some(lot=>services.ids.includes(lot.id))));
+      const checkCapacity = versioned && services && ((dispatch && !dispatch.ordinary) || planets.some(p=>p.shipyardQueue?.some(lot=>services.ids.includes(lot.id))));
       let activeRefs = flightRefs;
       const totals = {};
       if (checkCapacity) {
@@ -433,13 +447,16 @@
               (!dest.data().isNpc && !dest.data().ownerUid)) throw conflict();
           if (dispatch.doc.defenderUid !== (dest.data().ownerUid || null)) throw conflict();
           window.UniversumHangars.validateMission(dispatch.doc.ships,dispatch.carrierHangars);
-        } else if (!dispatch.doc.targetGalatticaId && (dispatch.specialist || (!dispatch.doc.originPlanetId && !dispatch.carrierHangars?.length))) {
+        } else if (!dispatch.ordinary && !dispatch.doc.targetGalatticaId && (dispatch.specialist || (!dispatch.doc.originPlanetId && !dispatch.carrierHangars?.length))) {
           const i = entries.findIndex(e=>e.ref.id===dispatch.doc.targetKey);
           if (i < 0 || snaps[i].data()?.ownerUid !== user.uid) throw conflict();
         }
-        if (!dispatch.doc.targetGalatticaId && (dispatch.specialist || (!dispatch.doc.originPlanetId && !dispatch.carrierHangars?.length))) activeRefs = [...activeRefs,dispatch.ref.id];
+        if (!dispatch.ordinary && !dispatch.doc.targetGalatticaId && (dispatch.specialist || (!dispatch.doc.originPlanetId && !dispatch.carrierHangars?.length))) activeRefs = [...activeRefs,dispatch.ref.id];
       }
 
+      // Conserva il calcolo dei punti delle partenze ordinarie sullo stock
+      // dopo l'addebito, senza mutare il pianeta prima del commit.
+      let pointState = universeObj;
       entries.forEach((e, i) => {
         const snap = snaps[i];
         const p = e.p;
@@ -454,7 +471,11 @@
         const sending = dispatch && e.ref.id === dispatch.doc.originKey;
         const dockPlanet=dockState?.planets.find(item=>item.id===p.id);
         const model = sending ? clone(dockPlanet || p) : dockPlanet || p;
-        if (sending) debitFleet(universeObj,model,dispatch,nowTs);
+        if (sending) {
+          debitFleet(universeObj,model,dispatch,nowTs);
+          if (dispatch.ordinary) pointState = {...universeObj,
+            planets:universeObj.planets.map(home=>home===p ? model : home)};
+        }
         const res = Object.assign({}, model.resources);
         const H = window.UniversumHangars;
         let savedHangars = Array.isArray(model.mothershipHangars) ? model.mothershipHangars.slice() : [];
@@ -536,13 +557,21 @@
         researches: universeObj.researches || {},
         researchQueue: universeObj.researchQueue || null,
         researchModelVersion: universeObj.researchModelVersion || 1,
-        points: computePlayerPoints(universeObj),
+        points: computePlayerPoints(pointState),
         planetCount: planets.length - lost.length,
         lastSeen: nowTs
       };
       if (playerSnap?.exists) tx.update(playerRef,playerPayload);
       else tx.set(playerRef,playerPayload,{merge:true});
-    });
+      if (outcome) outcome.mayHaveCommitted=true;
+    }); } catch (error) {
+      // Un rifiuto esplicito del server al primo tentativo non è un
+      // errore ambiguo. Dopo retry SDK, conserviamo il dubbio.
+      if (outcome && outcome.attempts===1 &&
+          ['aborted','permission-denied','unauthenticated','invalid-argument','failed-precondition'].includes(error.code)) outcome.definiteFailure=true;
+      throw error;
+    }
+    if (outcome) outcome.committed=true;
     if (versioned) universeObj.serviceRevision = expected+1;
     for (const write of galWrites) {
       universeObj.galatticaVersions ||= {};

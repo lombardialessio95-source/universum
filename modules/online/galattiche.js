@@ -22,8 +22,10 @@
     return {ownerUid:data.ownerUid,ownerName:data.ownerName,name:data.state.name || 'Galattica',
       coordKey:data.coordKey,systemKey:data.systemKey,defenses:data.state.defenses || {},destroyed:data.destroyed};
   }
-  async function restoreGalattiche(universe, uid) {
-    const result = await collection(universe.id).where('ownerUid', '==', uid).get();
+  async function restoreGalattiche(universe, uid, serverOnly=false) {
+    const query=collection(universe.id).where('ownerUid', '==', uid);
+    const result=await (serverOnly ? query.get({source:'server'}) : query.get());
+    if (serverOnly && (result.metadata?.fromCache || result.metadata?.hasPendingWrites)) throw Error('Stato orbitale non confermato.');
     universe.galattiche = [];
     universe.galatticaVersions = {};
     universe.galatticaSignatures = {};
