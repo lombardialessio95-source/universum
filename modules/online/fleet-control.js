@@ -124,7 +124,10 @@
     } finally {
       // Un errore di validazione prima della generazione del documento
       // non è una partenza incerta.
-      if (request && !request.ref) clearOrdinaryDeparture(request);
+      if (request && !request.ref) {
+        request.busy=false;
+        clearOrdinaryDeparture(request);
+      }
     }
   }
 
@@ -292,61 +295,69 @@
 
     const ordinary = !(targeted || dockDispatch || specialist || carrierHangars.length);
     if (ordinary && !request) request=reserveOrdinaryDeparture(universeObj,user.uid);
-    if (!ordinary && request) { clearOrdinaryDeparture(request); request=null; }
-    const ref = uniRef.collection('fleets').doc();
-    const dispatch={ref,doc:fleetDoc,ordinary,carrierHangars,specialist:Boolean(specialist),
-      debit:{metal:cargoM,crystal:cargoC,deuterium:cargoD+flightStats.fuelCost+blackHoleExtra}};
-    if (ordinary) {
-      request.ref=ref;
-      request.doc=fleetDoc;
-      request.expectedRevision=universeObj.serviceRevision;
-      dispatch.outcome=request.outcome;
-    }
+    if (!ordinary && request) { request.busy=false; clearOrdinaryDeparture(request); request=null; }
     try {
+      const ref = uniRef.collection('fleets').doc();
+      const dispatch={ref,doc:fleetDoc,ordinary,carrierHangars,specialist:Boolean(specialist),
+        debit:{metal:cargoM,crystal:cargoC,deuterium:cargoD+flightStats.fuelCost+blackHoleExtra}};
+      if (ordinary) {
+        request.ref=ref;
+        request.doc=fleetDoc;
+        request.expectedRevision=universeObj.serviceRevision;
+        dispatch.outcome=request.outcome;
+      }
       const committed=await syncPlayerState(universeObj,{force:true,dispatch});
-      if (ordinary && committed!==true) throw Error('Partenza non confermata.');
+      if (ordinary) {
+        if (committed!==true) throw Error('Partenza non confermata.');
+        // AT05-I04A: conserva la conferma prima di ogni finalizzazione locale.
+        request.confirmed=true;
+      }
+      fleetDoc.id = ref.id;
+
+      try {
+        const savedSnap = await ref.get();
+        const serverDepartureMs = _tsToMs(savedSnap.exists ? savedSnap.data()?.departureAt : null);
+        if (serverDepartureMs > 0) {
+          const durationMs = arrivalTime - now;
+          const returnDurationMs = returnTime - arrivalTime;
+          fleetDoc.departureTime = serverDepartureMs;
+          if (timeline) {
+            Object.assign(fleetDoc, MCore.buildExplorationTimeline(
+              serverDepartureMs, flightStats.durationSec, holdDurationSec));
+          } else {
+            fleetDoc.arrivalTime = serverDepartureMs + durationMs;
+            fleetDoc.returnTime = fleetDoc.arrivalTime + returnDurationMs;
+          }
+          await ref.update({
+            departureTime: fleetDoc.departureTime,
+            arrivalTime: fleetDoc.arrivalTime,
+            returnTime: fleetDoc.returnTime,
+            ...(timeline ? {
+              zoneArrivalTime: fleetDoc.zoneArrivalTime,
+              explorationEndTime: fleetDoc.explorationEndTime
+            } : {})
+          });
+        }
+      } catch (e) { /* fallback ai tempi gia' salvati */ }
+
+      if (!universeObj.fleetsInFlight.some(f=>f.id===ref.id)) universeObj.fleetsInFlight.push(fleetDoc);
+      if (ordinary) clearOrdinaryDeparture(request);
+
+      return fleetDoc;
     } catch (error) {
       if (!ordinary) throw error;
       const o=request.outcome;
-      if (!o.committed && (!o.mayHaveCommitted || o.definiteFailure)) {
+      request.confirmed=request.confirmed || !!o.committed;
+      if (!request.confirmed && (!o.mayHaveCommitted || o.definiteFailure)) {
         clearOrdinaryDeparture(request);
         throw error;
       }
-      request.confirmed=!!o.committed;
-      return reconcileOrdinaryDeparture(request);
+      // Copre anche le eccezioni dopo il commit, fino alla registrazione
+      // locale. Conserva l'ID e non ripete mai l'addebito.
+      return await reconcileOrdinaryDeparture(request);
+    } finally {
+      if (ordinary) request.busy=false;
     }
-    fleetDoc.id = ref.id;
-
-    try {
-      const savedSnap = await ref.get();
-      const serverDepartureMs = _tsToMs(savedSnap.exists ? savedSnap.data()?.departureAt : null);
-      if (serverDepartureMs > 0) {
-        const durationMs = arrivalTime - now;
-        const returnDurationMs = returnTime - arrivalTime;
-        fleetDoc.departureTime = serverDepartureMs;
-        if (timeline) {
-          Object.assign(fleetDoc, MCore.buildExplorationTimeline(
-            serverDepartureMs, flightStats.durationSec, holdDurationSec));
-        } else {
-          fleetDoc.arrivalTime = serverDepartureMs + durationMs;
-          fleetDoc.returnTime = fleetDoc.arrivalTime + returnDurationMs;
-        }
-        await ref.update({
-          departureTime: fleetDoc.departureTime,
-          arrivalTime: fleetDoc.arrivalTime,
-          returnTime: fleetDoc.returnTime,
-          ...(timeline ? {
-            zoneArrivalTime: fleetDoc.zoneArrivalTime,
-            explorationEndTime: fleetDoc.explorationEndTime
-          } : {})
-        });
-      }
-    } catch (e) { /* fallback ai tempi gia' salvati */ }
-
-    if (!universeObj.fleetsInFlight.some(f=>f.id===ref.id)) universeObj.fleetsInFlight.push(fleetDoc);
-    if (ordinary) clearOrdinaryDeparture(request);
-
-    return fleetDoc;
   }
 
 

@@ -144,6 +144,76 @@ async function runTests(fleetSource,syncSource) {
   await test("T09-10 double click and rebuilt universe blocked",async()=>{const f=fixture();f.mode.fail="lostAck";f.mode.readFail=true;const first=f.launch();const second=f.launch();const rs=await Promise.allSettled([first,second]);eq(rs.map(x=>x.status),["rejected","rejected"],"pending and duplicate");eq(f.state().created,1,"one fleet");const fresh=cp(f.u);f.W.UniversumUI.state.currentUniverse=fresh;eq(f.G.ordinaryDepartureStatus(fresh).id,rs[0].reason.fleetId,"survives reconstructed state");await rejected(()=>f.G.launchOnlineFleet(fresh,0,{g:1,s:1,p:3},"attack",{lightFighter:3},{}),"blocked");eq(f.state().created,1,"no second fleet");});
   await test("T09-11 confirmed commit but local reload fails",async()=>{const f=fixture();f.mode.fail="lostAck";f.mode.reloadFail=true;const e=await rejected(()=>f.launch(),"reload");eq([e.code,e.confirmed],["ordinary-departure-pending",true],"confirmed but pending");eq(await f.G.syncPlayerState(f.u,{force:true}),false,"no stale save");f.mode.reloadFail=false;await f.G.verifyOrdinaryDeparture(f.u);eq([f.state().created,f.mode.reloads,f.mode.timestampWrites],[1,2,0],"reconciled once");eq(await f.G.syncPlayerState(f.u,{force:true}),false,"retired state cannot save");});
   await test("T09-11 SDK confirmed then local application error",async()=>{const f=fixture();const original=f.G.syncPlayerState;f.G.syncPlayerState=async(...args)=>{await original(...args);throw Error("local apply failure")};const d=await f.launch();eq(f.state().created,1,"one fleet");eq(f.W.UniversumUI.state.currentUniverse.planets[0].fleet.lightFighter,7,"no double debit");eq(f.mode.serverReads,[f.fleets+d.id],"server confirmation");});
+
+  // AT05-I04A: eccezioni reali dopo il commit, senza nuovo dispatch.
+  for (const phase of ["id","some","push","afterPush","sync"]) {
+    await test("I04A R04-T06 postcommit "+phase+" releases busy and retains ID",async()=>{
+      const f=fixture();f.mode.reloadFail=true;
+      const original=f.G.syncPlayerState;
+      f.G.syncPlayerState=async(...args)=>{
+        const result=await original(...args);
+        if(phase==="id") Object.freeze(args[1].dispatch.doc);
+        if(phase==="some") f.u.fleetsInFlight.some=()=>{throw Error("some failed")};
+        if(phase==="push") Object.freeze(f.u.fleetsInFlight);
+        if(phase==="afterPush") f.u.fleetsInFlight.push=function(d){Array.prototype.push.call(this,d);throw Error("push then fail")};
+        if(phase==="sync") throw Error("local sync failure");
+        return result;
+      };
+      const e=await rejected(()=>f.launch(),"postcommit exception");
+      eq([e.code,e.confirmed],["ordinary-departure-pending",true],"confirmed pending");
+      const p=f.G.ordinaryDepartureStatus(f.u);
+      eq([p.id,p.busy,p.confirmed],[e.fleetId,false,true],"retryable same ID");
+      eq([f.state().created,f.state().remote.fleet.lightFighter,f.mode.commits],[1,7,1],"one committed debit");
+      eq(f.state().remote.resources,{metal:900,crystal:950,deuterium:99940},"one resource debit");
+      const attempts=f.mode.attempts;
+      await rejected(()=>f.launch(),"duplicate blocked");
+      eq(f.mode.attempts,attempts,"no second transaction");
+      f.mode.reloadFail=false;
+      const d=await f.G.verifyOrdinaryDeparture(f.u);
+      eq(d.id,p.id,"same ID");
+      const fresh=f.W.UniversumUI.state.currentUniverse;
+      eq([fresh.fleetsInFlight.length,fresh.planets[0].fleet.lightFighter,fresh.serviceRevision],[1,7,3],"reconciled");
+      eq([f.state().created,f.mode.commits,f.mode.timestampWrites],[1,1,0],"no double debit or timestamp rewrite");
+      eq(f.G.ordinaryDepartureStatus(fresh),null,"released after complete recovery");
+      ok(f.mode.serverReads.every(path=>path===f.fleets+p.id),"only original document");
+    });
+  }
+  await test("I04A postcommit exception with immediate recovery",async()=>{
+    const f=fixture();Object.freeze(f.u.fleetsInFlight);
+    const d=await f.launch();eq([f.state().created,f.mode.commits],[1,1],"single commit");
+    eq(f.mode.serverReads,[f.fleets+d.id],"same ID");
+    eq(f.G.ordinaryDepartureStatus(f.W.UniversumUI.state.currentUniverse),null,"released");
+  });
+  await test("I04A confirmed commit and server unavailable, second verification",async()=>{
+    const f=fixture();Object.freeze(f.u.fleetsInFlight);f.mode.readFail=true;
+    const e=await rejected(()=>f.launch(),"offline");eq(e.confirmed,true,"SDK confirmation retained");
+    eq(f.G.ordinaryDepartureStatus(f.u).busy,false,"not stuck");
+    f.mode.readFail=false;const d=await f.G.verifyOrdinaryDeparture(f.u);eq(d.id,e.fleetId,"same ID");
+    eq([f.state().created,f.mode.commits],[1,1],"single debit");
+  });
+  await test("I04A R04-T09 definitive failure and subsequent voluntary launch",async()=>{
+    const f=fixture();f.mode.fail="commit";const before=f.state();
+    await rejected(()=>f.launch(),"definitive abort");
+    eq(f.state(),before,"no debit");eq(f.G.ordinaryDepartureStatus(f.u),null,"released");
+    f.mode.fail=null;await f.launch();
+    eq([f.state().created,f.mode.commits,f.state().remote.fleet.lightFighter],[1,1,7],"new departure");
+  });
+  await test("I04A normal launch without reconciliation",async()=>{
+    const f=fixture();const d=await f.launch();eq([f.state().created,f.state().flights,f.mode.commits,f.mode.reloads],[1,1,1,0],"normal");
+    eq(f.u.fleetsInFlight[0].id,d.id,"registered");eq(f.G.ordinaryDepartureStatus(f.u),null,"released");
+  });
+  await test("I04A timestamp read failure retains normal fallback",async()=>{
+    const f=fixture();const original=f.G.syncPlayerState;
+    f.G.syncPlayerState=async(...args)=>{const result=await original(...args);args[1].dispatch.ref.get=async()=>{throw Error("timestamp read failed")};return result};
+    await f.launch();eq([f.state().created,f.state().flights,f.mode.commits,f.mode.reloads],[1,1,1,0],"existing fallback");
+    eq(f.G.ordinaryDepartureStatus(f.u),null,"released");
+  });
+  await test("I04A special postcommit exception unchanged",async()=>{
+    const f=fixture();Object.freeze(f.u.fleetsInFlight);const e=await rejected(()=>f.launch(enemy,"attack",{invictus:1,crepuscolo:1},{}),"special push");
+    ok(e.code!=="ordinary-departure-pending","special not intercepted");
+    eq([f.state().created,f.mode.commits,f.mode.reloads],[1,1,0],"original special behavior");
+    eq(f.G.ordinaryDepartureStatus(f.u),null,"no ordinary reservation");
+  });
   return results;
 }
 const root = path.join(__dirname, '..');
