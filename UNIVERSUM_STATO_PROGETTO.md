@@ -1,6 +1,6 @@
 # UNIVERSUM — STATO DEL PROGETTO E PASSAGGIO DI CONSEGNE
 
-**Revisione:** 1.28 — 26 novembre 2026  
+**Revisione:** 1.29 — 26 novembre 2026  
 **Tipo:** documento di continuità per ChatGPT, Codex e il proprietario del progetto  
 **Repository:** https://github.com/lombardialessio95-source/universum  
 **Riferimento verificato:** branch `main`, commit `67f71b7f2662ad2c345b0e3e8f2ba4ab4202c099` (25 novembre 2026, 21:24 UTC)  
@@ -323,3 +323,7 @@ Main ca38720f144993a805f84790e15519b7340525cc, candidata bbee52e2b38039f8a25d6bd
 
 ### AT05-I04B4B — rapporto intermedio
 Main ca38720f144993a805f84790e15519b7340525cc, candidata bbee52e2b38039f8a25d6bd6b3edda96fda75ac0 e backup/AT05-I04A-bbee52e verificati direttamente. Ordinaria riferisce verifica SHA-256 cumulativa B4A, conservazione precedenti e recupero differenze per ricostruire fleet-control.js autorizzato; implementazione rientro non completata, nessun test o patch B4B. CONTROLLO mantiene esclusivamente B4B autorizzato, senza ulteriore suddivisione per ora: riprendere dalla preparazione già effettuata, verificare blob dei sorgenti ricostruiti, implementare intercettazione rientro prima del normale join/installazione e riuso richiesta/ID e riconciliazione server-only, preservare busy, isolamento e uscita B4A. Conservare patch effettiva appena applicata, collaudare tutti i requisiti B4B già assegnati; se vincolo architetturale impedisce il recupero senza universo attivo, documentare punto esatto e test riproduttivo invece di ampliare il perimetro. Consegnare cumulativa, hash e banco riproducibile; nessuna approvazione B4B. B4C/B5, C–F e I05 non autorizzati; nessun push, merge, Rules/deploy. CONTROLLO non ha ispezionato patch o sorgenti locali né eseguito test.
+
+
+### AT05-I04B4B — secondo rapporto intermedio
+Main, candidata e backup verificati invariati da CONTROLLO. Ordinaria riferisce mismatch fleet-control.js locale ed0a2813753739adb1b489963a3d5dc4b73485e6 vs blob ufficiale 04a70db16088c092c3fee9fcfb4a742bd0c48e29; nessuna patch o test B4B. CONTROLLO ha verificato direttamente che il connettore GitHub fetch_file con ref bbee52e2b38039f8a25d6bd6b3edda96fda75ac0, path modules/online/fleet-control.js ed encoding base64 restituisce encoding base64, SHA ufficiale atteso e contenuto di 39772 caratteri; non ha decodificato né calcolato autonomamente hash dei byte. Preferire recupero base64 integrale, decodifica binaria senza conversioni newline/UTF-8 e git hash-object; se output troncato trasferire in blocchi ordinati del payload integrale, verificare lunghezza e hash finale. Non usare vecchio ZIP come sorgente ufficiale. Nessun impedimento architetturale dimostrato, mantenere Ordinaria e solo B4B autorizzato; salvare sorgente verificato e patch effettiva immediatamente, poi collaudi già assegnati. Se recupero fallisce consegnare diagnostica concreta del trasferimento, non modificare blob discordante. Nessun push, merge, Rules/deploy; B4C/B5, C–F e I05 non autorizzati. CONTROLLO non ha eseguito test o modificato codice operativo.
