@@ -374,14 +374,19 @@
   }
 
 
-  async function joinOnlineUniverse(universeId, passcode = '') {
+  async function joinOnlineUniverse(universeId, passcode = '', {serverOnly=false} = {}) {
     const auth = getAuth();
     const db = getDB();
     const user = auth.currentUser;
     if (!user) throw new Error('Devi accedere prima di entrare in un universo.');
 
     const uniRef = db.collection('online_universes').doc(universeId);
-    const uniSnap = await uniRef.get();
+    const read=async ref=>{
+      const snap=await (serverOnly ? ref.get({source:'server'}) : ref.get());
+      if (serverOnly && (snap.metadata?.fromCache || snap.metadata?.hasPendingWrites)) throw Error('Stato server non confermato.');
+      return snap;
+    };
+    const uniSnap = await read(uniRef);
     if (!uniSnap.exists) throw new Error('Universo online non trovato.');
 
     const uniData = uniSnap.data();
@@ -391,7 +396,8 @@
 
     const playerName = user.displayName || user.email.split('@')[0];
     const playerRef = uniRef.collection('players').doc(user.uid);
-    const playerSnap = await playerRef.get();
+    const playerSnap = await read(playerRef);
+    if (serverOnly && !playerSnap.exists) throw Error('Profilo online non disponibile.');
 
     let playerState;
     let myPlanets = [];
@@ -455,19 +461,17 @@
       myPlanets = [homePlanet];
     } else {
       playerState = playerSnap.data();
-      await playerRef.update({ lastSeen: Date.now(), nickname: playerName });
+      if (!serverOnly) await playerRef.update({ lastSeen: Date.now(), nickname: playerName });
 
-      const planetsSnap = await uniRef.collection('planets')
-        .where('ownerUid', '==', user.uid)
-        .get();
+      const planetsSnap = await read(uniRef.collection('planets')
+        .where('ownerUid', '==', user.uid));
 
       myPlanets = planetsSnap.docs.map((d) => d.data());
     }
 
-    const activeFleetsSnap = await uniRef.collection('fleets')
+    const activeFleetsSnap = await read(uniRef.collection('fleets')
       .where('attackerUid', '==', user.uid)
-      .where('resolved', '==', false)
-      .get();
+      .where('resolved', '==', false));
 
     const fleetsInFlight = activeFleetsSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
 
@@ -480,16 +484,16 @@
 
     const messages = msgSnap.docs.map((d) => d.data());
 
-    if (playerSnap.exists) {
+    if (!serverOnly && playerSnap.exists) {
       await claimServerSlot(db, user.uid, universeId, { alreadyMember: true }).catch(() => {});
     }
     _invalidateUniCaches(universeId);
     // Un giocatore appena creato non ha flotte legacy da migrare.
-    if (playerSnap.exists) await migrateOnlineFleets(universeId).catch(() => {});
-    await cleanupPrivateMessagesOnce(db, universeId, user.uid);
+    if (!serverOnly && playerSnap.exists) await migrateOnlineFleets(universeId).catch(() => {});
+    if (!serverOnly) await cleanupPrivateMessagesOnce(db, universeId, user.uid);
 
     // I bot configurabili vengono distribuiti vicino alla prima colonia.
-    if (uniData.botConfig?.density > 0 && myPlanets[0]) {
+    if (!serverOnly && uniData.botConfig?.density > 0 && myPlanets[0]) {
       await ensureBotsAroundHome(universeId, myPlanets[0].coords,
         normalizeBotConfig(uniData.botConfig), uniData)
         .catch((e) => console.warn('[MP Bot] Generazione bot fallita:', e));
@@ -522,7 +526,7 @@
       spyReports: [],
       messages
     };
-    await G.restoreGalattiche(output,user.uid);
+    await G.restoreGalattiche(output,user.uid,serverOnly);
     Object.defineProperty(output,'roomPasscode',{value:passcode});
     window.UniversumEngine?.normalizeResearchState(output);
     if (playerSnap.exists) G.restoreServices(output,myPlanets,playerState);

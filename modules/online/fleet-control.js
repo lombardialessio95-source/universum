@@ -39,7 +39,96 @@
 
 
 
+  // AT05-I04: solo memoria della pagina, distinta per account e universo.
+  const ordinaryDepartures = new Map();
+  const retiredDepartureStates = new WeakSet();
+  const departureKey = (u,uid=getAuth().currentUser?.uid) => JSON.stringify([uid,u?.id]);
+  function pendingOrdinaryDeparture(u) {
+    return ordinaryDepartures.get(departureKey(u));
+  }
+  function ordinaryDepartureStatus(u) {
+    const p=pendingOrdinaryDeparture(u);
+    return p ? {id:p.ref?.id || null, busy:p.busy, confirmed:p.confirmed} : null;
+  }
+  function pendingDepartureError(p) {
+    return Object.assign(Error(p?.confirmed
+      ? 'Partenza confermata; riallineamento non completato. Verifica prima di inviare ancora.'
+      : 'Esito della partenza in verifica. Non ripetere l\'invio.'),{code:'ordinary-departure-pending',fleetId:p?.ref?.id,confirmed:!!p?.confirmed});
+  }
+  function ordinaryCheckpointBlocked(u,dispatch) {
+    if (retiredDepartureStates.has(u)) return true;
+    const p=pendingOrdinaryDeparture(u);
+    return !!p && dispatch?.outcome!==p.outcome;
+  }
+  function reserveOrdinaryDeparture(u,uid) {
+    const key=departureKey(u,uid);
+    if (ordinaryDepartures.has(key)) throw pendingDepartureError(ordinaryDepartures.get(key));
+    const p={key,uid,universe:u,busy:true,confirmed:false,outcome:{}};
+    ordinaryDepartures.set(key,p);
+    return p;
+  }
+  function clearOrdinaryDeparture(p) {
+    if (ordinaryDepartures.get(p.key)===p) ordinaryDepartures.delete(p.key);
+  }
+  async function reconcileOrdinaryDeparture(p) {
+    // Solo una lettura esplicita per azione; mai un nuovo dispatch.
+    try {
+      if (getAuth().currentUser?.uid!==p.uid) throw pendingDepartureError(p);
+      const snap=await p.ref.get({source:'server'});
+      if (snap.metadata?.fromCache || snap.metadata?.hasPendingWrites) throw pendingDepartureError(p);
+      if (snap.exists) {
+        const d=snap.data();
+        if (snap.id!==p.ref.id || d.attackerUid!==p.uid || d.originKey!==p.doc.originKey) throw pendingDepartureError(p);
+        p.confirmed=true;
+        p.saved={...d,id:p.ref.id};
+      }
+      // L'assenza non dimostra l'annullamento. Se il commit era già
+      // confermato dall'SDK, è comunque possibile riallineare la partita.
+      if (!p.confirmed) throw pendingDepartureError(p);
+      const ui=window.UniversumUI;
+      const active=ui?.state?.currentUniverse;
+      if (!active || active.id!==p.universe.id || !ui.state.isMultiplayerMode) throw pendingDepartureError(p);
+      const fresh=await G.joinOnlineUniverse(p.universe.id,p.universe.roomPasscode,{serverOnly:true});
+      if (getAuth().currentUser?.uid!==p.uid || ui.state.currentUniverse!==active ||
+          !Number.isSafeInteger(fresh.serviceRevision) || fresh.serviceRevision<=(p.outcome.expectedRevision ?? p.expectedRevision)) throw pendingDepartureError(p);
+      // Non salvare lo stato vecchio. Le sincronizzazioni già accodate
+      // su questi oggetti non devono ripartire quando rimuoviamo il blocco.
+      retiredDepartureStates.add(p.universe);
+      retiredDepartureStates.add(active);
+      ui.startOnlineGame(fresh);
+      clearOrdinaryDeparture(p);
+      return p.saved || {...p.doc,id:p.ref.id};
+    } catch (error) {
+      throw pendingDepartureError(p);
+    } finally { p.busy=false; }
+  }
+  async function verifyOrdinaryDeparture(u) {
+    const p=pendingOrdinaryDeparture(u);
+    if (!p) throw Error('Nessuna partenza in verifica.');
+    if (p.busy || !p.ref) throw pendingDepartureError(p);
+    p.busy=true;
+    return reconcileOrdinaryDeparture(p);
+  }
   async function launchOnlineFleet(universeObj, originPlanetIndex, targetCoords, mission, shipsSelected, cargo = {}, options = {}) {
+    const uid=getAuth().currentUser?.uid;
+    const existing=pendingOrdinaryDeparture(universeObj);
+    if (existing || retiredDepartureStates.has(universeObj)) throw pendingDepartureError(existing);
+    // Riserva prima del primo await per impedire il doppio clic ordinario.
+    const selected=id=>Math.floor(Number(shipsSelected?.[id]) || 0)>0;
+    const likelyOrdinary=mission!=='destroyGalattica' && !selected('invictus') && !selected('crepuscolo') &&
+      !(selected('mothership') && window.UniversumHangars) &&
+      !window.UniversumServices?.ids?.some(selected);
+    let request=uid && likelyOrdinary ? reserveOrdinaryDeparture(universeObj,uid) : null;
+    try {
+      return await launchOnlineFleetImpl(universeObj,originPlanetIndex,targetCoords,mission,shipsSelected,cargo,options,request);
+    } finally {
+      // Un errore di validazione prima della generazione del documento
+      // non è una partenza incerta.
+      if (request && !request.ref) clearOrdinaryDeparture(request);
+    }
+  }
+
+  async function launchOnlineFleetImpl(universeObj, originPlanetIndex, targetCoords, mission, shipsSelected, cargo, options, request) {
     const auth = getAuth();
     const db = getDB();
     const user = auth.currentUser;
@@ -202,11 +291,30 @@
     };
 
     const ordinary = !(targeted || dockDispatch || specialist || carrierHangars.length);
+    if (ordinary && !request) request=reserveOrdinaryDeparture(universeObj,user.uid);
+    if (!ordinary && request) { clearOrdinaryDeparture(request); request=null; }
     const ref = uniRef.collection('fleets').doc();
-    const committed = await syncPlayerState(universeObj,{force:true,dispatch:{ref,doc:fleetDoc,
-      ordinary,carrierHangars,specialist:Boolean(specialist),
-      debit:{metal:cargoM,crystal:cargoC,deuterium:cargoD+flightStats.fuelCost+blackHoleExtra}}});
-    if (ordinary && committed !== true) throw new Error('Partenza non confermata.');
+    const dispatch={ref,doc:fleetDoc,ordinary,carrierHangars,specialist:Boolean(specialist),
+      debit:{metal:cargoM,crystal:cargoC,deuterium:cargoD+flightStats.fuelCost+blackHoleExtra}};
+    if (ordinary) {
+      request.ref=ref;
+      request.doc=fleetDoc;
+      request.expectedRevision=universeObj.serviceRevision;
+      dispatch.outcome=request.outcome;
+    }
+    try {
+      const committed=await syncPlayerState(universeObj,{force:true,dispatch});
+      if (ordinary && committed!==true) throw Error('Partenza non confermata.');
+    } catch (error) {
+      if (!ordinary) throw error;
+      const o=request.outcome;
+      if (!o.committed && (!o.mayHaveCommitted || o.definiteFailure)) {
+        clearOrdinaryDeparture(request);
+        throw error;
+      }
+      request.confirmed=!!o.committed;
+      return reconcileOrdinaryDeparture(request);
+    }
     fleetDoc.id = ref.id;
 
     try {
@@ -236,6 +344,7 @@
     } catch (e) { /* fallback ai tempi gia' salvati */ }
 
     if (!universeObj.fleetsInFlight.some(f=>f.id===ref.id)) universeObj.fleetsInFlight.push(fleetDoc);
+    if (ordinary) clearOrdinaryDeparture(request);
 
     return fleetDoc;
   }
@@ -476,6 +585,6 @@
     }
   }
 
-  Object.assign(G, { launchOnlineFleet, recallOnlineFleet, _mpNotifyError, listenOwnFleets, listenIncomingFleets, getLiveFleetDocs, clearLiveFleetDocs, _cleanupReasonText, forceCleanupOnlineFleet, processEmbargoFleets });
+  Object.assign(G, { launchOnlineFleet, ordinaryDepartureStatus, verifyOrdinaryDeparture, ordinaryCheckpointBlocked, recallOnlineFleet, _mpNotifyError, listenOwnFleets, listenIncomingFleets, getLiveFleetDocs, clearLiveFleetDocs, _cleanupReasonText, forceCleanupOnlineFleet, processEmbargoFleets });
 
 })();

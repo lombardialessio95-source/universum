@@ -330,7 +330,9 @@
         const fresh = ref && await ref.get({source:'server'}).catch(()=>null);
         if (fresh?.exists && fresh.data().serviceRevision !== u.serviceRevision) error = conflict();
       }
-      if (error.code === 'service-conflict' && window.UniversumUI?.state?.currentUniverse === u) {
+      const uncertainOrdinary=options.dispatch?.ordinary && options.dispatch.outcome?.mayHaveCommitted &&
+        !options.dispatch.outcome.definiteFailure;
+      if (!uncertainOrdinary && error.code === 'service-conflict' && window.UniversumUI?.state?.currentUniverse === u) {
         const ui = window.UniversumUI;
         ui.toast(error.message,'error');
         await ui.exitToLobbyAfterServerRemoval();
@@ -371,6 +373,10 @@
     const db = getDB();
     const user = auth.currentUser;
     if (!user || !universeObj?.id) return;
+    if (G.ordinaryCheckpointBlocked?.(universeObj,dispatch)) {
+      if (!dispatch && !galLaunch) return false;
+      throw Error('Partenza in verifica: riallinea la partita prima di continuare.');
+    }
     if (dispatch?.ordinary && (!Number.isSafeInteger(universeObj.serviceRevision) ||
         universeObj.serviceRevision < 0 || universeObj.serviceRevision >= Number.MAX_SAFE_INTEGER)) {
       throw new Error('Revisione non valida. Riapri la partita multiplayer.');
@@ -397,7 +403,10 @@
     let moonUpdates = [];
     let dockState,galWrites;
 
-    await db.runTransaction(async (tx) => {
+    const outcome=dispatch?.ordinary ? dispatch.outcome : null;
+    if (outcome) outcome.expectedRevision=expected;
+    try { await db.runTransaction(async (tx) => {
+      if (outcome) outcome.attempts=(outcome.attempts || 0)+1;
       reconciled = [];
       lost = [];
       moonUpdates = [];
@@ -554,7 +563,15 @@
       };
       if (playerSnap?.exists) tx.update(playerRef,playerPayload);
       else tx.set(playerRef,playerPayload,{merge:true});
-    });
+      if (outcome) outcome.mayHaveCommitted=true;
+    }); } catch (error) {
+      // Un rifiuto esplicito del server al primo tentativo non è un
+      // errore ambiguo. Dopo retry SDK, conserviamo il dubbio.
+      if (outcome && outcome.attempts===1 &&
+          ['aborted','permission-denied','unauthenticated','invalid-argument','failed-precondition'].includes(error.code)) outcome.definiteFailure=true;
+      throw error;
+    }
+    if (outcome) outcome.committed=true;
     if (versioned) universeObj.serviceRevision = expected+1;
     for (const write of galWrites) {
       universeObj.galatticaVersions ||= {};

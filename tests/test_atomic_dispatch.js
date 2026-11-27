@@ -21,9 +21,13 @@ async function runTests(fleetSource,syncSource) {
     const store=new Map([[planets+origin,cp(p)],[planets+own,cp(p2)],[planets+enemy,{ownerUid:"enemy"}],[player,{...(versioned?{serviceRevision:2}:{}),specialistFlights:["existing"]}],[fleets+"existing",{resolved:false,ships:{prometheusOracle:1}}]]);
     const mode={fail:null,retry:false,attempts:0,commits:0,settles:0,normalizations:0,reads:[],writes:[],calls:0};
     let next=0;
+    mode.serverReads=[];mode.reloads=0;mode.reloadFail=false;mode.readFail=false;mode.hideFleet=false;mode.timestampWrites=0;
     function snap(path){return {id:path.split("/").pop(),exists:store.has(path),data:()=>store.has(path)?cp(store.get(path)):undefined}}
     function ref(path){return {path,id:path.split("/").pop(),collection:n=>col(path+"/"+n),
-      get:async()=>snap(path),update:async d=>store.set(path,{...store.get(path),...cp(d)})}}
+      get:async options=>{
+        if(options?.source==="server"){mode.serverReads.push(path);if(mode.readFail)throw Error("offline");if(mode.hideFleet&&path.startsWith(fleets))return {id:path.split("/").pop(),exists:false,data:()=>undefined};}
+        return snap(path);
+      },update:async d=>{if(path.startsWith(fleets))mode.timestampWrites++;store.set(path,{...store.get(path),...cp(d)})}}}
     function col(path){return {doc:id=>ref(path+"/"+(id??("new"+(++next)))),
       add:async d=>{mode.calls++;throw Error("La candidata non deve usare add")}}}
     const db={collection:n=>col(n),runTransaction:async cb=>{
@@ -35,7 +39,7 @@ async function runTests(fleetSource,syncSource) {
           set:(r,d,opt)=>{if(mode.fail==="create"&&r.path.startsWith(fleets))throw Error("create rejected");staged.push([r.path,cp(d),!!opt?.merge])},
           update:(r,d)=>staged.push([r.path,cp(d),true])};
         await cb(tx);
-        if(mode.fail==="commit")throw Error("commit rejected");
+        if(mode.fail==="commit")throw Object.assign(Error("commit rejected"),{code:"aborted"});
         if(i+1<count)continue;
         for(const [path,d,merge] of staged){store.set(path,merge?{...store.get(path),...d}:d);mode.writes.push(path)}
         mode.commits++;
@@ -55,6 +59,14 @@ async function runTests(fleetSource,syncSource) {
     const firebase={firestore:{FieldValue:{serverTimestamp:()=>null,delete:()=>null}}};
     new Function("window","firebase",syncSource)(W,firebase);
     new Function("window","firebase",fleetSource)(W,firebase);
+    G.joinOnlineUniverse=async(id,passcode,opts)=>{
+      if(opts?.serverOnly!==true)throw Error("not server-only");
+      mode.reloads++;
+      if(mode.reloadFail)throw Error("reload failed");
+      return {...cp(u),serviceRevision:store.get(player).serviceRevision,planets:[cp(store.get(planets+origin)),cp(store.get(planets+own))],
+        fleetsInFlight:[...store].filter(([k,d])=>k.startsWith(fleets+"new")&&!d.resolved).map(([k,d])=>({...cp(d),id:k.split("/").pop()}))};
+    };
+    W.UniversumUI={state:{currentUniverse:u,isMultiplayerMode:true},startOnlineGame:fresh=>{W.UniversumUI.state.currentUniverse=fresh;},toast:()=>{},exitToLobbyAfterServerRemoval:async()=>{}};
     const launch=(target=enemy,mission="attack",ships={lightFighter:3},cargo={metal:100,crystal:50,deuterium:20},options={})=>G.launchOnlineFleet(u,0,{g:1,s:1,p:Number(target.slice(-1))},mission,ships,cargo,options);
     const state=()=>({local:cp(p),remote:cp(store.get(planets+origin)),flights:u.fleetsInFlight.length,created:[...store.keys()].filter(k=>k.startsWith(fleets+"new")).length,player:cp(store.get(player))});
     return {G,u,p,mode,store,state,launch,planets,player,fleets,W};
@@ -124,7 +136,14 @@ async function runTests(fleetSource,syncSource) {
   });
   await test("T01 missing checkpoint confirmation",async()=>{const f=fixture();f.G.syncPlayerState=async()=>undefined;const before=f.state();await rejected(()=>f.launch(),"not confirmed");eq(f.state(),before,"no local flight");});
   await test("T10 partial: stale revision rejected after another commit",async()=>{const f=fixture();const stale=cp(f.u);await f.launch();const before=f.state();await rejected(()=>f.G.launchOnlineFleet(stale,0,{g:1,s:1,p:3},"attack",{lightFighter:3},{}),"stale revision");eq(f.state(),before,"no second commit");});
-  await test("T09 diagnostic: ambiguous acknowledgment leaves local stale",async()=>{const f=fixture();f.mode.fail="lostAck";await rejected(()=>f.launch(),"lost ack");const s=f.state();eq([s.created,s.flights,s.local.fleet.lightFighter,s.remote.fleet.lightFighter],[1,0,10,7],"ambiguity reproduced");});
+  await test("T09-03 lost acknowledgment reconciled from server",async()=>{const f=fixture();f.mode.fail="lostAck";const d=await f.launch();const fresh=f.W.UniversumUI.state.currentUniverse;eq([f.state().created,fresh.fleetsInFlight.length,fresh.planets[0].fleet.lightFighter,f.state().remote.fleet.lightFighter,fresh.serviceRevision],[1,1,7,7,3],"one debit");eq(f.mode.serverReads,[f.fleets+d.id],"same server ID");eq([f.mode.reloads,f.mode.timestampWrites],[1,0],"no timestamp rewrite");eq(f.G.ordinaryDepartureStatus(fresh),null,"cleared");});
+  await test("T09-04/06 unavailable server then explicit verification",async()=>{const f=fixture();f.mode.fail="lostAck";f.mode.readFail=true;const e=await rejected(()=>f.launch(),"uncertain");eq(e.code,"ordinary-departure-pending","pending");const pending=f.G.ordinaryDepartureStatus(f.u);eq(pending.id,e.fleetId,"same ID");eq(await f.G.syncPlayerState(f.u,{force:true}),false,"no stale save");const attempts=f.mode.attempts;await rejected(()=>f.launch(),"no repeat");eq(f.mode.attempts,attempts,"no transaction");f.mode.readFail=false;const d=await f.G.verifyOrdinaryDeparture(f.u);eq(d.id,pending.id,"original ID");eq(f.state().created,1,"one fleet");eq(f.G.ordinaryDepartureStatus(f.W.UniversumUI.state.currentUniverse),null,"cleared");});
+  await test("T09-05 absent document is not definitive",async()=>{const f=fixture();f.mode.fail="lostAck";f.mode.hideFleet=true;const e=await rejected(()=>f.launch(),"absent");eq(e.code,"ordinary-departure-pending","pending");eq(f.mode.reloads,0,"no reload");eq(f.G.ordinaryDepartureStatus(f.u).id,e.fleetId,"kept");f.mode.hideFleet=false;await f.G.verifyOrdinaryDeparture(f.u);eq(f.state().created,1,"one fleet");});
+  await test("T09-08 completed mission never reactivated",async()=>{const f=fixture();f.mode.fail="lostAck";f.mode.readFail=true;const e=await rejected(()=>f.launch(),"uncertain");const d=f.store.get(f.fleets+e.fleetId);d.resolved=true;d.status="completed";f.mode.readFail=false;await f.G.verifyOrdinaryDeparture(f.u);eq(f.W.UniversumUI.state.currentUniverse.fleetsInFlight.length,0,"not active");eq(f.mode.timestampWrites,0,"no timestamp rewrite");});
+  await test("T09-09 voluntary identical departure gets new ID",async()=>{const f=fixture();f.mode.fail="lostAck";const d=await f.launch();f.mode.fail=null;const fresh=f.W.UniversumUI.state.currentUniverse;const d2=await f.G.launchOnlineFleet(fresh,0,{g:1,s:1,p:3},"attack",{lightFighter:3},{metal:100,crystal:50,deuterium:20});ok(d.id!==d2.id,"new request");eq([f.state().created,f.state().remote.fleet.lightFighter],[2,4],"two voluntary debits");});
+  await test("T09-10 double click and rebuilt universe blocked",async()=>{const f=fixture();f.mode.fail="lostAck";f.mode.readFail=true;const first=f.launch();const second=f.launch();const rs=await Promise.allSettled([first,second]);eq(rs.map(x=>x.status),["rejected","rejected"],"pending and duplicate");eq(f.state().created,1,"one fleet");const fresh=cp(f.u);f.W.UniversumUI.state.currentUniverse=fresh;eq(f.G.ordinaryDepartureStatus(fresh).id,rs[0].reason.fleetId,"survives reconstructed state");await rejected(()=>f.G.launchOnlineFleet(fresh,0,{g:1,s:1,p:3},"attack",{lightFighter:3},{}),"blocked");eq(f.state().created,1,"no second fleet");});
+  await test("T09-11 confirmed commit but local reload fails",async()=>{const f=fixture();f.mode.fail="lostAck";f.mode.reloadFail=true;const e=await rejected(()=>f.launch(),"reload");eq([e.code,e.confirmed],["ordinary-departure-pending",true],"confirmed but pending");eq(await f.G.syncPlayerState(f.u,{force:true}),false,"no stale save");f.mode.reloadFail=false;await f.G.verifyOrdinaryDeparture(f.u);eq([f.state().created,f.mode.reloads,f.mode.timestampWrites],[1,2,0],"reconciled once");eq(await f.G.syncPlayerState(f.u,{force:true}),false,"retired state cannot save");});
+  await test("T09-11 SDK confirmed then local application error",async()=>{const f=fixture();const original=f.G.syncPlayerState;f.G.syncPlayerState=async(...args)=>{await original(...args);throw Error("local apply failure")};const d=await f.launch();eq(f.state().created,1,"one fleet");eq(f.W.UniversumUI.state.currentUniverse.planets[0].fleet.lightFighter,7,"no double debit");eq(f.mode.serverReads,[f.fleets+d.id],"server confirmation");});
   return results;
 }
 const root = path.join(__dirname, '..');
