@@ -1,0 +1,131 @@
+name: AT04-I01C single isolated diagnostic
+on:
+  push:
+    branches: ['diagnostic/AT04-I01C-emulator-e612e5c']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Recover exact local candidate and check hashes
+        shell: bash
+        run: |
+          set -euo pipefail
+          logs="$RUNNER_TEMP/at04c-logs"
+          mkdir -p "$logs" "$RUNNER_TEMP/at04c-emulator"
+          exec > >(tee "$logs/reconstruction.log") 2>&1
+          base64 -d .at04-i01c/checkpoint.bundle.b64 > "$RUNNER_TEMP/at04c.bundle"
+          echo "0dd53b5f505214cd60944680d34621260e3cb76f433799b15f928ae289e31e18  $RUNNER_TEMP/at04c.bundle" | sha256sum -c
+          git bundle verify "$RUNNER_TEMP/at04c.bundle"
+          git fetch "$RUNNER_TEMP/at04c.bundle" refs/heads/candidate/AT04-I01C:refs/heads/at04c-local-candidate
+          git worktree add --detach "$RUNNER_TEMP/at04c-game" a9120900424af5aaf72eb2711e3d1cc21505bea9
+          cd "$RUNNER_TEMP/at04c-game"
+          test "$(git rev-parse HEAD)" = a9120900424af5aaf72eb2711e3d1cc21505bea9
+          test "$(git rev-parse HEAD^{tree})" = 164af2b529223eec0dff72ba958b8d72409c42ca
+          test "$(git hash-object firestore.rules)" = ae39d66baeced570a2338a5e778a97ca1725f64f
+          test "$(git hash-object .github/workflows/verify-release.yml)" = dbbabf89f705888b16de50bf24ca7dfba303d379
+          git merge-base --is-ancestor 63a05400049430676e66c483db88e807f483dc9e HEAD
+          git fsck --full
+          git diff --exit-code HEAD
+          git show fb8f9e1b79c8e7039d8191021fce4a190202d3ae:firestore.rules > "$RUNNER_TEMP/at04c-emulator/baseline.rules"
+          cp firestore.rules "$RUNNER_TEMP/at04c-emulator/candidate.rules"
+          sha256sum "$RUNNER_TEMP/at04c-emulator/"*.rules
+          git archive --format=zip --output="$RUNNER_TEMP/AT04-I01C-diagnostic.zip" HEAD
+          sha256sum "$RUNNER_TEMP/AT04-I01C-diagnostic.zip"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install same isolated dependency versions as AT05
+        shell: bash
+        run: |
+          set -euo pipefail
+          deps="$RUNNER_TEMP/at04c-deps"
+          export PLAYWRIGHT_BROWSERS_PATH="$RUNNER_TEMP/at04c-browsers"
+          npm install --prefix "$deps" --no-audit --no-fund firebase-tools@13.35.1 firebase@10.12.2 firebase-admin@12.7.0 playwright@1.51.1
+          node "$deps/node_modules/playwright/cli.js" install --with-deps chromium
+          export NODE_PATH="$deps/node_modules"
+          chrome="$(node -p "require('playwright').chromium.executablePath()")"
+          sdk="$deps/node_modules/firebase"
+          test -x "$chrome"
+          test -f "$sdk/firebase-app-compat.js"
+          test -f "$sdk/firebase-firestore-compat.js"
+          node --version
+          java -version
+          "$deps/node_modules/.bin/firebase" --version
+          "$chrome" --version
+          "$deps/node_modules/.bin/firebase" setup:emulators:firestore
+          jar="$HOME/.cache/firebase/emulators/cloud-firestore-emulator-v1.19.8.jar"
+          test -s "$jar"
+          sha256sum "$jar"
+          printf '%s\n' "NODE_PATH=$NODE_PATH" "CHROME_BIN=$chrome" "FIREBASE_SDK_DIR=$sdk" "PLAYWRIGHT_BROWSERS_PATH=$PLAYWRIGHT_BROWSERS_PATH" "FIRESTORE_EMULATOR_JAR=$jar" >> "$GITHUB_ENV"
+      - name: Red and green, real SDK, regressions, coverage and budget
+        shell: bash
+        run: |
+          set -euo pipefail
+          logs="$RUNNER_TEMP/at04c-logs"
+          cli="$RUNNER_TEMP/at04c-deps/node_modules/.bin/firebase"
+          cd "$RUNNER_TEMP/at04c-emulator"
+          printf '%s\n' '{"firestore":{"rules":"firestore.rules"},"emulators":{"firestore":{"host":"127.0.0.1","port":8080},"ui":{"enabled":false},"singleProjectMode":true}}' > firebase.json
+          : > "$logs/results.txt"
+          failed=0
+          group() {
+            local name="$1" project="$2" source="$3" code
+            cp "$source.rules" firestore.rules
+            cmp "$source.rules" firestore.rules
+            sha256sum firestore.rules | tee "$logs/$name-loaded-file.sha256"
+            set +e
+            GCLOUD_PROJECT="$project" GOOGLE_CLOUD_PROJECT="$project" "$cli" emulators:exec --project "$project" --only firestore --config firebase.json "bash '$GITHUB_WORKSPACE/.at04-i01c/run.sh' '$name' '$project'" 2>&1 | tee "$logs/$name-emulator.log"
+            code=${PIPESTATUS[0]}
+            set -e
+            echo "group $name exit=$code" | tee -a "$logs/results.txt"
+            test ! -f firestore-debug.log || cp firestore-debug.log "$logs/$name-firestore-debug.log"
+            if [ "$code" -ne 0 ]; then failed=1; fi
+          }
+          group red demo-universum baseline
+          group green demo-universum candidate
+          group at03 demo-universum-at03-i01 candidate
+          group at05 demo-universum-at05 candidate
+          cd "$RUNNER_TEMP/at04c-game"
+          for test in tests/test_d05_rules.py tests/test_specialist_rules.py tests/test_suprema_privacy_emulator.py; do
+            name="$(basename "$test" .py)"
+            set +e
+            timeout 240s python3 "$test" 2>&1 | tee "$logs/$name.log"
+            code=${PIPESTATUS[0]}
+            set -e
+            echo "$name exit=$code" | tee -a "$logs/results.txt"
+            if [ "$code" -ne 0 ]; then failed=1; fi
+          done
+          for test in tests/test_*.js; do
+            name="$(basename "$test" .js)"
+            set +e
+            timeout 120s node "$test" > "$logs/$name.log" 2>&1
+            code=$?
+            set -e
+            echo "$name exit=$code" | tee -a "$logs/results.txt"
+            if [ "$code" -ne 0 ]; then failed=1; fi
+          done
+          python3 tools/build_release.py
+          git diff --exit-code HEAD
+          grep -Ein 'maximum of 1000|evaluation.*limit|exceed(ed|s)?.*expression|too many.*(get|access)' "$logs"/*emulator.log "$logs"/*firestore-debug.log > "$logs/budget-suspicions.txt" || true
+          echo "Aggregate result: $failed" | tee -a "$logs/results.txt"
+          exit "$failed"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: AT04-I01C-diagnostic-logs
+          path: ${{ runner.temp }}/at04c-logs/
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: AT04-I01C-exact-candidate
+          path: ${{ runner.temp }}/AT04-I01C-diagnostic.zip
