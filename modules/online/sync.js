@@ -456,7 +456,11 @@
         for (const r of receipts) window.__UniversumGalaxyModules.dockSpecialShips(dockState,r,{...r.ships},r.arrivedAt);
       }
       const nowTs = Date.now();
-      const flightRefs = player.specialistFlights || [];
+      // AT03-I02: reuse the existing flight list for the debit binding, also
+      // when a legacy unversioned profile has not yet been checkpointed.
+      const galSpecialist = Boolean(galLaunch?.doc && services?.ids.some(id=>galLaunch.doc.ships?.[id]>0));
+      const specialistRegistration = Boolean(dispatch?.specialist || galSpecialist);
+      const flightRefs = (specialistRegistration ? identity : player).specialistFlights || [];
       const checkCapacity = versioned && services && ((dispatch && !dispatch.ordinary) || planets.some(p=>p.shipyardQueue?.some(lot=>services.ids.includes(lot.id))));
       let activeRefs = flightRefs;
       const totals = {};
@@ -483,6 +487,8 @@
         }
         if (!dispatch.ordinary && !dispatch.doc.targetGalatticaId && (dispatch.specialist || (!dispatch.doc.originPlanetId && !dispatch.carrierHangars?.length))) activeRefs = [...activeRefs,dispatch.ref.id];
       }
+
+      if (galSpecialist) activeRefs = [...activeRefs,galLaunch.ref.id];
 
       // Conserva il calcolo dei punti delle partenze ordinarie sullo stock
       // dopo l'addebito, senza mutare il pianeta prima del commit.
@@ -587,6 +593,7 @@
         ...(versioned ? {serviceRevision:expected+1,serviceCheckpoint:nowTs,
           checkpointPlanets:entries.filter((e,i)=>snaps[i].data()?.ownerUid===user.uid).map(e=>e.ref.id),
           specialistBuilt:universeObj.specialistBuilt || {}, specialistFlights:activeRefs} : {}),
+        ...(!versioned && specialistRegistration ? {specialistFlights:activeRefs} : {}),
         ...(dockState || universeObj.crepuscoloLimbo || player.orbitalDeltas ? {
           crepuscoloLimbo:(dockState || universeObj).crepuscoloLimbo || null,
           orbitalDeltas:(dockState || universeObj).galaxyDeltas || {}} : {}),

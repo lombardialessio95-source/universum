@@ -7,7 +7,7 @@ const rules = fs.readFileSync(path.join(base, 'firestore.rules'), 'utf8');
 const js = fs.readdirSync(path.join(base, 'modules/online')).filter(x => x.endsWith('.js'))
   .map(x => fs.readFileSync(path.join(base, 'modules/online', x), 'utf8')).join('\n');
 const checks = [
-  ['creazione flotta collegata a origine propria', /function validHumanFleetCreate\(uniId,fleetId,d\)/.test(rules) && /d\.originKey==canonicalFleetKey\(d\.originCoords\)/.test(rules) && /validFleetPlanetOrigin\(uniId,d,ordinary\)/.test(rules) && /before\.ownerUid==request\.auth\.uid/.test(rules) && /after\.ownerUid==request\.auth\.uid/.test(rules)],
+  ['creazione flotta collegata a origine propria', /function validHumanFleetCreate\(uniId,fleetId,d\)/.test(rules) && /d\.originKey==canonicalFleetKey\(d\.originCoords\)/.test(rules) && /validFleetPlanetOrigin\(uniId,d,ordinary,fleetId,specialist\)/.test(rules) && /before\.ownerUid==request\.auth\.uid/.test(rules) && /after\.ownerUid==request\.auth\.uid/.test(rules)],
   ['modifica flotta limitata ai partecipanti', /allow update: if signedIn\(\) && fleetParty\(\)/.test(rules)],
   ['missione immutabile salvo richiamo proprio', /request\.resource\.data\.mission == resource\.data\.mission/.test(rules) && /mission == 'recall'/.test(rules)],
   ['blocco creazione NPC raid su terzi', /function validNpcRaidCreate\(uniId, fleetId\)/.test(rules) && /\.data\.ownerUid == request\.auth\.uid/.test(rules)],

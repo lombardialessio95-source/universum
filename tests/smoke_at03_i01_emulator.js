@@ -1,4 +1,4 @@
-// AT03-I01 structural creation only. Real SDK; dedicated loopback Emulator using local firestore.rules.
+// AT03-I01/I02: structural creation and specialist debit only. Real SDK, isolated loopback Emulator.
 'use strict';
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
 const host=process.env.FIRESTORE_EMULATOR_HOST||'';
@@ -208,5 +208,133 @@ test('Forced Galattica return with equal arrival and return times',async()=>{
  for(let s=3;s<100;s++){gal.coords.s=s;if(a.W.UniversumGalaxy.generateProceduralSlot(a.u,1,s,2).ownerType!=='bot')break;}
  a.u.galattiche=[gal];await a.G.syncPlayerState(a.u,{force:true});const oldS=gal.coords.s;let to={g:1,s:oldS+1,p:2};for(let s=oldS+1;s<100;s++){to={g:1,s,p:2};const slot=a.W.UniversumGalaxy.generateProceduralSlot(a.u,1,s,2);if(!slot.moon&&!slot.bacinoSpaziale)break;}
  await a.G.jumpOnlineGalattica(a.u,'g1',to);const q=await a.raw.collection(base+'/fleets').get({source:'server'});assert.equal(q.size,1);const f=q.docs[0].data();assert.equal(f.mission,'deploy');assert.equal(f.galatticaReturn,true);assert.equal(f.arrivalTime,f.returnTime);assert.equal(f.defenderUid,uid);
+});
+// AT03-I02: negative cases use the real Rules and assert rollback of the entire batch.
+async function specialistFixture(label,stock={},options={}){
+ const u=await seed('i02_'+label,{legacy:options.legacy||false});
+ const h=u.planets[0];Object.assign(h.fleet,stock);if(options.inbox)h.inbox=options.inbox;
+ const own={...cp(h),id:'p2',coords:{g:1,s:1,p:2},fleet:{}};delete own.inbox;
+ await adminSet(home(u.id),h);await adminSet(room(u.id)+'/planets/1_1_2',own);u.planets.push(own);
+ const a=client(cp(u));a.W.UniversumServices={ids:['hephaestusForge','prometheusOracle'],forge:'hephaestusForge',oracle:'prometheusOracle',transfer:(u,m,t,ships)=>Boolean(ships.hephaestusForge||ships.prometheusOracle),settlePlanet:()=>{}};
+ for(const id of ['hephaestusForge','prometheusOracle'])a.W.UniversumData.SHIPS[id]={cargo:100000,cost:{metal:1,crystal:1,deuterium:0}};
+ return {u,a,own};
+}
+function specialistDoc(ships={hephaestusForge:1},patch={}){return fleet({defenderUid:uid,targetCoords:{g:1,s:1,p:2},targetKey:'1_1_2',mission:'deploy',ships,fleet:ships,...patch});}
+async function specialBatch(x,{ships={hephaestusForge:1},originUpdate,register=true,ids=['new1'],registry,patch={}}={}){
+ const {u,a}=x,base=room(u.id),b=a.raw.batch(),p=(await a.read(player(u.id))).data();
+ if(originUpdate)b.update(a.raw.doc(home(u.id)),{...originUpdate,...(p.serviceRevision===undefined?{}:{serviceRevision:p.serviceRevision+1})});
+ if(register)b.update(a.raw.doc(player(u.id)),{specialistFlights:registry??[...(p.specialistFlights||[]),...ids],...(p.serviceRevision===undefined?{}:{serviceRevision:p.serviceRevision+1})});
+ for(const id of ids)b.set(a.raw.doc(base+'/fleets/'+id),specialistDoc(ships,patch));
+ return b.commit();
+}
+async function deniedUnchanged(x,run){
+ const {u,a}=x;const snapshot=async()=>({home:(await a.read(home(u.id))).data(),player:(await a.read(player(u.id))).data(),flights:(await a.fleets()).docs.map(s=>[s.id,s.data()])});
+ const before=await snapshot();await denied(run);assert.deepEqual(await snapshot(),before,'denied batch must not change stock, profile or flights');
+}
+test('I02 R08 original specialist absent, standalone create',async()=>{
+ const x=await specialistFixture('absent');await deniedUnchanged(x,()=>x.a.raw.doc(room(x.u.id)+'/fleets/standalone').set(specialistDoc()));
+});
+test('I02 existing stock but standalone create',async()=>{const x=await specialistFixture('standalone',{hephaestusForge:1});await deniedUnchanged(x,()=>x.a.raw.doc(room(x.u.id)+'/fleets/standalone').set(specialistDoc()));});
+test('I02 registered flight without stock debit',async()=>{const x=await specialistFixture('nodebit',{hephaestusForge:2});await deniedUnchanged(x,()=>specialBatch(x));});
+test('I02 debit without existing profile flight registration',async()=>{const x=await specialistFixture('noreg',{hephaestusForge:2},{legacy:true});await deniedUnchanged(x,()=>specialBatch(x,{originUpdate:{'fleet.hephaestusForge':1},register:false}));});
+test('I02 insufficient stock cannot be clamped to zero',async()=>{const x=await specialistFixture('understock',{hephaestusForge:1});await deniedUnchanged(x,()=>specialBatch(x,{ships:{hephaestusForge:2},originUpdate:{'fleet.hephaestusForge':0}}));});
+test('I02 partial debit cannot authorize two specialists',async()=>{const x=await specialistFixture('partial',{hephaestusForge:2,prometheusOracle:1});await deniedUnchanged(x,()=>specialBatch(x,{ships:{hephaestusForge:1,prometheusOracle:1},originUpdate:{'fleet.hephaestusForge':1}}));});
+test('I02 two IDs cannot reuse one debit',async()=>{const x=await specialistFixture('twoids',{hephaestusForge:2});await deniedUnchanged(x,()=>specialBatch(x,{ids:['new1','new2'],originUpdate:{'fleet.hephaestusForge':1}}));});
+test('I02 negative inbox is not a debit',async()=>{const x=await specialistFixture('negativeinbox',{hephaestusForge:1});await deniedUnchanged(x,()=>specialBatch(x,{originUpdate:{'inbox.fleet.hephaestusForge':-1}}));});
+test('I02 pending credit cannot be retained after debit',async()=>{const x=await specialistFixture('keepinbox',{hephaestusForge:1},{inbox:{fleet:{hephaestusForge:1}}});await deniedUnchanged(x,()=>specialBatch(x,{originUpdate:{'fleet.hephaestusForge':1}}));});
+test('I02 pending loss must reduce available stock',async()=>{const x=await specialistFixture('loss',{hephaestusForge:1},{inbox:{fleet:{hephaestusForge:-1}}});await deniedUnchanged(x,()=>specialBatch(x,{originUpdate:{'fleet.hephaestusForge':0,inbox:firebase.firestore.FieldValue.delete()}}));});
+test('I02 already registered ID cannot authorize another create',async()=>{const x=await specialistFixture('oldid',{hephaestusForge:2});await adminUpdate(player(x.u.id),{specialistFlights:['new1']});await deniedUnchanged(x,()=>specialBatch(x,{originUpdate:{'fleet.hephaestusForge':1},registry:['new1']}));});
+test('I02 fake hangar/dock fields do not bypass specialist debit',async()=>{const x=await specialistFixture('exempt',{hephaestusForge:1});await deniedUnchanged(x,()=>specialBatch(x,{ships:{hephaestusForge:1,mothership:1,invictus:1},patch:{carrierHangars:[{id:'fake',fighters:0}],originPlanetId:'p1',birthBacinoAt:1}}));});
+for(const [mission,ships] of [['deploy',{hephaestusForge:1}],['transport',{prometheusOracle:1}],['deploy',{hephaestusForge:1,prometheusOracle:1,lightFighter:3}]])test('I02 actual SDK '+mission+' '+Object.keys(ships).join('+'),async()=>{
+ const x=await specialistFixture('positive',{hephaestusForge:2,prometheusOracle:2});const {a,u,own}=x;
+ const d=await a.G.launchOnlineFleet(a.u,0,own.coords,mission,ships,{});
+ const h=(await a.read(home(u.id))).data(),p=(await a.read(player(u.id))).data();for(const [id,n] of Object.entries(ships))assert.equal(h.fleet[id],u.planets[0].fleet[id]-n,id);assert.deepEqual(p.specialistFlights,[d.id]);assert.equal((await a.read(opPath(u.id,d.id))).exists,false);
+});
+test('I02 existing pending credit is consumed with correct net stock',async()=>{const x=await specialistFixture('credit',{hephaestusForge:1},{inbox:{fleet:{hephaestusForge:1}}});const {a,u,own}=x;const d=await a.G.launchOnlineFleet(a.u,0,own.coords,'deploy',{hephaestusForge:1},{});const h=(await a.read(home(u.id))).data();assert.equal(h.fleet.hephaestusForge,1);assert.equal(h.inbox,undefined);assert.deepEqual((await a.read(player(u.id))).data().specialistFlights,[d.id]);});
+test('I02 legacy unversioned specialist transfer uses existing registry',async()=>{const x=await specialistFixture('legacy',{hephaestusForge:1},{legacy:true});const {a,u,own}=x;await adminUpdate(player(u.id),{specialistFlights:['old']});const d=await a.G.launchOnlineFleet(a.u,0,own.coords,'transport',{hephaestusForge:1},{});assert.equal((await a.read(home(u.id))).data().fleet.hephaestusForge,0);const p=(await a.read(player(u.id))).data();assert.deepEqual(p.specialistFlights,['old',d.id]);assert.equal(p.serviceRevision,undefined);});
+test('I02 two real SDK clients compete for last specialist',async()=>{
+ const x=await specialistFixture('compete',{hephaestusForge:1});const y=client(cp(x.u));y.W.UniversumServices=x.a.W.UniversumServices;y.W.UniversumData.SHIPS=x.a.W.UniversumData.SHIPS;
+ // A conflict reload is a UI concern, not part of this test.
+ x.a.W.UniversumUI=undefined;y.W.UniversumUI=undefined;
+ const run=a=>a.G.launchOnlineFleet(a.u,0,x.own.coords,'deploy',{hephaestusForge:1},{});const out=await Promise.allSettled([run(x.a),run(y)]);assert.equal(out.filter(r=>r.status==='fulfilled').length,1,JSON.stringify(out.map(r=>r.status==='rejected'?r.reason.message:r.status)));assert.equal((await x.a.fleets()).size,1);assert.equal((await x.a.read(home(x.u.id))).data().fleet.hephaestusForge,0);assert.equal((await x.a.read(player(x.u.id))).data().specialistFlights.length,1);
+});
+test('I02 legacy active specialist flight can still be resolved/updated',async()=>{const x=await specialistFixture('inflight');const path=room(x.u.id)+'/fleets/old';await adminSet(path,specialistDoc());await x.a.raw.doc(path).update({schemaVersion:2});assert.equal((await x.a.read(path)).data().schemaVersion,2);});
+// These batches contain valid stock/registry writes so I01 quantity checks
+// cannot appear to pass solely because the new R08 admission is missing.
+for(const [label,ships] of [['zero',{hephaestusForge:0,lightFighter:1}],['negative',{hephaestusForge:-1}],['fraction',{hephaestusForge:0.5}],['unknown',{hephaestusForge:1,unknownShip:1}],['other fraction',{hephaestusForge:1,lightFighter:0.5}]])test('I02 I01 quantity gate '+label,async()=>{
+ const x=await specialistFixture('quantity',{hephaestusForge:2});const q=ships.hephaestusForge;
+ await deniedUnchanged(x,()=>specialBatch(x,{ships,originUpdate:{'fleet.hephaestusForge':2-q}}));
+});
+test('I02 registered exact atomic batch with existing active reference',async()=>{
+ const x=await specialistFixture('atomic',{hephaestusForge:2,prometheusOracle:1});const {a,u}=x;
+ await adminUpdate(player(u.id),{specialistFlights:['existing']});
+ await specialBatch(x,{ships:{hephaestusForge:1,prometheusOracle:1},originUpdate:{'fleet.hephaestusForge':1,'fleet.prometheusOracle':0}});
+ assert.equal((await a.fleets()).size,1);const h=(await a.read(home(u.id))).data();assert.equal(h.fleet.hephaestusForge,1);assert.equal(h.fleet.prometheusOracle,0);assert.deepEqual((await a.read(player(u.id))).data().specialistFlights,['existing','new1']);
+});
+async function fullSpecialistWorld(label,n=2){
+ const model=cp(require(path.join(root,'tests/helpers/game.js')).uni(2));Object.assign(model,{id:'i02_'+label+'_'+runId+'_'+(++serial),serviceRevision:0,emperor:'Pilot',speed:1,createdAt:Date.now(),lastSeen:Date.now(),specialistBuilt:{hephaestusForge:1,prometheusOracle:1}});
+ Object.assign(model.researches,{impulseDrive:3,computerTech:10});
+ for(let k=2;k<n;k++){const p=cp(model.planets[1]);p.id='colony'+k;p.name=p.id;p.coords={g:1,s:k+1,p:2};model.planets.push(p);}
+ for(const p of model.planets)Object.assign(p,{ownerUid:uid,ownerName:'Pilot',maxTemp:34,fieldsMax:240,lastUpdated:Date.now(),isNpc:false});
+ const base=room(model.id);await adminSet(base,{founderUid:uid,ownerUid:uid,name:label,speed:1,galaxies:3,systemsPerGalaxy:100});
+ return {model,base,href:base+'/planets/1_1_2',dref:base+'/planets/1_2_2'};
+}
+async function persistFullFixture(x){
+ const {model,base}=x;await adminSet(player(model.id),{uid,serviceRevision:0,joinedAt:1,nickname:'Pilot',researches:model.researches,specialistBuilt:model.specialistBuilt,specialistFlights:[],serviceCheckpoint:Date.now(),researchModelVersion:1,checkpointPlanets:model.planets.map(p=>[p.coords.g,p.coords.s,p.coords.p].join('_'))});
+ for(let start=0;start<model.planets.length;start+=10)await Promise.all(model.planets.slice(start,start+10).map(p=>adminSet(base+'/planets/'+[p.coords.g,p.coords.s,p.coords.p].join('_'),p)));
+}
+async function resolveTwice(a,b,base,fp,speed=1){
+ const resolve=async(c)=>{const snap=await c.read(fp);c.G.getLiveFleetDocs=()=>[snap];await c.G.resolveArrivedOnlineFleets(base.split('/').pop(),speed);};
+ await Promise.all([resolve(a),resolve(b)]);await resolve(a);
+}
+for(const mission of ['deploy','transport'])test('I02 full engine '+mission+' with concurrent resolver and reconciliation',async()=>{
+ const x=await fullSpecialistWorld(mission);const {model,base,href,dref}=x;model.planets[0].fleet={hephaestusForge:1,prometheusOracle:1,largeCargo:2};await persistFullFixture(x);
+ const a=fullClient(model),b=fullClient(model);const f=await a.G.launchOnlineFleet(a.u,0,model.planets[1].coords,mission,{hephaestusForge:1,prometheusOracle:1,largeCargo:1},{metal:100});const fp=base+'/fleets/'+f.id;
+ let h=(await a.read(href)).data();assert.equal(h.fleet.hephaestusForge,0);assert.equal(h.fleet.prometheusOracle,0);assert.equal(h.fleet.largeCargo,1);assert.deepEqual((await a.read(player(model.id))).data().specialistFlights,[f.id]);
+ await adminUpdate(fp,{arrivalTime:Date.now()-1,returnTime:Date.now()+60000});await resolveTwice(a,b,base,fp);let flight=(await a.read(fp)).data();const delivered=(await a.read(dref)).data();assert.equal(delivered.inbox.resources.metal,100);
+ if(mission==='deploy'){assert.equal(flight.resolved,true);assert.equal(delivered.inbox.fleet.hephaestusForge,1);assert.equal(delivered.inbox.fleet.prometheusOracle,1);assert.equal(delivered.inbox.fleet.largeCargo,1);}
+ else {assert.equal(flight.status,'returning');assert.equal(delivered.inbox.fleet?.hephaestusForge||0,0);assert.equal(flight.ships.hephaestusForge,1);await adminUpdate(fp,{returnTime:Date.now()-1});await resolveTwice(a,b,base,fp);flight=(await a.read(fp)).data();assert.equal(flight.resolved,true);h=(await a.read(href)).data();assert.equal(h.inbox.fleet.hephaestusForge,1);assert.equal(h.inbox.fleet.prometheusOracle,1);assert.equal(h.inbox.fleet.largeCargo,1);}
+ const fresh=await a.G.joinOnlineUniverse(model.id);await a.G.syncPlayerState(fresh,{force:true});await a.G.syncPlayerState(fresh,{force:true});
+ h=(await a.read(href)).data();const d=(await a.read(dref)).data();assert.equal(h.inbox,undefined);assert.equal(d.inbox,undefined);assert.equal((h.fleet.hephaestusForge||0)+(d.fleet.hephaestusForge||0),1);assert.equal((h.fleet.prometheusOracle||0)+(d.fleet.prometheusOracle||0),1);assert.equal((h.fleet.largeCargo||0)+(d.fleet.largeCargo||0),2);
+});
+test('I02 60 planets and all 17 classes, full engine and real SDK',async()=>{
+ const x=await fullSpecialistWorld('scale17',60),{model,base,href}=x;const keys=[...ids,'hephaestusForge','prometheusOracle','invictus','crepuscolo'];const h=model.planets[0];h.fleet=Object.fromEntries(keys.filter(k=>!['invictus','crepuscolo'].includes(k)).map(k=>[k,1]));h.mothershipHangars=[{id:'full17',fighters:20}];h.bacinoSpaziale={status:'active',startedAt:123,invictusActive:1,crepuscolo:{status:'active'}};await persistFullFixture(x);
+ const a=fullClient(model);const f=await a.G.launchOnlineFleet(a.u,0,model.planets[1].coords,'deploy',Object.fromEntries(keys.map(k=>[k,1])),{});const p=(await a.read(href)).data();assert.equal(p.fleet.hephaestusForge,0);assert.equal(p.fleet.prometheusOracle,0);assert.equal(p.bacinoSpaziale.invictusActive,0);assert.equal(p.bacinoSpaziale.crepuscolo.status,'inMission');assert.equal(p.mothershipHangars.length,0);assert.equal(Object.keys((await a.read(base+'/fleets/'+f.id)).data().ships).length,17);assert.deepEqual((await a.read(player(model.id))).data().specialistFlights,[f.id]);
+});
+test('I02 legacy Galattica forced return binds actual orbital stock',async()=>{
+ const x=await fullSpecialistWorld('legacygal'),{model,base}=x;await persistFullFixture(x);const a=fullClient(model),gal={id:'legacy',name:'Legacy',coords:{g:1,s:3,p:2},resources:{metal:500,crystal:0,deuterium:1e11},orbitingFleet:{hephaestusForge:2,prometheusOracle:1,lightFighter:10},defenses:{}};
+ // A legacy orbit may contain specialists even though normal construction and launch disallow them.
+ for(let s=3;s<100;s++){gal.coords.s=s;if(a.W.UniversumGalaxy.generateProceduralSlot(a.u,1,s,2).ownerType!=='bot')break;}
+ a.u.galattiche=[gal];await a.G.syncPlayerState(a.u,{force:true});let to={g:1,s:gal.coords.s+1,p:2};for(let s=gal.coords.s+1;s<100;s++){to={g:1,s,p:2};const slot=a.W.UniversumGalaxy.generateProceduralSlot(a.u,1,s,2);if(!slot.moon&&!slot.bacinoSpaziale)break;}
+ await a.G.jumpOnlineGalattica(a.u,'legacy',to);const q=await a.raw.collection(base+'/fleets').get({source:'server'});assert.equal(q.size,1);const doc=q.docs[0];assert.equal(doc.data().galatticaReturn,true);assert.equal(doc.data().ships.hephaestusForge,1);assert.equal(doc.data().ships.prometheusOracle,1);assert.deepEqual((await a.read(base+'/galattiche/'+uid+'~legacy')).data().state.orbitingFleet,{});assert.deepEqual((await a.read(player(model.id))).data().specialistFlights,[doc.id]);
+});
+test('I02 actual completed specialist can depart after existing checkpoint',async()=>{
+ const x=await fullSpecialistWorld('completion'),{model,href}=x;model.specialistBuilt={};model.planets[0].fleet={};await persistFullFixture(x);const a=fullClient(model);
+ a.W.UniversumEngine.buildUnits(a.u,0,'hephaestusForge',1);await a.G.syncPlayerState(a.u,{force:true});const lot=a.u.planets[0].shipyardQueue[0];assert(lot);const until=lot.nextUnitEndTime+1;
+ a.W.UniversumEngine.processOfflineProgress(a.u,until);assert.equal(a.u.planets[0].fleet.hephaestusForge,1);
+ const before=(await a.read(href)).data();assert.equal(before.fleet.hephaestusForge||0,0);
+ const launch=()=>a.G.launchOnlineFleet(a.u,0,model.planets[1].coords,'deploy',{hephaestusForge:1},{});
+ // The completed local unit is not server stock until the existing checkpoint.
+ await denied(launch);assert.deepEqual((await a.read(href)).data(),before);assert.equal(a.u.planets[0].fleet.hephaestusForge,1);
+ const saved=a.G.syncPlayerState(a.u,{force:true});const launched=launch();await saved;await launched;
+ assert.equal((await a.read(href)).data().fleet.hephaestusForge,0);
+});
+test('I02 existing registry cleanup on next specialist launch',async()=>{
+ const x=await specialistFixture('cleanup',{hephaestusForge:1});const {a,u,own}=x;
+ await adminSet(room(u.id)+'/fleets/old',specialistDoc({hephaestusForge:1},{resolved:true,status:'completed'}));await adminUpdate(player(u.id),{specialistFlights:['old']});
+ const d=await a.G.launchOnlineFleet(a.u,0,own.coords,'deploy',{hephaestusForge:1},{});assert.deepEqual((await a.read(player(u.id))).data().specialistFlights,[d.id]);
+});
+test('I02 legacy Galattica forced return without orbital stock rejected',async()=>{
+ const x=await specialistFixture('fakegal');const {a,u}=x,base=room(u.id),key=uid+'~g1',gr=base+'/galattiche/'+key,fp=base+'/fleets/fake';
+ const gal={ownerUid:uid,version:1,destroyed:false,coordKey:'1_2_1',systemKey:'1_2',state:{id:'g1',coords:{g:1,s:2,p:1},orbitingFleet:{}}};await adminSet(gr,gal);
+ const before=(await a.read(gr)).data(),profile=(await a.read(player(u.id))).data();
+ const b=a.raw.batch();b.update(a.raw.doc(gr),{version:2,coordKey:'1_3_1',systemKey:'1_3',state:{...gal.state,coords:{g:1,s:3,p:1}}});b.update(a.raw.doc(player(u.id)),{serviceRevision:3,specialistFlights:['fake']});
+ b.set(a.raw.doc(fp),specialistDoc({hephaestusForge:1},{originCoords:gal.state.coords,originKey:gal.coordKey,originGalatticaId:'g1',originGalatticaKey:key,galatticaReturn:true}));
+ await denied(()=>b.commit());assert.deepEqual((await a.read(gr)).data(),before);assert.deepEqual((await a.read(player(u.id))).data(),profile);assert.equal((await a.read(fp)).exists,false);
+});
+test('I02 max mixed dispatch after AT05 ordinary receipt',async()=>{
+ const x=await fullSpecialistWorld('afterordinary'),{model,base,href}=x;const keys=[...ids,'hephaestusForge','prometheusOracle','invictus','crepuscolo'];const h=model.planets[0];h.fleet=Object.fromEntries(keys.filter(k=>!['invictus','crepuscolo'].includes(k)).map(k=>[k,k==='lightFighter'?2:1]));h.mothershipHangars=[{id:'full17ack',fighters:20}];h.bacinoSpaziale={status:'active',startedAt:123,invictusActive:1,crepuscolo:{status:'active'}};await persistFullFixture(x);
+ const a=fullClient(model);const first=await a.G.launchOnlineFleet(a.u,0,model.planets[1].coords,'transport',{lightFighter:1},{});const prior=(await a.read(player(model.id))).data();assert.equal(prior.ordinaryDispatchReceipt.operationId,first.id);assert((await a.read(opPath(model.id,first.id))).exists);
+ const second=await a.G.launchOnlineFleet(a.u,0,model.planets[1].coords,'deploy',Object.fromEntries(keys.map(k=>[k,1])),{});const p=(await a.read(player(model.id))).data();assert.equal(p.serviceRevision,prior.serviceRevision+1);assert.equal(p.ordinaryDispatchReceipt.operationId,first.id);assert.equal(p.ordinaryDispatchReceipt.acknowledged,true);assert.deepEqual(p.specialistFlights,[second.id]);assert.equal((await a.read(href)).data().fleet.hephaestusForge,0);assert.equal(Object.keys((await a.read(base+'/fleets/'+second.id)).data().ships).length,17);
 });
 (async()=>{try{const probe=await fetch(`http://${host}/`,{signal:AbortSignal.timeout(5000)});assert(probe.ok);console.log(`SDK=${firebase.SDK_VERSION}; Rules Git blob=${ruleHash}; project=${projectId}`);const selected=process.argv.length>2?cases.filter(([n])=>process.argv.slice(2).some(x=>n.includes(x))):cases;let pass=0,fail=0;for(const [name,fn] of selected){try{await fn();pass++;console.log('PASS '+name);}catch(e){fail++;console.error('FAIL '+name+': '+e.stack);process.exitCode=1;}}console.log(JSON.stringify({total:selected.length,pass,fail}));}catch(e){console.error('BLOCKED: '+e.stack);process.exitCode=2;}finally{await Promise.allSettled(apps.map(async a=>{await a.firestore().terminate();await a.delete();}));}})();

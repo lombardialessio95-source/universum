@@ -137,16 +137,43 @@ service cloud.firestore {
     }
     // Existing AT05 special exemptions, evaluated only after quantity, target
     // and mission validation. Reuse the origin read required by ownership.
-    function validSpecialPlanetDispatch(d,origin,before) {
+    // AT03-I02: the existing active-flight list binds one new flight to one
+    // atomic stock debit. A shared debit cannot authorize two new flight IDs.
+    function validSpecialistFlightRegistration(uniId,fleetId) {
+      let profile=pilotPath(uniId,request.auth.uid);
+      let before=get(profile).data.get('specialistFlights',[]);
+      let after=getAfter(profile).data.get('specialistFlights',[]);
+      return after.removeAll(before)==[fleetId];
+    }
+    function specialistDebited(id,ships,before,after,inbox) {
+      let q=ships.get(id,0);
+      let balance=after.get(id,0);
+      return q==0 || (balance is int && balance>=0
+        && balance+q==before.get(id,0)+inbox.get(id,0));
+    }
+    function validSpecialistPlanetDebit(d,before,after) {
+      let stock=before.get('fleet',{});
+      let final=after.get('fleet',{});
+      let pending=before.get('inbox',{}).get('fleet',{});
+      // The checkpoint consumes the inbox. Neither a residual credit nor
+      // a newly inserted negative inbox entry counts as the actual debit.
+      let outstanding=after.get('inbox',{}).get('fleet',{});
+      return after.ownerUid==before.ownerUid
+        && outstanding.get('hephaestusForge',0)==0 && outstanding.get('prometheusOracle',0)==0
+        && specialistDebited('hephaestusForge',d.ships,stock,final,pending)
+        && specialistDebited('prometheusOracle',d.ships,stock,final,pending);
+    }
+    function validSpecialPlanetDispatch(d,origin,before,uniId,fleetId,specialist) {
       let ships=d.ships;
       let keys=ships.keys();
-      return ('targetGalatticaId' in d)
-        || keys.hasAny(['hephaestusForge','prometheusOracle'])
-        || (('mothership' in ships) && d.get('carrierHangars',[]).size()==ships.mothership)
-        || (('originPlanetId' in d) && ('birthBacinoAt' in d)
-          && keys.hasAny(['invictus','crepuscolo'])
-          && before.id==d.originPlanetId && before.bacinoSpaziale.status=='active'
-          && getAfter(origin).data.bacinoSpaziale!=before.bacinoSpaziale);
+      return specialist
+        ? validSpecialistFlightRegistration(uniId,fleetId)
+        : (('targetGalatticaId' in d)
+          || (('mothership' in ships) && d.get('carrierHangars',[]).size()==ships.mothership)
+          || (('originPlanetId' in d) && ('birthBacinoAt' in d)
+            && keys.hasAny(['invictus','crepuscolo'])
+            && before.id==d.originPlanetId && before.bacinoSpaziale.status=='active'
+            && getAfter(origin).data.bacinoSpaziale!=before.bacinoSpaziale));
     }
     function validTerminalShape(r, before, after) {
       return r is map && r.keys().hasOnly(['operationId','originKey','expectedRevision','terminalRevision','profileJoinedAt','profileCreatedAt','status','acknowledged'])
@@ -317,8 +344,8 @@ service cloud.firestore {
     }
     // Validate actual ship quantities in bounded blocks of five. Padding is
     // only a positive integer sentinel for an incomplete final block.
-    function validShipValues() {
-      let values=request.resource.data.ships.values();
+    function validShipValues(ships) {
+      let values=ships.values();
       let count=values.size();
       let v=values.concat([1,1,1,1]);
       return (v[0] is int && v[0]>0) && (v[1] is int && v[1]>0) && (v[2] is int && v[2]>0) && (v[3] is int && v[3]>0) && (v[4] is int && v[4]>0)
@@ -326,13 +353,12 @@ service cloud.firestore {
         && (count<=10 || ((v[10] is int && v[10]>0) && (v[11] is int && v[11]>0) && (v[12] is int && v[12]>0) && (v[13] is int && v[13]>0) && (v[14] is int && v[14]>0)))
         && (count<=15 || ((v[15] is int && v[15]>0) && (v[16] is int && v[16]>0)));
     }
-    function validSpecialShipQuantities() {
-      let ships=request.resource.data.ships;
-      return ships.keys().hasOnly(['smallCargo','largeCargo','lightFighter','heavyFighter','cruiser','battleship','bomber','battlecruiser','colonyShip','recycler','espionageProbe','mothership','deathStar','hephaestusForge','prometheusOracle','invictus','crepuscolo']) && validShipValues();
+    function validSpecialShipQuantities(ships) {
+      return ships.keys().hasOnly(['smallCargo','largeCargo','lightFighter','heavyFighter','cruiser','battleship','bomber','battlecruiser','colonyShip','recycler','espionageProbe','mothership','deathStar','hephaestusForge','prometheusOracle','invictus','crepuscolo']) && validShipValues(ships);
     }
     function validRaidShipQuantities() {
       let ships=request.resource.data.ships;
-      return ships.keys().hasOnly(['lightFighter','heavyFighter','cruiser','battleship','bomber']) && validShipValues();
+      return ships.keys().hasOnly(['lightFighter','heavyFighter','cruiser','battleship','bomber']) && validShipValues(ships);
     }
     function validHumanFleetTarget(uniId,d) {
       let target=originPath(uniId,d.targetKey);
@@ -368,31 +394,74 @@ service cloud.firestore {
         && d.targetKey!=d.originKey && get(originPath(uniId,d.targetKey)).data.ownerUid!=request.auth.uid
         && getAfter(origin).data.fleet.mothership==get(origin).data.fleet.mothership-n;
     }
-    function validFleetGalatticaOrigin(uniId,d) {
+    function validFleetGalatticaOrigin(uniId,d,fleetId,specialist) {
       let origin=/databases/$(database)/documents/online_universes/$(uniId)/galattiche/$(d.originGalatticaKey);
       let after=getAfter(origin).data;
       return d.originGalatticaKey==request.auth.uid+'~'+d.originGalatticaId
         && !after.destroyed && after.ownerUid==request.auth.uid
         && (after.coordKey==d.originKey || (d.mission=='deploy' && d.defenderUid==request.auth.uid
-          && get(origin).data.coordKey==d.originKey));
+          && get(origin).data.coordKey==d.originKey))
+        && (!specialist
+          || (d.get('galatticaReturn',false)==true && d.mission=='deploy'
+            && after.coordKey!=d.originKey && get(origin).data.coordKey==d.originKey
+            && validSpecialistFlightRegistration(uniId,fleetId)));
     }
-    function validFleetPlanetOrigin(uniId,d,ordinary) {
+    function validLegacyGalatticaSpecialistDebit(d,before,after) {
+      // Forced jump return may destroy some units; survivors cannot exceed
+      // the debited orbital stock. The normal jump already empties that stock.
+      return (!('hephaestusForge' in d.ships) || (after.get('hephaestusForge',0)==0
+          && d.ships.hephaestusForge<=before.get('hephaestusForge',0)))
+        && (!('prometheusOracle' in d.ships) || (after.get('prometheusOracle',0)==0
+          && d.ships.prometheusOracle<=before.get('prometheusOracle',0)));
+    }
+    function validSpecialistOriginDebit(uniId,d) {
+      let origin=originPath(uniId,d.originKey);
+      return validSpecialistPlanetDebit(d,get(origin).data,getAfter(origin).data);
+    }
+    function validSpecialistGalatticaDebit(uniId,d) {
+      let origin=/databases/$(database)/documents/online_universes/$(uniId)/galattiche/$(d.originGalatticaKey);
+      return validLegacyGalatticaSpecialistDebit(d,get(origin).data.state.orbitingFleet,getAfter(origin).data.state.orbitingFleet);
+    }
+    function validNewRegisteredFlightDebit(uniId,fleetId) {
+      let f=flightPath(uniId,fleetId);
+      // Preserve list cleanup and legacy bookkeeping for existing flights.
+      // Only a new specialist flight created in this same atomic write needs
+      // the stock proof. The create rule always requires this single new ID.
+      return exists(f) || !existsAfter(f)
+        || !getAfter(f).data.ships.keys().hasAny(['hephaestusForge','prometheusOracle'])
+        || (validSpecialShipQuantities(getAfter(f).data.ships)
+          && (('originGalatticaKey' in getAfter(f).data)
+            ? validSpecialistGalatticaDebit(uniId,getAfter(f).data)
+            : validSpecialistOriginDebit(uniId,getAfter(f).data)));
+    }
+    function validSpecialistRegistryDebit(uniId) {
+      let before=resource.data.get('specialistFlights',[]);
+      let after=request.resource.data.get('specialistFlights',[]);
+      let added=after.removeAll(before);
+      // Multiple additions cannot authorize a new specialist flight: each
+      // create requires exactly its own ID as the only addition.
+      return added.size()!=1 || validNewRegisteredFlightDebit(uniId,added[0]);
+    }
+    function validFleetPlanetOrigin(uniId,d,ordinary,fleetId,specialist) {
       let origin=originPath(uniId,d.originKey);
       let before=get(origin).data;
-      return before.ownerUid==request.auth.uid && (ordinary || validSpecialPlanetDispatch(d,origin,before));
+      return before.ownerUid==request.auth.uid && (ordinary || validSpecialPlanetDispatch(d,origin,before,uniId,fleetId,specialist));
     }
     function validHumanFleetCreate(uniId,fleetId,d) {
       let ordinary=ordinaryHumanFleet(d);
+      let specialist=d.ships.keys().hasAny(['hephaestusForge','prometheusOracle']);
       return d.attackerUid==request.auth.uid
         // The target owner has already been checked by validHumanFleetTarget.
-        && (!d.ships.keys().hasAny(['hephaestusForge','prometheusOracle'])
+        && (!specialist
           || (d.mission in ['deploy','transport'] && d.targetKey!=d.originKey && d.defenderUid==request.auth.uid))
         && d.mission in ['attack','destroyMoon','spy','transport','deploy','colonize','recycle','expedition','embargo','blockade','occupy','incursion']
         && (d.mission!='incursion' || validFleetIncursion(uniId,d))
         && d.status=='outbound' && d.resolved==false
-        && (ordinary ? validOrdinaryCreate(uniId,fleetId) : validSpecialShipQuantities())
-        && (('originGalatticaKey' in d) ? validFleetGalatticaOrigin(uniId,d)
-          : validFleetPlanetOrigin(uniId,d,ordinary));
+        // Specialist quantities are checked on the required profile update,
+        // along with debit, to keep both writes below the Rules budget.
+        && (ordinary ? validOrdinaryCreate(uniId,fleetId) : (specialist || validSpecialShipQuantities(d.ships)))
+        && (('originGalatticaKey' in d) ? validFleetGalatticaOrigin(uniId,d,fleetId,specialist)
+          : validFleetPlanetOrigin(uniId,d,ordinary,fleetId,specialist));
     }
 
     function validNpcRaidCreate(uniId, fleetId) {
@@ -468,7 +537,9 @@ service cloud.firestore {
           && (validReceiptAck() || ((!('serviceRevision' in resource.data) ||
             request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastSeen','nickname']) ||
             request.resource.data.serviceRevision == resource.data.serviceRevision + 1)
-          && validReceiptTransition(uniId,playerId)));
+          && validReceiptTransition(uniId,playerId)
+          && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['specialistFlights'])
+            || validSpecialistRegistryDebit(uniId))));
         allow delete: if signedIn() && request.auth.uid == playerId
           && (resource.data.get('ordinaryDispatchReceipt',null)==null || resource.data.ordinaryDispatchReceipt.acknowledged==true);
       }

@@ -31,6 +31,7 @@ def field(v):
     if isinstance(v,bool): return {'booleanValue':v}
     if isinstance(v,int): return {'integerValue':str(v)}
     if isinstance(v,str): return {'stringValue':v}
+    if isinstance(v,list): return {'arrayValue':{'values':[field(x) for x in v]}}
     return {'mapValue':{'fields':{k:field(x) for k,x in v.items()}}}
 def write(path,data): return {'name':game+path,'fields':{k:field(v) for k,v in data.items()}}
 def put(path,data,user): return call('/v1/'+game+path,write(path,data),user)
@@ -47,7 +48,7 @@ try:
     # AT03-I01: use canonical coordinates and a real universe fixture.
     room=doc+'/online_universes/F2'
     check(call('/v1/'+room,{'name':room,'fields':{'galaxies':field(3),'systemsPerGalaxy':field(100)}},'owner'),200,'fixture universe')
-    home={'ownerUid':'A','serviceRevision':1,'lastUpdated':1,'coords':{'g':1,'s':1,'p':1}}
+    home={'ownerUid':'A','serviceRevision':1,'lastUpdated':1,'coords':{'g':1,'s':1,'p':1},'fleet':{'hephaestusForge':1}}
     for pos,owner in [(1,'A'),(2,'A'),(3,'B')]:
         name='1_1_'+str(pos)
         check(put('planets/'+name,{**home,'ownerUid':owner,'coords':{'g':1,'s':1,'p':pos}},'owner'),200,'fixture '+name)
@@ -59,9 +60,15 @@ try:
     check(call('/v1/'+doc+':commit',{'writes':writes},alice,'POST'),200,'checkpoint atomico accettato')
     future=int(time.time()*1000)+600000
     flight={'attackerUid':'A','defenderUid':'A','originCoords':{'g':1,'s':1,'p':1},'targetCoords':{'g':1,'s':1,'p':2},'originKey':'1_1_1','targetKey':'1_1_2','ships':{'hephaestusForge':1},'cargo':{'metal':0,'crystal':0,'deuterium':0},'mission':'deploy','status':'outbound','resolved':False,'arrivalTime':future,'departureTime':future-300000,'returnTime':future+300000}
-    check(put('fleets/ok',flight,alice),200,'schieramento su colonia propria')
-    check(put('fleets/attack',{**flight,'mission':'attack'},alice),403,'attacco specialistico respinto')
-    check(put('fleets/other',{**flight,'targetKey':'1_1_3','targetCoords':{'g':1,'s':1,'p':3},'defenderUid':'B'},alice),403,'destinazione altrui respinta')
+    check(put('fleets/without-debit',flight,alice),403,'partenza senza addebito respinta R08')
+    def transfer(id, fleet):
+        writes=[{'update':write('planets/1_1_1',{**home,'serviceRevision':3,'lastUpdated':3,'fleet':{'hephaestusForge':0},'services':{}})},
+                {'update':write('players/A',{'serviceRevision':3,'nickname':'A','specialistBuilt':{'hephaestusForge':1},'specialistFlights':[id]})},
+                {'update':write('fleets/'+id,fleet)}]
+        return call('/v1/'+doc+':commit',{'writes':writes},alice,'POST')
+    check(transfer('attack',{**flight,'mission':'attack'}),403,'attacco specialistico respinto anche con addebito')
+    check(transfer('other',{**flight,'targetKey':'1_1_3','targetCoords':{'g':1,'s':1,'p':3},'defenderUid':'B'}),403,'destinazione altrui respinta anche con addebito')
+    check(transfer('ok',flight),200,'schieramento su colonia propria con addebito atomico')
 finally:
     proc.terminate()
     proc.wait(timeout=15)

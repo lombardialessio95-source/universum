@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "version": "r2296518366c2d7847228",
+  "version": "rf39c7e759449fc081438",
   "workerHash": "e6113328911026127c7b936a2bc671e2eddf4a68cf7f6168b1138fb7daa1e923",
   "files": {
     "app.html": "b685545586d2e04359dc7cb8931b5b7384dfba6446e1fbfa4b79e272ed33340d",
@@ -52,7 +52,7 @@
     "modules/online/galattiche.js": "261ad34e45d78fb3c1e113932744090f2446110736d1021bb8f3ca0affa4c3d9",
     "modules/online/sieges.js": "28cd7d7f5390cf3735d6fc6050bb34120ae669fad58cfa6014972af26a67013e",
     "modules/online/suprema-staging-client.js": "9d5c8d7cf3bacef39ff1a32a596c4ab72b2ea6e3b3300703eb009d5de68e72a9",
-    "modules/online/sync.js": "e94f6f5a241f8f71761d902d895b8b6baadb9315fbc10aa278fc20b6b57590b0",
+    "modules/online/sync.js": "6e11ca5dac74bf31bc830871b508fdc348777a791207b8d4c51a58515bbcaa43",
     "modules/online/universes.js": "3af8ee532f5ac6ac5e94d4a12fcad9e41dd5091bed3310555dd9a22b19ebf02b",
     "modules/ui/diplomacy.js": "167e7f1654c0c3a783dec96f4fd3db43bfc5ef0b6e490efdd75034f530b5a0e1",
     "modules/ui/espionage.js": "7955c38ad8b7c6c9694579f83237ccd615c07753bca27ee71a49ebd75b25eabc",
