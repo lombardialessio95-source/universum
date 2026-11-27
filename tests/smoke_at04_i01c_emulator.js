@@ -11,18 +11,19 @@ function client(uid){const app=firebase.initializeApp({apiKey:'demo',projectId,a
 function value(v){if(v?.__at04Ts){const {seconds,nanoseconds}=v.__at04Ts;return{timestampValue:new Date(seconds*1000).toISOString().replace('.000Z','.'+String(nanoseconds).padStart(9,'0')+'Z')};}if(v instanceof Date)return{timestampValue:v.toISOString()};if(v===null)return{nullValue:null};if(typeof v==='boolean')return{booleanValue:v};if(typeof v==='number')return Number.isSafeInteger(v)?{integerValue:String(v)}:{doubleValue:v};if(typeof v==='string')return{stringValue:v};if(Array.isArray(v))return{arrayValue:{values:v.map(value)}};return{mapValue:{fields:fields(v)}};}
 function fields(v){return Object.fromEntries(Object.entries(v).map(([k,x])=>[k,value(x)]));}
 async function adminSet(key,data){const res=await fetch(`http://${host}/v1/projects/${projectId}/databases/(default)/documents/${key}`,{method:'PATCH',headers:{Authorization:'Bearer owner','Content-Type':'application/json'},body:JSON.stringify({fields:fields(data)}),signal:AbortSignal.timeout(10000)});if(!res.ok)throw Error(`Emulator seed ${res.status}: ${await res.text()}`);}
-async function denied(fn){await assert.rejects(fn(),e=>String(e?.code||'').endsWith('permission-denied'),'must reject by actual Rules');}
+async function denied(fn){await assert.rejects(fn(),e=>String(e?.code||'').endsWith('permission-denied') && !/maximum of 1000 expressions|too many.*(?:access|get)|evaluation.*limit/i.test(String(e?.message||e)),'must reject by actual Rules, not evaluation budget');}
 async function snap(ref){return (await ref.get({source:'server'})).data();}
 async function main(){
  const rules=process.env.RULES_FILE||path.join(root,'firestore.rules');console.log('Rules FILE SHA256',crypto.createHash('sha256').update(fs.readFileSync(rules)).digest('hex'),'mode',mode);
  const a=client('alice'),b=client('bob'),a2=client('alice');
+ const preflight=process.env.AT04_PREFLIGHT==='1';
  const makeCases=require('./helpers/at04_structural_cases');let count=0;
- for(let idx=0;idx<makeCases(0).length;idx++){const c=makeCases(Date.now())[idx];if(c.modelOnly||(mode==='baseline'&&!c.red))continue;const key=room+'/fleets/case'+count++;await adminSet(key,c.old);const ref=(c.uid==='bob'?b:a).doc(key), before=await snap(ref);const upd={...c.patch};for(const k of c.remove)upd[k]=FV.delete();
+ for(let idx=0;idx<makeCases(0).length;idx++){const c=makeCases(Date.now())[idx];if(c.modelOnly||(mode==='baseline'&&!c.red)||(preflight&&!['R01 early outbound complete','R02 terminal to outbound','return completion after due','normal return','recall before arrival','fractional SDK departure timestamp alignment','rounded timestamp does not authorize shifting durations','embargo entry','Galattica redirection after due','legacy numeric string normalization'].includes(c.name)))continue;const key=room+'/fleets/case'+count++;await adminSet(key,c.old);const ref=(c.uid==='bob'?b:a).doc(key), before=await snap(ref);const upd={...c.patch};for(const k of c.remove)upd[k]=FV.delete();
    if(mode==='baseline'||c.allow)await ref.update(upd);else{await denied(()=>ref.update(upd));assert.deepEqual(await snap(ref),before);}
    console.log('PASS',mode==='baseline'?'old allowed':c.allow?'allow':'deny',c.name);
  }
  console.log('SDK direct case count',count);
- if(mode==='baseline')return;
+ if(mode==='baseline'||preflight){if(preflight)assert.equal(count,10);return;}
  const T=Date.now(),base=makeCases(T)[0].old, complete={status:'completed',phase:'COMPLETATA',resolved:true,completedAt:T};
  const seq=a.doc(room+'/fleets/sequence');await adminSet(seq.path,base);
  await denied(()=>seq.update({arrivalTime:T-1,returnTime:T-1}));await denied(()=>seq.update(complete));
@@ -39,7 +40,17 @@ async function main(){
  // through two independently authenticated SDK clients. Both see a stale active snapshot.
  const returned={...base,status:'returning',phase:'IN RITORNO',arrivalTime:T-10000,returnTime:T-10000};
  const key=room+'/fleets/cleanup';await adminSet(key,returned);
- function game(db){const W={fbDB:db,fbAuth:{currentUser:{uid:'alice'}},localStorage:{getItem:()=>null,setItem(){},removeItem(){}}};const ctx=vm.createContext({window:W,firebase,console,Date,Math});for(const file of ['context.js','foundation.js','sync.js','fleet-control.js'])vm.runInContext(fs.readFileSync(path.join(root,'modules/online',file),'utf8'),ctx,{filename:file});vm.runInContext(fs.readFileSync(path.join(root,'missions-core.js'),'utf8'),ctx,{filename:'missions-core.js'});return W.__UniversumMPModules;}
+ function game(db){
+   // Load unchanged source in the SDK's realm, with isolated window/storage per client.
+   // Object literals written by the resolver are now native SDK-realm objects;
+   // FieldValue/Timestamp instances are passed untouched (no JSON cloning).
+   const W={fbDB:db,fbAuth:{currentUser:{uid:'alice'}},localStorage:{getItem:()=>null,setItem(){},removeItem(){}}};
+   for(const file of ['modules/online/context.js','modules/online/foundation.js','modules/online/sync.js','modules/online/fleet-control.js','missions-core.js']){
+     const source=fs.readFileSync(path.join(root,file),'utf8');
+     vm.runInThisContext('(function(window,firebase,localStorage){\n'+source+'\n})',{filename:file})(W,firebase,W.localStorage);
+   }
+   return W.__UniversumMPModules;
+ }
  const g1=game(a),g2=game(a2);const u1=a.doc(room),u2=a2.doc(room);
  await Promise.all([g1.forceCleanupOnlineFleet(u1,returned,a.doc(key),'repair-button'),g2.forceCleanupOnlineFleet(u2,returned,a2.doc(key),'repair-button')]);
  assert.equal((await snap(home)).inbox.resources.metal,10);assert.equal((await snap(a.doc(key))).status,'completed');console.log('PASS two real SDK clients / one cleanup credit');
