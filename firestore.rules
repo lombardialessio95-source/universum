@@ -102,6 +102,131 @@ service cloud.firestore {
         || resource.data.defenderUid == request.auth.uid;
     }
 
+    // AT04-I01C (A): structural invariants only. Existing client ETA semantics
+    // remain authoritative on recall/return recalculations. No new document reads.
+    function fleetTerminal(d) {
+      return d.get('status', '') == 'completed' || d.get('resolved', false) == true;
+    }
+    function fleetState(d) {
+      let s=d.get('status','outbound');
+      return fleetTerminal(d) ? 'completed' : (s in ['outbound','returning','embargo','occupy'] ? s : 'outbound');
+    }
+    function fleetPhase(s) {
+      return s=='completed' ? 'COMPLETATA' : (s=='returning' ? 'IN RITORNO' :
+        (s=='embargo' ? 'IN EMBARGO' : (s=='occupy' ? 'IN OCCUPAZIONE' : 'IN VIAGGIO')));
+    }
+    function fleetClockPresent(v) {
+      return v!=null && v!=false && v!=0 && v!='';
+    }
+    function fleetNumericClock(v) {
+      return v is number ? v : (v is string && v.matches('^[0-9]+([.][0-9]+)?$') ? float(v) : -1);
+    }
+    function fleetAliasClock(v) {
+      let seconds=v is map ? v.get('seconds',null) : null;
+      return !fleetClockPresent(v) ? 0 : (v is timestamp ? v.toMillis() :
+        (seconds is number ? seconds*1000 : fleetNumericClock(v)));
+    }
+    function fleetOldArrival(d) {
+      let a=d.get('arrivalTime',null);
+      let legacy=fleetAliasClock(d.get('arrivalAt',null));
+      return fleetClockPresent(a) ? fleetNumericClock(a) :
+        (legacy!=0 ? legacy : fleetNumericClock(d.get('returnTime',null)));
+    }
+    function fleetOldReturn(d) {
+      let r=d.get('returnTime',null);
+      return fleetClockPresent(r) && fleetNumericClock(r)!=0 ? fleetNumericClock(r) : fleetOldArrival(d);
+    }
+    function fleetOldDeparture(d) {
+      let start=d.get('departureTime',null);
+      return fleetClockPresent(start) ? fleetNumericClock(start) : fleetAliasClock(d.get('departureAt',null));
+    }
+    function fleetDue(d,s,serverMs) {
+      let due=s=='returning' ? fleetOldReturn(d) : fleetOldArrival(d);
+      // Explicit legacy residual: no persisted positive clock to authenticate.
+      // Preserve existing repair/normalization; never use a proposed repaired flag.
+      return due<=0 || due<=serverMs;
+    }
+    function fleetNormalizeClock(old,next,key,known) {
+      let v=next.get(key,null);
+      return v==old.get(key,null) || (v is number && v>0 && (known<=0 || v==known));
+    }
+    function fleetNormalizeTravel(old,next) {
+      return fleetNormalizeClock(old,next,'departureTime',fleetOldDeparture(old))
+        && fleetNormalizeClock(old,next,'arrivalTime',fleetOldArrival(old))
+        && fleetNormalizeClock(old,next,'returnTime',fleetOldReturn(old));
+    }
+    function fleetServerAlign(old,next) {
+      let start=old.get('departureAt',null);
+      return request.auth.uid==old.attackerUid && start is timestamp
+        && old.departureTime is number && old.arrivalTime is number && old.returnTime is number
+        && next.departureTime==start.toMillis()
+        && next.arrivalTime==next.departureTime+(old.arrivalTime-old.departureTime)
+        && next.returnTime==next.arrivalTime+(old.returnTime-old.arrivalTime);
+    }
+    function fleetNewReturnClock(next) {
+      return next.arrivalTime is number && next.returnTime is number
+        && next.arrivalTime>0 && next.arrivalTime==next.returnTime;
+    }
+    function fleetStateMarkers(old,next,a,b,changed) {
+      let stateChanged=changed.hasAny(['status','resolved']);
+      return (!stateChanged || (next.get('status','')==b &&
+          (b=='completed' ? next.get('resolved',false)==true :
+            (next.get('resolved',null)==false || (!('resolved' in old) && !('resolved' in next))))))
+        && (!(stateChanged || changed.hasAny(['phase'])) || next.get('phase','')==fleetPhase(b))
+        && (!changed.hasAny(['completedAt']) || (a!='completed' && b=='completed'
+          && next.completedAt is number && next.completedAt>0));
+    }
+    function fleetTransition(old,next,a,b,serverMs) {
+      return a==b || (a=='outbound' && (
+        (b=='returning' && next.get('mission','')=='recall' && request.auth.uid==old.attackerUid)
+        || (fleetDue(old,a,serverMs) && (b in ['returning','completed']
+          || (b=='embargo' && old.get('mission','') in ['embargo','blockade'])
+          || (b=='occupy' && old.get('mission','')=='occupy')))))
+        || (a=='returning' && b=='completed' && fleetDue(old,a,serverMs))
+        || (a in ['embargo','occupy'] && b=='returning');
+    }
+    function fleetTravelUpdate(old,next,a,b,changed,serverMs) {
+      let clocks=changed.hasAny(['departureTime','arrivalTime','returnTime','zoneArrivalTime','explorationEndTime']);
+      let zones=changed.hasAny(['zoneArrivalTime','explorationEndTime']);
+      // Exact realignment to the existing departureAt, retaining both durations.
+      return !clocks || (a==b && a=='outbound' && fleetServerAlign(old,next))
+        || (!zones && ((a==b && fleetNormalizeTravel(old,next))
+          || (a!=b && b!='returning' && fleetNormalizeTravel(old,next))
+          || (a!=b && b=='returning' && fleetNewReturnClock(next)
+            && fleetNormalizeClock(old,next,'departureTime',fleetOldDeparture(old)))
+          || (a=='returning' && b=='returning' && 'originGalatticaKey' in old
+            && request.auth.uid==old.attackerUid && old.returnTime<=serverMs
+            && next.get('galatticaReturn',false)==true
+            && changed.hasAny(['galatticaReturn','galReturnCoords','fallbackPlanetKey'])
+            && fleetNewReturnClock(next) && next.returnTime>old.returnTime
+            && fleetNormalizeClock(old,next,'departureTime',fleetOldDeparture(old)))));
+    }
+    function fleetSiegeClockUpdate(old,next,a,b,changed) {
+      let startChanged=changed.hasAny(['siegeStartedAt']);
+      let tickChanged=changed.hasAny(['lastSiegeTickAt']);
+      let start=old.get('siegeStartedAt',null);
+      let tick=old.get('lastSiegeTickAt',null);
+      let newTick=next.get('lastSiegeTickAt',null);
+      return (!startChanged || (a=='outbound' && b in ['embargo','occupy']
+          && next.siegeStartedAt is number && next.siegeStartedAt>0 && next.siegeStartedAt==newTick))
+        && (!tickChanged || (newTick is number && newTick>0 && (
+          (a=='outbound' && b in ['embargo','occupy'] && newTick==next.get('siegeStartedAt',null))
+          || (a=='embargo' && b in ['embargo','returning'] && (!fleetClockPresent(tick) || newTick>=fleetNumericClock(tick)))
+          || (a==b && newTick==(fleetClockPresent(tick) ? fleetNumericClock(tick) : fleetNumericClock(start)))
+          || (a==b && !fleetClockPresent(tick) && !fleetClockPresent(start)))));
+    }
+    function validFleetStructuralUpdate(old,next,serverMs) {
+      let a=fleetState(old);
+      let b=fleetState(next);
+      let changed=next.diff(old).affectedKeys();
+      return fleetStateMarkers(old,next,a,b,changed)
+        && fleetTransition(old,next,a,b,serverMs)
+        && fleetTravelUpdate(old,next,a,b,changed,serverMs)
+        && (a==b || b!='returning' || (fleetNewReturnClock(next)
+          && (a!='outbound' || next.get('mission','')=='recall' || next.returnTime>=fleetOldArrival(old))))
+        && fleetSiegeClockUpdate(old,next,a,b,changed);
+    }
+
     function validOwnerCheckpoint(uniId) {
       let changed=request.resource.data.diff(resource.data).affectedKeys();
       let protectedOrigin=('ordinaryDispatchId' in resource.data)
@@ -645,6 +770,7 @@ service cloud.firestore {
         // Questo impedisce a un client malevolo di cambiare attackerUid, targetCoords, originCoords,
         // o di riscrivere ships/cargo con valori inventati durante il volo.
         allow update: if signedIn() && fleetParty()
+          && validFleetStructuralUpdate(resource.data, request.resource.data, request.time.toMillis())
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(fleetFieldsForUpdate())
           && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['crepuscoloDamaged'])
             || (resource.data.status == 'outbound' && request.resource.data.status in ['returning','embargo','occupy']

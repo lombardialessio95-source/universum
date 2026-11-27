@@ -65,7 +65,8 @@ try:
     check(put('fleets/f',f,'owner'),200,'missione maturata')
     def strike(id,uid):
         writes=[]
-        for path,changes in [('galattiche/'+id,{'destroyed':True,'destroyedBy':'f'}),('galatticheMap/'+id,{'destroyed':True,'destroyedBy':'f'}),('fleets/f',{'status':'returning'})]:
+        eta=int(time.time()*1000)+60000
+        for path,changes in [('galattiche/'+id,{'destroyed':True,'destroyedBy':'f'}),('galatticheMap/'+id,{'destroyed':True,'destroyedBy':'f'}),('fleets/f',{'status':'returning','phase':'IN RITORNO','resolved':False,'arrivalTime':eta,'returnTime':eta})]:
             writes.append({'update':write(path,changes),'updateMask':{'fieldPaths':list(changes)}})
         return call('/v1/'+doc+':commit',{'writes':writes},token(uid),'POST')
     check(strike('A~2','A'),403,'bersaglio non selezionato')
