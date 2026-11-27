@@ -1,6 +1,6 @@
 # UNIVERSUM — STATO DEL PROGETTO E PASSAGGIO DI CONSEGNE
 
-**Revisione:** 1.30 — 26 novembre 2026  
+**Revisione:** 1.31 — 26 novembre 2026  
 **Tipo:** documento di continuità per ChatGPT, Codex e il proprietario del progetto  
 **Repository:** https://github.com/lombardialessio95-source/universum  
 **Riferimento verificato:** branch `main`, commit `67f71b7f2662ad2c345b0e3e8f2ba4ab4202c099` (25 novembre 2026, 21:24 UTC)  
@@ -331,3 +331,7 @@ Main, candidata e backup verificati invariati da CONTROLLO. Ordinaria riferisce 
 
 ### AT05-I04B4B — terzo rapporto intermedio
 Ordinaria riferisce fetch_file base64 riuscito, blob atteso 04a70db16088c092c3fee9fcfb4a742bd0c48e29, 39772 caratteri con newline e 39120 senza; trasferimento nel filesystem incompleto, nessun hash dei byte decodificati, nessuna implementazione/test B4B. Decisione CONTROLLO: separare B4B-R01 recupero sorgente ufficiale da B4B implementazione. Solo R01 autorizzato: recuperare payload integrale in blocchi numerati con salvataggio progressivo, decodifica binaria, git hash-object e consegna file originale verificato scaricabile; nessuna modifica operativa. Se trasferimento fallisce, indicare limite preciso e blocchi mancanti, conservare quelli ottenuti. B4B sospeso fino a verifica R01; altri micropassi non autorizzati. Nessun push, merge, Rules/deploy. Nessuna nuova verifica indipendente dei byte o dei riferimenti remoti in questo passaggio; stato ufficiale ultimo verificato invariato secondo rapporto.
+
+
+### AT05-I04B4B-R01 — recupero tramite download diretto
+Ordinaria riferisce R01 incompleto, zero blocchi salvati. CONTROLLO ha recuperato payload Base64 integrale via fetch_file allo SHA bbee52e2b38039f8a25d6bd6b3edda96fda75ac0: 39120 caratteri senza whitespace, decodificati in 29340 byte nel runtime del connettore; calcolato SHA-1 Git con prefisso blob e lunghezza, risultato 04a70db16088c092c3fee9fcfb4a742bd0c48e29 coincidente con atteso. Nessun file locale consegnato da CONTROLLO; evitare trascrizione manuale. Proprietario può scaricare file Raw dalla pagina immutabile https://github.com/lombardialessio95-source/universum/blob/bbee52e2b38039f8a25d6bd6b3edda96fda75ac0/modules/online/fleet-control.js e allegarlo a Ordinaria. R01 rimane aperto fino a git hash-object sul file ricevuto; B4B sospeso fino a tale verifica. Nessun nuovo intervento operativo, test, push, merge, Rules/deploy. Nessuna nuova verifica main/backup in questo passaggio.
