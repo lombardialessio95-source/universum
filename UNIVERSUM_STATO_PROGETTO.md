@@ -1,6 +1,6 @@
 # UNIVERSUM — STATO DEL PROGETTO E PASSAGGIO DI CONSEGNE
 
-**Revisione:** 1.47 — 26 novembre 2026  
+**Revisione:** 1.48 — 26 novembre 2026  
 **Tipo:** documento di continuità per ChatGPT, Codex e il proprietario del progetto  
 **Repository:** https://github.com/lombardialessio95-source/universum  
 **Riferimento verificato:** branch `main`, commit `67f71b7f2662ad2c345b0e3e8f2ba4ab4202c099` (25 novembre 2026, 21:24 UTC)  
@@ -438,3 +438,7 @@ Il proprietario ha fornito Testo incollato(3).txt come copia delle Rules attualm
 
 ### AT05 — avvio pubblicazione manuale coordinata
 Verificato direttamente hash Git della copia Rules fornita dal proprietario, normalizzata solo per newline finale: 911d2a1e81185d3b489a22f9738ca1975c5ba7f8, coincide con main. Candidata 08942f02f3cbeba0cb7ed32f11bb19aff1226684 e Rules blob 2a668723c9f5d22a1f7a3909b22a4e142562060d ricontrollate. Proprietario conferma backup e uscita di tutti i giocatori (punti 1 e 2). Istruzione per pubblicazione manuale delle Rules integrali della candidata mantenendo sospeso il multiplayer, verificare progetto corretto e conferma pubblicazione prima dell'integrazione autorizzata. Nessuna pubblicazione o merge effettuata da CONTROLLO; nessun accesso diretto a Firebase. Backup dati non ispezionato direttamente. Dopo conferma, integrare solo commit approvato con fast-forward, verificare CI main/Pages, versione PWA e canary prima di riaprire; se errore fermarsi e preservare ledger. Nessuna chiusura operativa anticipata.
+
+
+### AT05 — conferma pubblicazione manuale Rules e autorizzazione integrazione
+Il proprietario conferma («fatto») la pubblicazione manuale delle Rules integrali AT05, dopo aver confermato backup e uscita dei giocatori. CONTROLLO non ha accesso alla console Firebase: pubblicazione dichiarata dal proprietario, copia effettivamente pubblicata non ancora confrontata dopo l'operazione. Main e candidata ricontrollati rispettivamente ca38720f144993a805f84790e15519b7340525cc e 08942f02f3cbeba0cb7ed32f11bb19aff1226684, PR #12 non integrata. CONTROLLO autorizza esclusivamente Programmazione ordinaria a integrare mediante fast-forward lo SHA approvato su main, previa verifica base/candidata, CI verde e backup remoto della base; nessun merge commit/squash/rebase, nessuna nuova modifica, nessun workflow diagnostico, nessun deploy Firebase. Verificare main SHA esatto, CI ordinaria e Pages sul medesimo SHA, release PWA r2296518366c2d7847228. Riportare riferimenti e risultati effettivi. Multiplayer ancora sospeso salvo canary controllato dopo pubblicazione del client; confrontare Rules effettive fornite dal proprietario, verifica aggiornamento PWA, partenza/rientro e un solo addebito/accredito, senza mettere a rischio i salvataggi. Se errore, fermarsi, preservare dati e ledger, nessun rollback permissivo automatico. AT05 tecnicamente approvato, chiusura operativa non ancora certificata. CONTROLLO non ha integrato main né pubblicato Rules direttamente.
