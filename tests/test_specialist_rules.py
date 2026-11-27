@@ -44,19 +44,24 @@ try:
             if call('',method='GET')==200: break
         except OSError: time.sleep(.2)
     alice=token('A')
-    home={'ownerUid':'A','serviceRevision':1,'lastUpdated':1}
-    for name,owner in [('a','A'),('b','A'),('c','B')]: check(put('planets/'+name,{**home,'ownerUid':owner},'owner'),200,'fixture '+name)
+    # AT03-I01: use canonical coordinates and a real universe fixture.
+    room=doc+'/online_universes/F2'
+    check(call('/v1/'+room,{'name':room,'fields':{'galaxies':field(3),'systemsPerGalaxy':field(100)}},'owner'),200,'fixture universe')
+    home={'ownerUid':'A','serviceRevision':1,'lastUpdated':1,'coords':{'g':1,'s':1,'p':1}}
+    for pos,owner in [(1,'A'),(2,'A'),(3,'B')]:
+        name='1_1_'+str(pos)
+        check(put('planets/'+name,{**home,'ownerUid':owner,'coords':{'g':1,'s':1,'p':pos}},'owner'),200,'fixture '+name)
     check(put('players/A',{'serviceRevision':1,'nickname':'A'},'owner'),200,'fixture player')
-    check(put('planets/a',{**home,'lastUpdated':2},alice),403,'checkpoint obsoleto respinto')
+    check(put('planets/1_1_1',{**home,'lastUpdated':2},alice),403,'checkpoint obsoleto respinto')
     check(put('players/A',{'serviceRevision':4},alice),403,'salto di revisione respinto')
-    writes=[{'update':write('planets/a',{**home,'serviceRevision':2,'lastUpdated':2,'services':{}})},
+    writes=[{'update':write('planets/1_1_1',{**home,'serviceRevision':2,'lastUpdated':2,'services':{}})},
             {'update':write('players/A',{'serviceRevision':2,'nickname':'A','specialistBuilt':{'hephaestusForge':1}})}]
     check(call('/v1/'+doc+':commit',{'writes':writes},alice,'POST'),200,'checkpoint atomico accettato')
     future=int(time.time()*1000)+600000
-    flight={'attackerUid':'A','defenderUid':'A','originCoords':{'g':1},'targetCoords':{'g':1},'originKey':'a','targetKey':'b','ships':{'hephaestusForge':1},'cargo':{},'mission':'deploy','status':'outbound','resolved':False,'arrivalTime':future,'departureTime':future-300000}
+    flight={'attackerUid':'A','defenderUid':'A','originCoords':{'g':1,'s':1,'p':1},'targetCoords':{'g':1,'s':1,'p':2},'originKey':'1_1_1','targetKey':'1_1_2','ships':{'hephaestusForge':1},'cargo':{'metal':0,'crystal':0,'deuterium':0},'mission':'deploy','status':'outbound','resolved':False,'arrivalTime':future,'departureTime':future-300000,'returnTime':future+300000}
     check(put('fleets/ok',flight,alice),200,'schieramento su colonia propria')
     check(put('fleets/attack',{**flight,'mission':'attack'},alice),403,'attacco specialistico respinto')
-    check(put('fleets/other',{**flight,'targetKey':'c'},alice),403,'destinazione altrui respinta')
+    check(put('fleets/other',{**flight,'targetKey':'1_1_3','targetCoords':{'g':1,'s':1,'p':3},'defenderUid':'B'},alice),403,'destinazione altrui respinta')
 finally:
     proc.terminate()
     proc.wait(timeout=15)

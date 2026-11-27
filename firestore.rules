@@ -135,21 +135,18 @@ service cloud.firestore {
         && !d.ships.keys().hasAny(['hephaestusForge','prometheusOracle','invictus','crepuscolo'])
         && d.get('carrierHangars', []).size() == 0;
     }
-    // Reject empty/mislabelled exemptions, preserve the original special paths.
-    function validSpecialDispatch(uniId, d) {
-      return ('originGalatticaKey' in d)
-        || (d.get('targetGalatticaId', '') is string && d.get('targetGalatticaId', '') != ''
-          && d.mission == 'destroyMoon' && d.ships.get('deathStar',0) > 0
-          && get(/databases/$(database)/documents/online_universes/$(uniId)/galatticheMap/$(d.targetGalatticaId)).data.ownerUid == d.defenderUid
-          && d.defenderUid != request.auth.uid
-          && get(/databases/$(database)/documents/online_universes/$(uniId)/galatticheMap/$(d.targetGalatticaId)).data.coordKey == d.targetKey)
-        || d.ships.get('hephaestusForge',0) > 0 || d.ships.get('prometheusOracle',0) > 0
+    // Existing AT05 special exemptions, evaluated only after quantity, target
+    // and mission validation. Reuse the origin read required by ownership.
+    function validSpecialPlanetDispatch(d,origin,before) {
+      let ships=d.ships;
+      let keys=ships.keys();
+      return ('targetGalatticaId' in d)
+        || keys.hasAny(['hephaestusForge','prometheusOracle'])
+        || (('mothership' in ships) && d.get('carrierHangars',[]).size()==ships.mothership)
         || (('originPlanetId' in d) && ('birthBacinoAt' in d)
-          && (d.ships.get('invictus',0)>0 || d.ships.get('crepuscolo',0)>0)
-          && get(originPath(uniId,d.originKey)).data.id == d.originPlanetId
-          && get(originPath(uniId,d.originKey)).data.bacinoSpaziale.status=='active'
-          && getAfter(originPath(uniId,d.originKey)).data.bacinoSpaziale!=get(originPath(uniId,d.originKey)).data.bacinoSpaziale)
-        || (d.ships.get('mothership',0)>0 && d.get('carrierHangars',[]).size()==d.ships.mothership);
+          && keys.hasAny(['invictus','crepuscolo'])
+          && before.id==d.originPlanetId && before.bacinoSpaziale.status=='active'
+          && getAfter(origin).data.bacinoSpaziale!=before.bacinoSpaziale);
     }
     function validTerminalShape(r, before, after) {
       return r is map && r.keys().hasOnly(['operationId','originKey','expectedRevision','terminalRevision','profileJoinedAt','profileCreatedAt','status','acknowledged'])
@@ -278,63 +275,138 @@ service cloud.firestore {
         && validTerminalShape(d.receipt,before,after) && terminalEffects(uniId,d.receipt,request.auth.uid,d.get('proof',{}));
     }
 
-    function validHumanFleetCreate(uniId) {
-      return request.resource.data.attackerUid == request.auth.uid
-        && request.resource.data.originCoords is map
-        && request.resource.data.targetCoords is map
-        && request.resource.data.targetKey is string
-        && request.resource.data.ships is map
-        && (!request.resource.data.ships.keys().hasAny(['hephaestusForge','prometheusOracle'])
-          || (request.resource.data.mission in ['deploy','transport']
-            && request.resource.data.targetKey != request.resource.data.originKey
-            && get(/databases/$(database)/documents/online_universes/$(uniId)/planets/$(request.resource.data.targetKey)).data.ownerUid == request.auth.uid))
-        && request.resource.data.cargo is map
-        && request.resource.data.mission in [
-          'attack', 'destroyMoon', 'spy', 'transport', 'deploy', 'colonize',
-          'recycle', 'expedition', 'embargo', 'blockade', 'occupy', 'incursion'
-        ]
-        && (request.resource.data.mission != 'incursion' || (
-          request.resource.data.ships.keys().hasOnly(['mothership'])
-          && request.resource.data.ships.mothership is int
-          && request.resource.data.ships.mothership > 0
-          && request.resource.data.carrierHangars is list
-          && request.resource.data.carrierHangars.size() == request.resource.data.ships.mothership
-          && request.resource.data.targetKey != request.resource.data.originKey
-          && exists(/databases/$(database)/documents/online_universes/$(uniId)/planets/$(request.resource.data.targetKey))
-          && get(/databases/$(database)/documents/online_universes/$(uniId)/planets/$(request.resource.data.targetKey)).data.ownerUid != request.auth.uid
-          && getAfter(/databases/$(database)/documents/online_universes/$(uniId)/planets/$(request.resource.data.originKey)).data.fleet.mothership ==
-            get(/databases/$(database)/documents/online_universes/$(uniId)/planets/$(request.resource.data.originKey)).data.fleet.mothership - request.resource.data.ships.mothership
-        ))
-        && request.resource.data.status == 'outbound'
-        && request.resource.data.resolved == false
-        && request.resource.data.arrivalTime is number
-        && request.resource.data.departureTime is number
-        && request.resource.data.arrivalTime > request.resource.data.departureTime
-        && request.resource.data.arrivalTime > request.time.toMillis()
-        && request.resource.data.originKey is string
-        && (('originGalatticaKey' in request.resource.data)
-          ? (request.resource.data.originGalatticaKey == request.auth.uid + '~' + request.resource.data.originGalatticaId
-            && !getAfter(/databases/$(database)/documents/online_universes/$(uniId)/galattiche/$(request.resource.data.originGalatticaKey)).data.destroyed
-            && (getAfter(/databases/$(database)/documents/online_universes/$(uniId)/galattiche/$(request.resource.data.originGalatticaKey)).data.coordKey == request.resource.data.originKey
-              || (request.resource.data.mission == 'deploy' && request.resource.data.defenderUid == request.auth.uid
-                && get(/databases/$(database)/documents/online_universes/$(uniId)/galattiche/$(request.resource.data.originGalatticaKey)).data.coordKey == request.resource.data.originKey
-                && get(/databases/$(database)/documents/online_universes/$(uniId)/planets/$(request.resource.data.targetKey)).data.ownerUid == request.auth.uid))
-            && getAfter(/databases/$(database)/documents/online_universes/$(uniId)/galattiche/$(request.resource.data.originGalatticaKey)).data.ownerUid == request.auth.uid)
-          : (exists(/databases/$(database)/documents/online_universes/$(uniId)/planets/$(request.resource.data.originKey))
-        && get(/databases/$(database)/documents/online_universes/$(uniId)/planets/$(request.resource.data.originKey)).data.ownerUid == request.auth.uid));
+    // AT03-I01: new documents only. Existing missions and update/delete rules stay unchanged.
+    function validFleetCoords(c, room) {
+      let g=c.g;
+      let s=c.s;
+      let p=c.p;
+      return c is map && g is int && s is int && p is int
+        && g>=1 && g<=9 && g<=room.get('galaxies',9)
+        && s>=1 && s<=499 && s<=room.get('systemsPerGalaxy',499)
+        && p>=1 && p<=16;
+    }
+    function canonicalFleetKey(c) {
+      return string(c.g)+'_'+string(c.s)+'_'+string(c.p);
+    }
+    function validFleetCoordinatePair(uniId,d,npc) {
+      let room=get(/databases/$(database)/documents/online_universes/$(uniId)).data;
+      return validFleetCoords(d.originCoords,room) && validFleetCoords(d.targetCoords,room)
+        && ((npc && !('originKey' in d)) || d.originKey==canonicalFleetKey(d.originCoords))
+        && d.targetKey==canonicalFleetKey(d.targetCoords);
+    }
+    function validFleetAmount(n) {
+      let q=n;
+      return q is int && q>=0 && q<=9007199254740991;
+    }
+    function validNewFleetCargo(d) {
+      let cargo=d.cargo;
+      return cargo is map && cargo.keys().hasOnly(['metal','crystal','deuterium'])
+        && validFleetAmount(cargo.metal) && validFleetAmount(cargo.crystal) && validFleetAmount(cargo.deuterium);
+    }
+    function validNewFleetClock(d,npc) {
+      let start=d.departureTime;
+      let arrival=d.arrivalTime;
+      let end=d.returnTime;
+      return start is number && arrival is number && end is number
+        && start>0 && arrival>start && arrival>request.time.toMillis()
+        && end>=arrival && end<=9007199254740991
+        && (end>arrival || npc || ('originGalatticaKey' in d && d.mission=='deploy' && d.get('galatticaReturn',false)==true));
+    }
+    function validFleetAlias(d) {
+      return d.ships is map && d.ships.size()>0 && (!('fleet' in d) || d.fleet==d.ships);
+    }
+    // Validate actual ship quantities in bounded blocks of five. Padding is
+    // only a positive integer sentinel for an incomplete final block.
+    function validShipValues() {
+      let values=request.resource.data.ships.values();
+      let count=values.size();
+      let v=values.concat([1,1,1,1]);
+      return (v[0] is int && v[0]>0) && (v[1] is int && v[1]>0) && (v[2] is int && v[2]>0) && (v[3] is int && v[3]>0) && (v[4] is int && v[4]>0)
+        && (count<=5 || ((v[5] is int && v[5]>0) && (v[6] is int && v[6]>0) && (v[7] is int && v[7]>0) && (v[8] is int && v[8]>0) && (v[9] is int && v[9]>0)))
+        && (count<=10 || ((v[10] is int && v[10]>0) && (v[11] is int && v[11]>0) && (v[12] is int && v[12]>0) && (v[13] is int && v[13]>0) && (v[14] is int && v[14]>0)))
+        && (count<=15 || ((v[15] is int && v[15]>0) && (v[16] is int && v[16]>0)));
+    }
+    function validSpecialShipQuantities() {
+      let ships=request.resource.data.ships;
+      return ships.keys().hasOnly(['smallCargo','largeCargo','lightFighter','heavyFighter','cruiser','battleship','bomber','battlecruiser','colonyShip','recycler','espionageProbe','mothership','deathStar','hephaestusForge','prometheusOracle','invictus','crepuscolo']) && validShipValues();
+    }
+    function validRaidShipQuantities() {
+      let ships=request.resource.data.ships;
+      return ships.keys().hasOnly(['lightFighter','heavyFighter','cruiser','battleship','bomber']) && validShipValues();
+    }
+    function validHumanFleetTarget(uniId,d) {
+      let target=originPath(uniId,d.targetKey);
+      return ('targetGalatticaId' in d)
+        ? (d.mission=='destroyMoon' && d.targetGalatticaId is string && d.targetGalatticaId!=''
+          && d.defenderUid!=request.auth.uid
+          && get(/databases/$(database)/documents/online_universes/$(uniId)/galatticheMap/$(d.targetGalatticaId)).data.ownerUid==d.defenderUid
+          && get(/databases/$(database)/documents/online_universes/$(uniId)/galatticheMap/$(d.targetGalatticaId)).data.coordKey==d.targetKey)
+        : (exists(target) ? (d.mission!='colonize' && d.defenderUid==get(target).data.get('ownerUid',null)) : (d.defenderUid==null && d.mission!='incursion'));
+    }
+    function validMissionPrerequisites(d) {
+      return (d.mission!='colonize' || d.ships.get('colonyShip',0)>0)
+        && (d.mission!='spy' || d.ships.get('espionageProbe',0)>0)
+        && (d.mission!='recycle' || d.ships.get('recycler',0)>0)
+        && (d.mission!='destroyMoon' || d.ships.get('deathStar',0)>0);
+    }
+    function validNewFleetCreate(uniId,fleetId) {
+      let d=request.resource.data;
+      let npc=d.attackerUid!=request.auth.uid;
+      return validFleetAlias(d) && validNewFleetCargo(d) && validNewFleetClock(d,npc)
+        && validFleetCoordinatePair(uniId,d,npc)
+        && (npc ? (validNpcRaidCreate(uniId,fleetId) && validRaidShipQuantities())
+          : ((d.defenderUid==null || (d.defenderUid is string && d.defenderUid!=''))
+            && validHumanFleetTarget(uniId,d) && validMissionPrerequisites(d)
+            && validHumanFleetCreate(uniId,fleetId,d)));
+    }
+
+    function validFleetIncursion(uniId,d) {
+      let origin=originPath(uniId,d.originKey);
+      let n=d.ships.mothership;
+      return d.ships.keys().hasOnly(['mothership']) && n is int && n>0
+        && d.carrierHangars is list && d.carrierHangars.size()==n
+        && d.targetKey!=d.originKey && get(originPath(uniId,d.targetKey)).data.ownerUid!=request.auth.uid
+        && getAfter(origin).data.fleet.mothership==get(origin).data.fleet.mothership-n;
+    }
+    function validFleetGalatticaOrigin(uniId,d) {
+      let origin=/databases/$(database)/documents/online_universes/$(uniId)/galattiche/$(d.originGalatticaKey);
+      let after=getAfter(origin).data;
+      return d.originGalatticaKey==request.auth.uid+'~'+d.originGalatticaId
+        && !after.destroyed && after.ownerUid==request.auth.uid
+        && (after.coordKey==d.originKey || (d.mission=='deploy' && d.defenderUid==request.auth.uid
+          && get(origin).data.coordKey==d.originKey));
+    }
+    function validFleetPlanetOrigin(uniId,d,ordinary) {
+      let origin=originPath(uniId,d.originKey);
+      let before=get(origin).data;
+      return before.ownerUid==request.auth.uid && (ordinary || validSpecialPlanetDispatch(d,origin,before));
+    }
+    function validHumanFleetCreate(uniId,fleetId,d) {
+      let ordinary=ordinaryHumanFleet(d);
+      return d.attackerUid==request.auth.uid
+        // The target owner has already been checked by validHumanFleetTarget.
+        && (!d.ships.keys().hasAny(['hephaestusForge','prometheusOracle'])
+          || (d.mission in ['deploy','transport'] && d.targetKey!=d.originKey && d.defenderUid==request.auth.uid))
+        && d.mission in ['attack','destroyMoon','spy','transport','deploy','colonize','recycle','expedition','embargo','blockade','occupy','incursion']
+        && (d.mission!='incursion' || validFleetIncursion(uniId,d))
+        && d.status=='outbound' && d.resolved==false
+        && (ordinary ? validOrdinaryCreate(uniId,fleetId) : validSpecialShipQuantities())
+        && (('originGalatticaKey' in d) ? validFleetGalatticaOrigin(uniId,d)
+          : validFleetPlanetOrigin(uniId,d,ordinary));
     }
 
     function validNpcRaidCreate(uniId, fleetId) {
+      let d=request.resource.data;
       return fleetId.matches('^npc_raid_' + request.auth.uid + '_[0-9]+$')
-        && request.resource.data.attackerUid is string
-        && request.resource.data.attackerUid.matches('^npc_raid_.*')
-        && request.resource.data.defenderUid == request.auth.uid
-        && request.resource.data.mission == 'attack'
-        && request.resource.data.status == 'outbound'
-        && request.resource.data.resolved == false
-        && request.resource.data.targetKey is string
-        && exists(/databases/$(database)/documents/online_universes/$(uniId)/planets/$(request.resource.data.targetKey))
-        && get(/databases/$(database)/documents/online_universes/$(uniId)/planets/$(request.resource.data.targetKey)).data.ownerUid == request.auth.uid;
+        && d.attackerUid is string
+        && d.attackerUid.matches('^npc_raid_.*')
+        && d.defenderUid == request.auth.uid
+        && d.mission == 'attack'
+        && d.status == 'outbound'
+        && d.resolved == false
+        && d.targetKey is string
+        && exists(/databases/$(database)/documents/online_universes/$(uniId)/planets/$(d.targetKey))
+        && get(/databases/$(database)/documents/online_universes/$(uniId)/planets/$(d.targetKey)).data.ownerUid == request.auth.uid;
     }
 
     // La conquista deve almeno essere collegata a una flotta d'attacco
@@ -497,9 +569,7 @@ service cloud.firestore {
         allow read: if signedIn();
         allow create: if signedIn()
           && !exists(opPath(uniId,fleetId))
-          && ((validHumanFleetCreate(uniId) && (ordinaryHumanFleet(request.resource.data)
-            ? validOrdinaryCreate(uniId,fleetId) : validSpecialDispatch(uniId,request.resource.data)))
-            || validNpcRaidCreate(uniId, fleetId));
+          && validNewFleetCreate(uniId,fleetId);
         // P-R3: aggiornamento consentito a chiunque autenticato, MA solo sui campi di risoluzione.
         // Questo impedisce a un client malevolo di cambiare attackerUid, targetCoords, originCoords,
         // o di riscrivere ships/cargo con valori inventati durante il volo.
