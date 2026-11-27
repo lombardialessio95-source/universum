@@ -1,6 +1,6 @@
 # UNIVERSUM — STATO DEL PROGETTO E PASSAGGIO DI CONSEGNE
 
-**Revisione:** 1.32 — 26 novembre 2026  
+**Revisione:** 1.33 — 26 novembre 2026  
 **Tipo:** documento di continuità per ChatGPT, Codex e il proprietario del progetto  
 **Repository:** https://github.com/lombardialessio95-source/universum  
 **Riferimento verificato:** branch `main`, commit `67f71b7f2662ad2c345b0e3e8f2ba4ab4202c099` (25 novembre 2026, 21:24 UTC)  
@@ -339,3 +339,7 @@ Ordinaria riferisce R01 incompleto, zero blocchi salvati. CONTROLLO ha recuperat
 
 ### AT05-I04B4B-R01 — intervento straordinario Profonda riuscito secondo rapporto
 Su autorizzazione del proprietario, Profonda ha eseguito esclusivamente recupero sorgente. Rapporto 27/11: git fetch --no-tags --depth=1 del backup autorizzato in repository bare temporaneo, controllo FETCH_HEAD e blob del percorso, git cat-file blob del percorso al commit con redirezione binaria; wc -c 29340, git hash-object --no-filters 04a70db16088c092c3fee9fcfb4a742bd0c48e29, SHA256 a4ba94a475fda7eb238918c52a5151b4a77216a3f322d044ac66feb43679300a. CONTROLLO verifica direttamente main, candidata e backup invariati; non dispone del file consegnato a Profonda/utente nel proprio filesystem, quindi non certifica autonomamente il file locale. R01 accettato sulla base del rapporto, subordinando l'uso del sorgente alla verifica locale dei tre valori in Ordinaria. Metodo preferenziale di recupero per ambienti con accesso Git in lettura; se DNS/rete impediscono fetch usare il file verificato allegato dal proprietario, non ripetere trascrizione base64. Restituire incarico a Ordinaria, autorizzato esclusivamente B4B con patch cumulativa B4A e test già prescritti. Nessun avanzamento funzionale (6/9 I04B), B4C/B5/C–F/I05 non autorizzati, nessun push, integrazione, Rules/deploy. Nessuna modifica operativa da CONTROLLO.
+
+
+### AT05-I04B4B — recupero cumulativa B4A riuscito secondo rapporto
+Ordinaria ha confermato fleet-control.js locale verificato (29340 byte, blob 04a70db16088c092c3fee9fcfb4a742bd0c48e29, SHA256 a4ba94a475fda7eb238918c52a5151b4a77216a3f322d044ac66feb43679300a), ma mancava cumulativa B4A. Successivo rapporto di recupero conferma originale non ricostruita, SHA256 ab4ba833ed61b6b0566a5f6a8fc0a16ce5ed36089c50c71d2f76d89a61e3a5e2, 14 file +132/-4. CONTROLLO accetta il recupero sulla base del rapporto, senza aver ispezionato i byte della patch; main/candidata/backup verificati direttamente invariati. Proprietario deve conservare entrambi i file e allegarli a Ordinaria. Verificare hash e git apply --check sulla base pulita bbee52e2b38039f8a25d6bd6b3edda96fda75ac0, applicare cumulativa una sola volta, poi implementare esclusivamente B4B e tutti i test già prescritti. Conservare patch B4B appena prodotta e consegnare allegati verificabili. Nessun avanzamento funzionale (6/9 I04B); B4C/B5/C–F/I05 non autorizzati, nessun push, integrazione, Rules/deploy. Nessuna modifica operativa da CONTROLLO.
