@@ -42,7 +42,7 @@ function client(u,storage=new Map(),account=uid){
   if(mode.loseOnce){mode.loseOnce=false;throw Object.assign(Error('Injected lost response AFTER real commit'),{code:'unavailable'});}return result;
  }};
  const G={getAuth:()=>({currentUser:{uid:account,displayName:'Pilot'}}),getDB:()=>db,coordsToKey:c=>`${c.g}_${c.s}_${c.p}`,_tsToMs:()=>0};
- const W={localStorage:{getItem:k=>storage.get(k)??null,setItem:(k,v)=>storage.set(k,String(v)),removeItem:k=>storage.delete(k)},__UniversumMPModules:G,__UniversumMPVariables:{SYNC_MIN_INTERVAL_MS:0,_INBOX_RES_KEYS:['metal','crystal','deuterium'],_syncLastByUni:new Map(),_systemCache:new Map(),_systemPending:new Map(),FLEET_SCHEMA_VERSION:1,_mpErrorToastAt:new Map()},UniversumData:{SHIPS:{lightFighter:{cargo:100000,cost:{metal:3000,crystal:1000,deuterium:0}}}},UniversumGalaxy:{calculateDistance:()=>1,getFleetSpeedAndFuel:()=>({fuelCost:40,durationSec:600})},UniversumMissionsCore:{getMaxFleetSlots:()=>100,getMaxExploreHours:()=>4},fbAuth:{currentUser:{uid:account}}};
+ const W={localStorage:{get length(){return storage.size},key:i=>[...storage.keys()][i]??null,getItem:k=>storage.get(k)??null,setItem:(k,v)=>storage.set(k,String(v)),removeItem:k=>storage.delete(k)},__UniversumMPModules:G,__UniversumMPVariables:{SYNC_MIN_INTERVAL_MS:0,_INBOX_RES_KEYS:['metal','crystal','deuterium'],_syncLastByUni:new Map(),_systemCache:new Map(),_systemPending:new Map(),FLEET_SCHEMA_VERSION:1,_mpErrorToastAt:new Map()},UniversumData:{SHIPS:{lightFighter:{cargo:100000,cost:{metal:3000,crystal:1000,deuterium:0}}}},UniversumGalaxy:{calculateDistance:()=>1,getFleetSpeedAndFuel:()=>({fuelCost:40,durationSec:600})},UniversumMissionsCore:{getMaxFleetSlots:()=>100,getMaxExploreHours:()=>4},fbAuth:{currentUser:{uid:account}}};
  for(const source of sources)new Function('window','firebase',source)(W,firebase);
  W.UniversumUI={state:{currentUniverse:u,isMultiplayerMode:true},startOnlineGame(fresh){this.state.currentUniverse=fresh;this.state.isMultiplayerMode=true;},toast(){}};
  const launch=()=>G.launchOnlineFleet(u,0,target,'attack',{lightFighter:3},{metal:100,crystal:50,deuterium:20});
@@ -237,5 +237,25 @@ test('R16 ack cannot authorize a direct versioned stock overwrite',async()=>{
  const u=await seed('versionedack');const {a}=await launchLost(u);await a.raw.doc(player(u.id)).update({'ordinaryDispatchReceipt.acknowledged':true});
  await denied(()=>a.raw.doc(home(u.id)).update({fleet:{lightFighter:10}}));
  await a.raw.doc(home(u.id)).update({'inbox.fleet.lightFighter':1});assert.equal((await a.read(home(u.id))).data().inbox.fleet.lightFighter,1);
+});
+test('Profonda journal migration on real SDK: stable ID, terminal remains after fleet removal',async()=>{
+ const u=await seed('profondajournal');const {a,p}=await launchLost(u);
+ const key='universum.at05.v1:'+JSON.stringify([uid,u.id])+':'+p.operationId;
+ const storage=new Map([[key,JSON.stringify({id:p.operationId,originKey:p.originKey,revision:p.expectedRevision})]]);
+ await adminDelete(room(u.id)+'/fleets/'+p.operationId);
+ const b=client(cp(u),storage);assert.equal(b.G.ordinaryDepartureStatus(b.u).operationId,p.operationId);assert.equal(storage.has(key),false);
+ const result=await b.G.verifyOrdinaryDeparture(b.u);assert.equal(result.operationId,p.operationId);assert.equal(result.status,'committed');
+ const fresh=b.W.UniversumUI.state.currentUniverse;assert.equal(fresh.planets[0].fleet.lightFighter,7);assert.equal((await b.fleets()).size,0);
+ assert.equal(await b.G.syncPlayerState(fresh,{force:true}),true);assert.equal((await b.read(player(u.id))).data().ordinaryDispatchReceipt.acknowledged,true);assert.equal((await b.read(home(u.id))).data().fleet.lightFighter,7);
+});
+test('Profonda pre-protocol journal: fleet-only positive evidence; no negative inference',async()=>{
+ const u=await seed('profondalegacy');const {a,p}=await launchLost(u);
+ const key='universum.at05.v1:'+JSON.stringify([uid,u.id])+':'+p.operationId;
+ // Simulate historical committed fleet from before E/I05: no receipt or terminal document.
+ const profile=(await a.read(player(u.id))).data();delete profile.ordinaryDispatchReceipt;
+ await adminSet(player(u.id),profile);await adminDelete(opPath(u.id,p.operationId));
+ const storage=new Map([[key,JSON.stringify({id:p.operationId,originKey:p.originKey,revision:p.expectedRevision})]]),b=client(cp(u),storage);
+ await assert.rejects(()=>b.G.verifyOrdinaryDeparture(b.u,{cancel:true}),{code:'ordinary-departure-pending'});
+ assert.equal((await b.G.verifyOrdinaryDeparture(b.u)).operationId,p.operationId);assert.equal((await b.fleets()).size,1);assert.equal((await b.read(home(u.id))).data().fleet.lightFighter,7);
 });
 (async()=>{try{const probe=await fetch(`http://${host}/`,{signal:AbortSignal.timeout(5000)});if(!probe.ok)throw Error(`Emulator health ${probe.status}`);console.log(`SDK=${firebase.SDK_VERSION}; Rules Git blob=${ruleHash}; project=${projectId}`);for(const [name,fn] of cases){try{await fn();console.log('PASS '+name);}catch(e){console.error('FAIL '+name+': '+e.stack);process.exitCode=1;}}}catch(e){console.error('BLOCKED: '+e.stack);process.exitCode=2;}finally{await Promise.allSettled(apps.map(a=>a.delete()));}})();

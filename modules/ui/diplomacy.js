@@ -78,8 +78,11 @@
             // Prima consolidiamo le risorse e la flotta locale. La transazione online
             // è poi l'unica a sottrarre tariffa e navi (anche se altri client sono attivi).
             await UI.persistUniverseState();
+            if (UI.state.currentUniverse!==uni || UI.blockPendingMutation(uni)) return;
             result = await window.UniversumMP.hireOnlineMoonMerchant(uni, planet.coords);
+            if (UI.state.currentUniverse!==uni || UI.blockPendingMutation(uni)) return;
             await window.UniversumMP.syncPlayerState(uni, { force: true });
+            if (UI.state.currentUniverse!==uni || UI.blockPendingMutation(uni)) return;
             if (result.success) {
               planet.moon = moonMerchant.createMoonData();
               const key = `${planet.coords.g}:${planet.coords.s}:${planet.coords.p}`;

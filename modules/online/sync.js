@@ -320,7 +320,7 @@
     if (!u) return;
     const uid=getAuth().currentUser?.uid;
     const epoch=G.ordinaryRecoveryEpoch?.(u,uid);
-    const blocked=()=>G.ordinaryRecoveryEpoch?.(u,uid)!==epoch || G.ordinaryCheckpointBlocked?.(u,options.dispatch,uid);
+    const blocked=()=>getAuth().currentUser?.uid!==uid || G.isOnlineSessionCurrent?.(u)===false || G.ordinaryRecoveryEpoch?.(u,uid)!==epoch || G.ordinaryCheckpointBlocked?.(u,options.dispatch,uid);
     const rejectBlocked=()=>{
       if (options.dispatch || options.galLaunch) throw Object.assign(Error('Partenza in verifica.'),{code:'ordinary-departure-pending'});
       return false;
@@ -339,6 +339,7 @@
     try { return await operation; }
     catch (error) {
       // Le regole possono osservare il commit concorrente prima del retry SDK.
+      if (blocked()) throw error;
       if (error.code === 'permission-denied' && Number.isSafeInteger(u.serviceRevision)) {
         const user = getAuth().currentUser;
         const ref = user && getDB().collection('online_universes').doc(u.id).collection('players').doc(user.uid);
@@ -348,8 +349,15 @@
       if (!options.dispatch?.outcome && !blocked() && error.code === 'service-conflict' && window.UniversumUI?.state?.currentUniverse === u) {
         const ui = window.UniversumUI;
         ui.toast(error.message,'error');
+        const oldGeneration=ui._ordinaryEntryGeneration;
         await ui.exitToLobbyAfterServerRemoval();
-        try { ui.startOnlineGame(await G.joinOnlineUniverse(u.id,u.roomPasscode)); }
+        try {
+          const generation=ui._ordinaryEntryGeneration;
+          if (getAuth().currentUser?.uid!==uid || ui.state.currentUniverse ||
+              (Number.isSafeInteger(oldGeneration) && generation!==oldGeneration+1)) throw error;
+          const fresh=await G.joinOnlineUniverse(u.id,u.roomPasscode);
+          if (getAuth().currentUser?.uid===uid && !ui.state.currentUniverse && ui._ordinaryEntryGeneration===generation) ui.startOnlineGame(fresh);
+        }
         catch (reloadError) { ui.toast(reloadError.message,'error'); }
       }
       throw error;
@@ -416,7 +424,7 @@
     const outcome=dispatch?.ordinary ? dispatch.outcome : null;
     if (dispatch?.ordinary && !outcome) throw Error('Dispatch ordinario non autorizzato.');
     let terminalReceipt, debitProof;
-    const checkpointBlocked=()=>G.ordinaryRecoveryEpoch?.(universeObj,user.uid)!==recoveryEpoch ||
+    const checkpointBlocked=()=>G.isOnlineSessionCurrent?.(universeObj)===false || G.ordinaryRecoveryEpoch?.(universeObj,user.uid)!==recoveryEpoch ||
       G.ordinaryCheckpointBlocked?.(universeObj,dispatch,user.uid);
     try { await db.runTransaction(async (tx) => {
       if (getAuth().currentUser?.uid!==user.uid || checkpointBlocked())
@@ -600,7 +608,7 @@
       throw error;
     }
     if (outcome) outcome.receipt=terminalReceipt;
-    if (getAuth().currentUser?.uid!==user.uid || G.ordinaryRecoveryEpoch?.(universeObj,user.uid)!==recoveryEpoch)
+    if (getAuth().currentUser?.uid!==user.uid || G.isOnlineSessionCurrent?.(universeObj)===false || G.ordinaryRecoveryEpoch?.(universeObj,user.uid)!==recoveryEpoch)
       throw Object.assign(Error('Stato del checkpoint non più attivo.'),{code:'ordinary-departure-pending'});
     if (versioned) universeObj.serviceRevision = expected+1;
     for (const write of galWrites) {

@@ -27,11 +27,13 @@ module.exports = async function multiplayerSmoke(ctx,baseUrl) {
   Object.assign(seed.researches,{impulseDrive:3,computerTech:10});
   for(const p of seed.planets) Object.assign(p,{ownerUid:'e2e',ownerName:'E2E',maxTemp:34,fieldsMax:240,lastUpdated:Date.now(),isNpc:false});
   seed.planets[0].fleet.hephaestusForge=4;
-  await clients[0].evaluate(async u=>{
+  seed.at05ProfileIncarnation=await clients[0].evaluate(async u=>{
     const ref=fbDB.collection('online_universes').doc(u.id);
     await ref.set({founderUid:'e2e',ownerUid:'e2e',name:'E2E',speed:1000});
-    await ref.collection('players').doc('e2e').set({uid:'e2e',nickname:'E2E',researches:u.researches,specialistBuilt:u.specialistBuilt,serviceRevision:0,researchModelVersion:1});
+    await ref.collection('players').doc('e2e').set({uid:'e2e',nickname:'E2E',researches:u.researches,specialistBuilt:u.specialistBuilt,serviceRevision:0,researchModelVersion:1,joinedAt:Date.now(),at05ProfileCreatedAt:firebase.firestore.FieldValue.serverTimestamp()});
     for(const p of u.planets) await ref.collection('planets').doc([p.coords.g,p.coords.s,p.coords.p].join('_')).set(p);
+    const created=(await ref.collection('players').doc('e2e').get({source:'server'})).data().at05ProfileCreatedAt;
+    return `${created.seconds}:${created.nanoseconds}`;
   },seed);
   console.log('SDK: profilo e colonie inizializzati.');
   const outcomes=await Promise.all(clients.map((page,i)=>page.evaluate(async ({u,i})=>{

@@ -108,6 +108,7 @@
     panel.addEventListener('click',async event=>{
       const button = event.target.closest('button');
       if (!button || button.disabled) return;
+      if ((button.dataset.add || button.dataset.job) && UI.blockPendingMutation(u)) return;
       try {
         if (button.dataset.add) {
           const id = button.dataset.add;
@@ -131,5 +132,8 @@
     const panel = document.getElementById('work-orders');
     if (panel) view(panel,UI.state.currentUniverse,UI.getActivePlanet());
   };
-  UI.changeWorkOrder = change;
+  UI.changeWorkOrder = function (u, ...args) {
+    if ((UI.state.currentUniverse || UI.state.isMultiplayerMode) && UI.blockPendingMutation?.(u)) return;
+    return change(u, ...args);
+  };
 })();

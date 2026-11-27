@@ -155,7 +155,9 @@
           document.getElementById('trade-bot-give').value,
           Number(document.getElementById('trade-bot-amount').value),
           document.getElementById('trade-bot-get').value);
+        if (UI.state.currentUniverse!==uni || UI.blockPendingMutation(uni)) return;
         await window.UniversumMP.syncPlayerState(uni, { force: true });
+        if (UI.state.currentUniverse!==uni || UI.blockPendingMutation(uni)) return;
         UI.closeModal();
         UI.updateTopBarNumbers();
         UI.renderCurrentView();

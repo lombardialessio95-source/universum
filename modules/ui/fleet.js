@@ -268,6 +268,7 @@
       UI.renderCurrentView();
     }));
     const operateHangar=async (button,direction)=>{
+      if (UI.blockPendingMutation(uni)) return;
       const id=button.dataset.id;
       const amountBox=[...viewport.querySelectorAll('.mother-hangar-amount')].find(el=>el.dataset.id===id);
       const amount=Number(amountBox?.value);
@@ -281,9 +282,10 @@
           Hangars.changeLoad(planet,id,amount*direction);
           await window.UniversumDB.save(uni);
         }
+        if (UI.state.currentUniverse!==uni || UI.blockPendingMutation(uni)) return;
         UI.updateTopBarNumbers();
         UI.renderCurrentView();
-      } catch(e) {button.disabled=false;UI.toast(e.message,'error');}
+      } catch(e) {button.disabled=false;if (UI.state.currentUniverse===uni) UI.toast(e.message,'error');}
     };
     viewport.querySelectorAll('.mother-hangar-load').forEach(b=>b.addEventListener('click',()=>operateHangar(b,1)));
     viewport.querySelectorAll('.mother-hangar-unload').forEach(b=>b.addEventListener('click',()=>operateHangar(b,-1)));
@@ -417,6 +419,7 @@
       } catch (error) { UI.toast(error.message, 'error'); }
     });
     document.getElementById('btn-launch-fleet')?.addEventListener('click', async () => {
+      if (UI.blockPendingMutation(uni)) return;
       syncTarget();
       try {
         let missionObj;
@@ -463,6 +466,7 @@
           await window.UniversumDB.save(uni);
         }
 
+        if (UI.state.currentUniverse!==uni || UI.blockPendingMutation(uni)) return;
         st.fleetSelection = {};
         st.fleetHangarIds = [];
         st.fleetCargo = { metal: 0, crystal: 0, deuterium: 0 };

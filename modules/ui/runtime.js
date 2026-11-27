@@ -3,15 +3,27 @@
   'use strict';
 
   const UI = window.UniversumUI;
+  const sessionOwners=new WeakMap();
+  const online=window.__UniversumMPModules;
+  if (online) online.isOnlineSessionCurrent=function (u) {
+    return !sessionOwners.has(u) || (UI.state.isMultiplayerMode && UI.state.currentUniverse===u &&
+      window.fbAuth?.currentUser?.uid===sessionOwners.get(u));
+  };
 
 
   UI.exitActiveGameToLobby = async function () {
     const st = UI.state;
-    const pending=UI.pendingDeparture(st.currentUniverse);
+    const leaving=st.currentUniverse;
+    let pending=UI.pendingDeparture(leaving);
     if (pending?.busy) { UI.toast('Verifica in corso: attendi la fine del tentativo.','info'); return; }
     UI._ordinaryEntryGeneration++;
     UI.closeResourceDeposit?.();
-    if (st.currentUniverse && !pending) await UI.persistUniverseState();
+    if (leaving && !pending) {
+      await UI.persistUniverseState();
+      if (st.currentUniverse!==leaving) return;
+      pending=UI.pendingDeparture(leaving);
+      if (pending?.busy) { UI.toast('Verifica in corso: attendi la fine del tentativo.','info'); return; }
+    }
     UI.stopGameLoop();
     UI.cleanupMultiplayerListeners();
     st.isMultiplayerMode = false;
@@ -47,22 +59,12 @@
 
   UI.cleanupMultiplayerListeners = function () {
     const st = UI.state;
-    UI.stopChatListeners();
-    if (typeof st.unsubServerListener === 'function') {
-      st.unsubServerListener();
-      st.unsubServerListener = null;
-    }
-    if (typeof st.unsubFleetsListener === 'function') {
-      st.unsubFleetsListener();
-      st.unsubFleetsListener = null;
-    }
-    if (typeof st.unsubOwnFleetsListener === 'function') {
-      st.unsubOwnFleetsListener();
-      st.unsubOwnFleetsListener = null;
-    }
-    if (typeof st.unsubOwnPlanetsListener === 'function') {
-      st.unsubOwnPlanetsListener();
-      st.unsubOwnPlanetsListener = null;
+    try { UI.stopChatListeners(); } catch (error) { console.warn('[MP] Arresto chat:',error); }
+    for (const key of ['unsubServerListener','unsubFleetsListener','unsubOwnFleetsListener','unsubOwnPlanetsListener']) {
+      const unsubscribe=st[key];st[key]=null;
+      if (typeof unsubscribe==='function') {
+        try { unsubscribe(); } catch (error) { console.warn('[MP] Arresto listener:',error); }
+      }
     }
     if (UI._reconcileTimer) {
       clearTimeout(UI._reconcileTimer);
@@ -111,9 +113,9 @@
       }
     };
 
+    const uni=st.currentUniverse;
     st.gameLoopTimer = setInterval(async () => {
-      const uni = st.currentUniverse;
-      if (!uni) return;
+      if (!uni || st.currentUniverse!==uni || online?.isOnlineSessionCurrent(uni)===false) return;
       const pending=UI.pendingDeparture(uni);
       if (pending) {
         UI.updateOrdinaryDeparturePanel();
@@ -274,6 +276,8 @@
     const st = UI.state;
     st.isMultiplayerMode = true;
     st.currentUniverse = universe;
+    sessionOwners.set(universe,window.fbAuth?.currentUser?.uid);
+    const isCurrent=()=>st.currentUniverse===universe && online?.isOnlineSessionCurrent(universe)!==false;
     universe.creativeMode = false;
 
     if (universe.supremaRecoveryStaging) window.UniversumSupremaStaging?.onJoin(universe)
@@ -288,7 +292,7 @@
 
     if (window.UniversumMP?.listenUniverseDeleted) {
       st.unsubServerListener = window.UniversumMP.listenUniverseDeleted(universe.id, async () => {
-        if (UI.state.currentUniverse !== universe) return;
+        if (!isCurrent()) return;
         UI.toast('Il server e stato eliminato dal creatore.', 'error');
         await UI.exitToLobbyAfterServerRemoval();
       });
@@ -296,7 +300,7 @@
 
     if (window.UniversumMP?.listenIncomingFleets) {
       st.unsubFleetsListener = window.UniversumMP.listenIncomingFleets(universe, (incomingList) => {
-        if (UI.state.currentUniverse!==universe) return;
+        if (!isCurrent()) return;
         universe.incomingAttacks = incomingList;
         if (incomingList.length > st.lastAlertCount) {
           UI.playSound('alarm');
@@ -311,7 +315,7 @@
     // FIX 4.2 — Le flotte proprie si aggiornano da sole (partenza, ritorno, rientro assedi)
     if (window.UniversumMP?.listenOwnFleets) {
       st.unsubOwnFleetsListener = window.UniversumMP.listenOwnFleets(universe, (ownList) => {
-        if (UI.state.currentUniverse !== universe) return;
+        if (!isCurrent()) return;
         universe.fleetsInFlight = ownList;
         if (['overview', 'movements'].includes(st.currentView)) UI.renderCurrentView();
       });
@@ -320,7 +324,7 @@
     // FIX 2.9 — Pianeti propri: variazioni in arrivo, pianeti persi (conquista) o acquisiti
     if (window.UniversumMP?.listenOwnPlanets) {
       st.unsubOwnPlanetsListener = window.UniversumMP.listenOwnPlanets(universe, ({ gained, needSync }) => {
-        if (UI.state.currentUniverse !== universe) return;
+        if (!isCurrent()) return;
         if (gained.length > 0) {
           gained.forEach((p) => UI.toast(`Nuovo pianeta nel tuo impero: ${p.name}`, 'success'));
           UI.refreshPlanetSelector?.();
@@ -337,6 +341,25 @@
     UI.startGameLoop();
   };
 
+
+  UI.installRecoveredOnlineGame = function (universe) {
+    try {
+      UI.stopGameLoop();
+      UI.startOnlineGame(universe);
+      if (UI.state.currentUniverse!==universe || !UI.state.isMultiplayerMode) throw Error('Installazione non completata.');
+    } catch (error) {
+      UI._ordinaryEntryGeneration++;
+      UI.state.currentUniverse=null;
+      UI.state.isMultiplayerMode=false;
+      for (const stop of [UI.stopGameLoop,UI.cleanupMultiplayerListeners,UI.closeResourceDeposit,UI.closeModal,UI.updateOrdinaryDeparturePanel]) {
+        try { stop?.(); } catch (e) { console.warn('[MP] Arresto dopo recupero:',e); }
+      }
+      document.getElementById('screen-game')?.classList.add('hidden');
+      document.getElementById('screen-lobby')?.classList.remove('hidden');
+      document.body.classList.add('lobby-black');
+      throw error;
+    }
+  };
 
   UI.bindGlobalUIEvents = function () {
     const st = UI.state;

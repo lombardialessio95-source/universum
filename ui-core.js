@@ -341,8 +341,10 @@
   UI._scheduleSyncRetry = function () {
     const r = UI._syncRetry;
     if (r.timer || r.attempt >= SYNC_RETRY_DELAYS_MS.length) return;
+    const universe=UI.state.currentUniverse;
     const delay = SYNC_RETRY_DELAYS_MS[r.attempt++];
-    r.timer = setTimeout(async () => {
+    const timer=setTimeout(async () => {
+      if (r.timer!==timer || UI.state.currentUniverse!==universe || window.__UniversumMPModules?.isOnlineSessionCurrent?.(universe)===false) return;
       r.timer = null;
       if (!UI.state.isMultiplayerMode || !UI.state.currentUniverse) {
         UI._resetSyncRetry();
@@ -352,6 +354,7 @@
         await UI.persistUniverseState();
       } catch (e) { /* persistUniverseState ripianifica da sola il tentativo successivo */ }
     }, delay);
+    r.timer=timer;
   };
 
 
@@ -473,13 +476,16 @@
 
   UI._requestReconcileSync = function () {
     if (UI.pendingDeparture() || UI._reconcileTimer) return;
-    UI._reconcileTimer = setTimeout(async () => {
+    const universe=UI.state.currentUniverse;
+    const timer=setTimeout(async () => {
+      if (UI._reconcileTimer!==timer || UI.state.currentUniverse!==universe || window.__UniversumMPModules?.isOnlineSessionCurrent?.(universe)===false) return;
       UI._reconcileTimer = null;
       if (!UI.state.isMultiplayerMode || !UI.state.currentUniverse) return;
       try {
         await UI.persistUniverseState();
       } catch (e) { /* errore già mostrato/ritentato da persistUniverseState */ }
     }, 400);
+    UI._reconcileTimer=timer;
   };
 
 

@@ -10,7 +10,7 @@ async function runTests(fleetSource,syncSource,universesSource,galatticheSource)
   const origin="1_1_1", own="1_1_2", enemy="1_1_3", empty="1_1_4";
   function fixture({versioned=true,queue=false,initial=10,uid="me",uniId="u",storageMap=new Map(),sharedStore=null,counter={next:0},recovery=false}={}) {
     const storageMode={};
-    const localStorage={getItem:k=>{if(storageMode.failGet)throw Error("storage read denied");return storageMap.get(k)??null},
+    const localStorage={get length(){return storageMap.size},key:i=>[...storageMap.keys()][i]??null,getItem:k=>{if(storageMode.failGet)throw Error("storage read denied");return storageMap.get(k)??null},
       setItem:(k,v)=>{if(storageMode.failSet)throw Error("storage quota");if(!storageMode.dropWrite)storageMap.set(k,String(v))},
       removeItem:k=>{if(storageMode.failRemove)throw Error("storage remove denied");storageMap.delete(k)}};
     const auth={uid};
@@ -221,6 +221,44 @@ async function runTests(fleetSource,syncSource,universesSource,galatticheSource)
     const first=f.launch();await entered.wait;ok(pending(f).admissionOnly,"visible early reservation");ok(f.G.ordinaryDepartureBusy(f.u),"busy");
     await rejected(()=>f.launch(),"double click before fleet id");await rejected(()=>f.G.renameOnlinePlanet(f.u.id,f.p.coords,"changed"),"direct mutation blocked");eq(await f.G.syncPlayerState(f.u,{force:true}),false,"checkpoint blocked");
     eq(f.storageMap.size,0,"no durable request before ID");f.mode.beforeGet=null;hold.open();await first;eq(f.mode.commits,1,"one commit");eq(pending(f),null,"admission released");
+  });
+  const oldJournalKey=(uid,uni,id)=>'universum.at05.v1:'+JSON.stringify([uid,uni])+':'+id;
+  await test("Profonda journal migration: stable ID, positive proof, no redispatch",async()=>{
+    const f=await uncertain();const record=pending(f),key=oldJournalKey('me','u',record.operationId);
+    f.storageMap.clear();f.storageMap.set(key,JSON.stringify({id:record.operationId,originKey:record.originKey,revision:record.expectedRevision}));
+    const reload=fixture({recovery:true,storageMap:f.storageMap,sharedStore:f.store,counter:f.counter});
+    eq(pending(reload).operationId,record.operationId,"old ID");ok(!f.storageMap.has(key),"legacy copy removed only after new storage");
+    eq((await verify(reload)).status,"committed","positive proof");eq(f.state().created,1,"no duplicate");eq(reload.mode.commits,0,"read-only recovery");
+  });
+  await test("Profonda journal migration: missing proof cannot cancel",async()=>{
+    const f=fixture({recovery:true});const key=oldJournalKey('me','u','old1');f.storageMap.set(key,JSON.stringify({id:'old1',originKey:origin,revision:2}));
+    eq(pending(f).operationId,'old1',"original ID");await rejected(()=>verify(f,{cancel:true}),"legacy cannot cancel");await rejected(()=>verify(f),"no positive proof");eq(f.mode.commits,0,"no writes");
+  });
+  await test("Profonda journal: failed persistent migration retains legacy record",async()=>{
+    const f=fixture();const key=oldJournalKey('me','u','old1');f.storageMap.set(key,JSON.stringify({id:'old1',originKey:origin,revision:2}));f.storageMode.failSet=true;
+    await rejected(()=>f.launch(),"storage blocked");ok(f.storageMap.has(key),"old record retained");eq(f.mode.commits,0,"no commit");f.storageMode.failSet=false;eq(pending(f).operationId,'old1',"recovered ID");
+  });
+  await test("Profonda journal: multiple records kept, other scope independent",async()=>{
+    const f=fixture();for(const id of ['old1','old2'])f.storageMap.set(oldJournalKey('me','u',id),JSON.stringify({id,originKey:origin,revision:2}));
+    await rejected(()=>f.launch(),"ambiguous records");eq(f.storageMap.size,2,"no lost journal");eq(pending(f).operationId,"old1","first pending");const g=fixture({uid:'other',storageMap:f.storageMap});await g.launch();eq(g.mode.commits,1,"other account independent");
+  });
+  await test("Profonda journal: two committed legacy requests recovered sequentially",async()=>{
+    const f=await uncertain();const first=pending(f),doc=cp(f.store.get(f.fleets+first.operationId));
+    delete f.store.get(f.player).ordinaryDispatchReceipt;f.store.delete(f.root+'/ordinaryDispatchOps/'+first.operationId);
+    f.store.get(f.player).serviceRevision=4;f.store.set(f.fleets+'old2',doc);f.store.get(f.planets+origin).fleet.lightFighter=4;
+    f.storageMap.clear();for(const [id,revision] of [[first.operationId,2],['old2',3]])f.storageMap.set(oldJournalKey('me','u',id),JSON.stringify({id,originKey:origin,revision}));
+    const reload=fixture({recovery:true,storageMap:f.storageMap,sharedStore:f.store,counter:f.counter});
+    eq((await verify(reload)).operationId,first.operationId,"first proof");eq(pending(reload).operationId,'old2',"second retained");
+    eq((await verify(reload)).operationId,'old2',"second proof");eq(pending(reload),null,"all settled");eq(reload.mode.commits,0,"no duplicate or debit");eq(installed(reload).planets[0].fleet.lightFighter,4,"stock authoritative");
+  });
+  await test("Profonda journal: invalid modern terminal cannot erase legacy request",async()=>{
+    const f=fixture(),old=oldJournalKey('me','u','old1'),modern='universum:ordinary-departure:v1:'+JSON.stringify(['me','u']);
+    f.storageMap.set(old,JSON.stringify({id:'old1',originKey:origin,revision:2}));
+    f.storageMap.set(modern,JSON.stringify({accountUid:'me',universeId:'u',operationId:'old1',originKey:origin,expectedRevision:2,status:'settled'}));
+    await rejected(()=>f.launch(),"invalid terminal");ok(f.storageMap.has(old),"legacy record retained");eq(f.mode.commits,0,"no commit");
+  });
+  await test("Profonda session: callback from retired account cannot checkpoint",async()=>{
+    const f=fixture();f.G.isOnlineSessionCurrent=()=>false;await rejected(()=>f.launch(),"retired session");eq(await f.G.syncPlayerState(f.u,{force:true}),false,"checkpoint blocked");eq(f.mode.commits,0,"no writes");
   });
   return results;
 }

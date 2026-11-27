@@ -76,6 +76,7 @@
 
     viewport.querySelectorAll('.btn-start-research').forEach((btn) => {
       btn.addEventListener('click', async () => {
+        if (UI.blockPendingMutation(uni)) return;
         try {
           const res = Engine.startResearch(uni, btn.dataset.rid, pIdx);
           await UI.persistUniverseState();

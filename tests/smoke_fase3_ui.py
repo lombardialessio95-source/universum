@@ -24,6 +24,7 @@ with sync_playwright() as pw:
           window.UniversumUI={state,escapeHTML:x=>String(x).replace(/[&<>\"]/g,''),formatNum:x=>String(x),
             formatDuration:x=>String(x),svgIcon:()=>'',artTag:()=>'',resIconTag:()=>'',
             getActivePlanet:()=>planet,getActivePlanetIndex:()=>0,
+            blockPendingMutation(u){return this.state.currentUniverse!==u;},
             updateTopBarNumbers(){},toast(){},renderCurrentView(){this.renderFleet(document.getElementById('viewport'))}};
         }''')
         page.add_script_tag(path=str(root/'modules/galaxy/hangars.js'))

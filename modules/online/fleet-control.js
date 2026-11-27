@@ -59,20 +59,70 @@
       {code:'ordinary-departure-storage',cause});
   }
   const validRevision=n=>Number.isSafeInteger(n) && n>=0 && n<Number.MAX_SAFE_INTEGER;
-  function readStoredDeparture(u,uid) {
-    const key=departureKey(u,uid);
-    try {
-      const raw=window.localStorage.getItem(key);
-      const active=ordinaryDepartures.get(key);
-      if (raw===null) return active ? {...active.record,missing:true} : null;
-      const record=JSON.parse(raw);
-      if (!record || record.accountUid!==uid || record.universeId!==u.id ||
+  function validStoredDeparture(record,u,uid) {
+    return !(!record || record.accountUid!==uid || record.universeId!==u.id ||
           typeof record.operationId!=='string' || !record.operationId || record.operationId.includes('/') ||
           typeof record.originKey!=='string' || !record.originKey ||
           !(record.expectedRevision===null || validRevision(record.expectedRevision)) ||
           !['pending','settled'].includes(record.status) ||
           (record.status==='settled' && (!terminalStatuses.has(record.terminalStatus) ||
-            !(record.terminalRevision===null || Number.isSafeInteger(record.terminalRevision))))) throw Error('Richiesta persistente non valida.');
+            !(record.terminalRevision===null || Number.isSafeInteger(record.terminalRevision)))));
+  }
+  // Importazione conservativa del journal di Profonda. Non dedurre mai un
+  // esito negativo da un record senza ricevuta o identità del profilo.
+  function importLegacyDeparture(u,uid,key,raw) {
+    const storage=window.localStorage;
+    if (typeof storage.key!=='function') return raw;
+    const prefix='universum.at05.v1:'+JSON.stringify([uid,u.id])+':';
+    const records=[];
+    for (let i=0;i<storage.length;i++) {
+      const oldKey=storage.key(i);
+      if (oldKey?.startsWith(prefix)) records.push(oldKey);
+    }
+    if (!records.length) return raw;
+    const items=records.map(oldKey=>{
+      const old=JSON.parse(storage.getItem(oldKey));
+      if (!old || typeof old.id!=='string' || !/^[A-Za-z0-9_-]{1,128}$/.test(old.id) ||
+          oldKey!==prefix+old.id || typeof old.originKey!=='string' || !/^\d+_\d+_\d+$/.test(old.originKey) ||
+          !validRevision(old.revision)) throw Error('Journal legacy non valido.');
+      return {oldKey,old};
+    }).sort((a,b)=>a.old.revision-b.old.revision || a.old.id.localeCompare(b.old.id));
+    const remove=oldKey=>{
+      storage.removeItem(oldKey);
+      if (storage.getItem(oldKey)!==null) throw Error('Migrazione journal non verificata.');
+    };
+    if (raw!==null) {
+      const current=JSON.parse(raw);
+      if (!validStoredDeparture(current,u,uid)) throw Error('Journal corrente non valido.');
+      const index=items.findIndex(({old})=>old.id===current.operationId);
+      if (index>=0) {
+        const {oldKey,old}=items[index];
+        if (current.originKey!==old.originKey || current.expectedRevision!==old.revision) throw Error('Journal legacy in conflitto con richiesta corrente.');
+        remove(oldKey);items.splice(index,1);
+      }
+      if (current.status==='pending') return raw;
+    }
+    if (!items.length || ordinaryDepartures.has(key)) return raw;
+    // Un record alla volta, in ordine di revisione del vecchio journal.
+    // Eventuali altri ID restano memorizzati fino alla propria verifica.
+    const {oldKey,old}=items[0];
+    const record={accountUid:uid,universeId:u.id,operationId:old.id,originKey:old.originKey,
+      expectedRevision:old.revision,status:'pending',protocol:1};
+    writeDeparture(key,record);
+    raw=JSON.stringify(record);
+    // Prima scrittura verificata, poi rimozione della copia legacy: un crash
+    // intermedio lascia due copie identiche, non una richiesta perduta.
+    remove(oldKey);
+    return raw;
+  }
+  function readStoredDeparture(u,uid) {
+    const key=departureKey(u,uid);
+    try {
+      const raw=importLegacyDeparture(u,uid,key,window.localStorage.getItem(key));
+      const active=ordinaryDepartures.get(key);
+      if (raw===null) return active ? {...active.record,missing:true} : null;
+      const record=JSON.parse(raw);
+      if (!validStoredDeparture(record,u,uid)) throw Error('Richiesta persistente non valida.');
       // Una scrittura locale parzialmente riuscita non libera la sessione attiva.
       if (active && record.status==='settled') return {...active.record,missing:true};
       return record;
@@ -127,8 +177,9 @@
     return u?.id && uid ? recoveryEpochs.get(departureKey(u,uid)) || 0 : 0;
   }
   function ordinaryCheckpointBlocked(u,dispatch,uid=getAuth().currentUser?.uid,admission=null) {
-    if (!u?.id || !uid) return false;
-    if (retiredDepartureStates.has(u)) return true;
+    if (!u?.id) return false;
+    if (retiredDepartureStates.has(u) || G.isOnlineSessionCurrent?.(u)===false) return true;
+    if (!uid) return false;
     try {
       const p=readOrdinaryDeparture(u,uid);
       if (!p) return ordinaryAdmissions.has(departureKey(u,uid)) && ordinaryAdmissions.get(departureKey(u,uid))!==admission;
@@ -327,7 +378,7 @@
     if (ordinaryRecoveries.has(key) || activeRequest?.busy || activeRequest?.dispatch) throw pendingDepartureError(record);
     const ui=window.UniversumUI,active=ui?.state?.currentUniverse;
     const stillCurrent=()=>getAuth().currentUser?.uid===uid && ui?.state?.currentUniverse===active &&
-      (active ? active===u && ui.state.isMultiplayerMode : !ui?.state?.isMultiplayerMode && typeof isCurrent==='function' && isCurrent());
+      (active ? active===u && ui.state.isMultiplayerMode && G.isOnlineSessionCurrent?.(active)!==false : !ui?.state?.isMultiplayerMode && typeof isCurrent==='function' && isCurrent());
     if (!stillCurrent()) throw pendingDepartureError(record);
     ordinaryRecoveries.add(key);
     notifyOrdinaryDepartureChanged(active);
@@ -344,7 +395,8 @@
       if (active) retiredDepartureStates.add(active);
       if (activeRequest?.universe) retiredDepartureStates.add(activeRequest.universe);
       recoveryEpochs.set(key,ordinaryRecoveryEpoch(u,uid)+1);
-      ui.startOnlineGame(fresh);
+      const install=ui.installRecoveredOnlineGame || ui.startOnlineGame;
+      install.call(ui,fresh);
       if (getAuth().currentUser?.uid!==uid || ui.state.currentUniverse!==fresh || !ui.state.isMultiplayerMode)
         throw pendingDepartureError(record);
       settleOrdinaryDeparture(request,receipt);
@@ -377,6 +429,7 @@
     assertOrdinaryMutationAllowed(universeObj,user.uid,admission);
     const epoch=ordinaryRecoveryEpoch(universeObj,user.uid);
     const wasActive=window.UniversumUI?.state?.currentUniverse===universeObj;
+    const isCurrent=()=>getAuth().currentUser?.uid===user.uid && G.isOnlineSessionCurrent?.(universeObj)!==false && (!wasActive || window.UniversumUI?.state?.currentUniverse===universeObj);
 
     const planet = universeObj.planets[originPlanetIndex];
     if (!planet) throw new Error('Pianeta di partenza non valido.');
@@ -539,7 +592,7 @@
       throw Error('Revisione non valida. Riapri la partita multiplayer.');
     if (ordinary && readStoredDeparture(universeObj,user.uid)?.status==='settled')
       await acknowledgeSettledDeparture(universeObj,user.uid,admission);
-    if (wasActive && window.UniversumUI?.state?.currentUniverse!==universeObj) throw pendingDepartureError(null);
+    if (!isCurrent()) throw pendingDepartureError(null);
     const ref = uniRef.collection('fleets').doc();
     if (getAuth().currentUser?.uid!==user.uid) throw Error('Account cambiato durante la partenza.');
     if (ordinaryRecoveryEpoch(universeObj,user.uid)!==epoch) throw pendingDepartureError(null);
@@ -562,13 +615,13 @@
         // Il privilegio vale soltanto per la chiamata iniziale, non per un retry.
         if (request) request.dispatch=null;
       }
-      if (ordinary && (committed !== true || getAuth().currentUser?.uid!==user.uid)) throw pendingDepartureError(request.record);
+      if (ordinary && (committed !== true || !isCurrent())) throw pendingDepartureError(request.record);
       fleetDoc.id = ref.id;
 
       try {
         const savedSnap = await ref.get();
         const serverDepartureMs = _tsToMs(savedSnap.exists ? savedSnap.data()?.departureAt : null);
-        if (serverDepartureMs > 0 && getAuth().currentUser?.uid===user.uid && ordinaryRecoveryEpoch(universeObj,user.uid)===epoch) {
+        if (serverDepartureMs > 0 && isCurrent() && ordinaryRecoveryEpoch(universeObj,user.uid)===epoch) {
           const durationMs = arrivalTime - now;
           const returnDurationMs = returnTime - arrivalTime;
           fleetDoc.departureTime = serverDepartureMs;
@@ -591,6 +644,7 @@
         }
       } catch (e) { /* fallback ai tempi gia' salvati */ }
 
+      if (!isCurrent()) throw pendingDepartureError(request?.record);
       if (!universeObj.fleetsInFlight.some(f=>f.id===ref.id)) universeObj.fleetsInFlight.push(fleetDoc);
       if (request) {
         if (getAuth().currentUser?.uid!==user.uid || (wasActive && window.UniversumUI?.state?.currentUniverse!==universeObj))
@@ -685,6 +739,7 @@
       .where('attackerUid', '==', user.uid)
       .where('status', 'in', ['outbound', 'returning', 'embargo', 'occupy'])
       .onSnapshot((snap) => {
+        if (getAuth().currentUser?.uid!==user.uid || G.isOnlineSessionCurrent?.(universeObj)===false) return;
         _updateLiveFleetDocs(uniId, user.uid, 'own', snap.docs);
         const list = snap.docs
           .map((d) => normalizeOnlineFleet(d.data(), d.id))
@@ -711,6 +766,7 @@
       .where('defenderUid', '==', user.uid)
       .where('status', 'in', ['outbound', 'returning', 'embargo', 'occupy'])
       .onSnapshot((snap) => {
+        if (getAuth().currentUser?.uid!==user.uid || G.isOnlineSessionCurrent?.(universeObj)===false) return;
         _updateLiveFleetDocs(uniId, user.uid, 'incoming', snap.docs);
         const list = snap.docs
           .map((d) => Object.assign({ id: d.id }, d.data()))

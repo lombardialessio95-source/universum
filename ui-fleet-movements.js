@@ -366,6 +366,11 @@
 
     viewport.querySelectorAll('.btn-recall-fleet').forEach((btn) => {
       btn.addEventListener('click', async () => {
+        if (UI.blockPendingMutation(uni)) return;
+        if (UI.state.currentUniverse !== uni) {
+          UI.toast('Partita cambiata: riapri la schermata.', 'info');
+          return;
+        }
         try {
           if (st.isMultiplayerMode && window.UniversumMP?.recallOnlineFleet) {
             await window.UniversumMP.recallOnlineFleet(uni, btn.dataset.fid);
@@ -373,6 +378,7 @@
             MCore.recallFleet(uni, btn.dataset.fid);
             await window.UniversumDB.save(uni);
           }
+          if (UI.state.currentUniverse!==uni || UI.blockPendingMutation(uni)) return;
           UI.playSound('click');
           UI.toast('Ordine di rientro trasmesso allo squadrone!', 'info');
           UI.renderCurrentView();
@@ -385,14 +391,21 @@
 
     viewport.querySelectorAll('.btn-withdraw-siege').forEach((btn) => {
       btn.addEventListener('click', async () => {
+        if (UI.blockPendingMutation(uni)) return;
+        if (UI.state.currentUniverse !== uni) {
+          UI.toast('Partita cambiata: riapri la schermata.', 'info');
+          return;
+        }
         try {
           if (st.isMultiplayerMode && window.UniversumMP?.liftOnlineSiege) {
             const coords = { g: Number(btn.dataset.g), s: Number(btn.dataset.s), p: Number(btn.dataset.p) };
             await window.UniversumMP.liftOnlineSiege(uni.id, coords);
           } else if (window.UniversumSiege?.withdrawSiege) {
             await window.UniversumSiege.withdrawSiege(uni, btn.dataset.sid);
+            if (UI.state.currentUniverse!==uni || UI.blockPendingMutation(uni)) return;
             await UI.persistUniverseState();
           }
+          if (UI.state.currentUniverse!==uni || UI.blockPendingMutation(uni)) return;
           UI.playSound('click');
           UI.toast('Flotta orbitale richiamata verso il pianeta madre.', 'info');
           UI.renderCurrentView();
@@ -405,9 +418,16 @@
 
     viewport.querySelectorAll('.btn-break-siege-fight').forEach((btn) => {
       btn.addEventListener('click', async () => {
+        if (UI.blockPendingMutation(uni)) return;
+        if (UI.state.currentUniverse !== uni) {
+          UI.toast('Partita cambiata: riapri la schermata.', 'info');
+          return;
+        }
         if (window.UniversumSiege?.attackOrbitingSiege) {
           await window.UniversumSiege.attackOrbitingSiege(uni, btn.dataset.sid);
+          if (UI.state.currentUniverse!==uni || UI.blockPendingMutation(uni)) return;
           await UI.persistUniverseState();
+          if (UI.state.currentUniverse!==uni || UI.blockPendingMutation(uni)) return;
           UI.updateTopBarNumbers();
           UI.renderCurrentView();
         }
@@ -416,10 +436,16 @@
 
     viewport.querySelectorAll('.btn-pay-siege-ransom').forEach((btn) => {
       btn.addEventListener('click', async () => {
+        if (UI.blockPendingMutation(uni)) return;
+        if (UI.state.currentUniverse !== uni) {
+          UI.toast('Partita cambiata: riapri la schermata.', 'info');
+          return;
+        }
         try {
           if (st.isMultiplayerMode && window.UniversumMP?.payOnlineSiegeRansom) {
             const coords = { g: Number(btn.dataset.g), s: Number(btn.dataset.s), p: Number(btn.dataset.p) };
             await window.UniversumMP.payOnlineSiegeRansom(uni.id, coords);
+            if (UI.state.currentUniverse!==uni || UI.blockPendingMutation(uni)) return;
             const pl = uni.planets.find((p) => p.coords.g === coords.g && p.coords.s === coords.s && p.coords.p === coords.p);
             if (pl) {
               const siege = pl.occupation || pl.embargo;
@@ -433,8 +459,10 @@
             }
           } else if (window.UniversumSiege?.payOccupationRansom) {
             await window.UniversumSiege.payOccupationRansom(uni, btn.dataset.sid);
+            if (UI.state.currentUniverse!==uni || UI.blockPendingMutation(uni)) return;
             await UI.persistUniverseState();
           }
+          if (UI.state.currentUniverse!==uni || UI.blockPendingMutation(uni)) return;
           UI.playSound('success');
           UI.toast('Riscatto pagato! Blocco orbitale rimosso.', 'success');
           UI.updateTopBarNumbers();

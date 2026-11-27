@@ -122,6 +122,7 @@
 
     viewport.querySelectorAll('.btn-produce-unit').forEach((btn) => {
       btn.addEventListener('click', async () => {
+        if (UI.blockPendingMutation(uni)) return;
         const uid = btn.dataset.uid;
         const inp = viewport.querySelector(`.unit-qty-input[data-uid="${uid}"]`);
         const qty = Math.max(1, Math.floor(Number(inp?.value) || 1));

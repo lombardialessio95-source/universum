@@ -93,6 +93,7 @@
 
     viewport.querySelectorAll('.btn-build-structure').forEach((btn) => {
       btn.addEventListener('click', async () => {
+        if (UI.blockPendingMutation(uni)) return;
         try {
           const res = Engine.startBuilding(uni, pIdx, btn.dataset.bid, false);
           await UI.persistUniverseState();

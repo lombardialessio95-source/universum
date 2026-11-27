@@ -165,6 +165,7 @@
     const Galaxy = window.UniversumGalaxy;
 
     viewport.querySelectorAll('.btn-gal-upgrade').forEach((btn) => btn.addEventListener('click', async () => {
+      if (UI.blockPendingMutation(uni)) return;
       try {
         Galaxy.upgradeGalatticaStructure(uni, galHere.id, btn.dataset.gsid);
         await UI.persistUniverseState();
@@ -173,6 +174,7 @@
       } catch (err) { UI.playSound('error'); UI.toast(err.message, 'error'); }
     }));
     viewport.querySelectorAll('.btn-gal-defense').forEach((btn) => btn.addEventListener('click', async () => {
+      if (UI.blockPendingMutation(uni)) return;
       try {
         Galaxy.buildGalatticaDefense(uni, galHere.id, btn.dataset.gdid, 1);
         await UI.persistUniverseState();
@@ -181,6 +183,7 @@
       } catch (err) { UI.playSound('error'); UI.toast(err.message, 'error'); }
     }));
     viewport.querySelectorAll('.btn-gal-ship').forEach((btn) => btn.addEventListener('click', async () => {
+      if (UI.blockPendingMutation(uni)) return;
       try {
         Galaxy.buildGalatticaShip(uni, galHere.id, btn.dataset.gship, 1);
         await UI.persistUniverseState();
@@ -192,6 +195,7 @@
       UI.renderGalatticaFleet(btn.dataset.galId);
     }));
     document.getElementById('btn-gal-jump')?.addEventListener('click', async () => {
+      if (UI.blockPendingMutation(uni)) return;
       try {
         const target = {
           g: Number(document.getElementById('gal-jump-g').value),
@@ -517,6 +521,7 @@
     });
 
     document.getElementById('btn-gal-fleet-send')?.addEventListener('click', async () => {
+      if (UI.blockPendingMutation(uni)) return;
       try {
         const target = st.fleetTarget;
         const mission = st.fleetMission;

@@ -257,6 +257,7 @@
         } catch (error) { UI.toast(error.message,'error'); }
       });
       document.getElementById('btn-start-galattica')?.addEventListener('click', async () => {
+        if (UI.blockPendingMutation(uni)) return;
         try {
           const res = Galaxy.startGalatticaConstruction(uni, pIdx);
           await UI.persistUniverseState();
@@ -270,6 +271,7 @@
         }
       });
       document.getElementById('btn-start-crepuscolo')?.addEventListener('click', async () => {
+        if (UI.blockPendingMutation(uni)) return;
         try {
           const res = Galaxy.startCrepuscoloConstruction(uni, pIdx);
           await UI.persistUniverseState();
@@ -283,6 +285,7 @@
         }
       });
       document.getElementById('btn-start-invictus')?.addEventListener('click', async () => {
+        if (UI.blockPendingMutation(uni)) return;
         try {
           const res = Galaxy.startInvictusConstruction(uni, pIdx);
           await UI.persistUniverseState();
@@ -323,6 +326,7 @@
 
       document.getElementById('btn-go-moon-merchant')?.addEventListener('click', () => UI.switchView('diplomacy'));
       document.getElementById('btn-create-moon')?.addEventListener('click', async () => {
+        if (UI.blockPendingMutation(uni)) return;
         try {
           Galaxy.createMoon(uni, pIdx);
           await UI.persistUniverseState();
@@ -337,6 +341,7 @@
         }
       });
       document.getElementById('btn-start-bacino')?.addEventListener('click', async () => {
+        if (UI.blockPendingMutation(uni)) return;
         try {
           Galaxy.startBacinoSpaziale(uni, pIdx);
           await UI.persistUniverseState();
@@ -423,6 +428,7 @@
 
     viewport.querySelectorAll('.btn-build-moon').forEach((btn) => {
       btn.addEventListener('click', async () => {
+        if (UI.blockPendingMutation(uni)) return;
         try {
           const res = Engine.startBuilding(uni, pIdx, btn.dataset.mbid, true);
           await UI.persistUniverseState();
@@ -438,6 +444,7 @@
     });
 
     document.getElementById('btn-trigger-jumpgate')?.addEventListener('click', async () => {
+      if (UI.blockPendingMutation(uni)) return;
       try {
         const destIdx = Number(document.getElementById('jumpgate-dest-select').value);
         const res = Galaxy.useJumpGate(uni, pIdx, destIdx, planet.fleet);
