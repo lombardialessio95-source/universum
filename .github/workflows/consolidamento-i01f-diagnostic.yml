@@ -42,7 +42,9 @@ jobs:
           cd "$GITHUB_WORKSPACE"
           git show 9f1f8825aa13467fe5387f4606249bcc24d6aff9:.at04-i02b/checkpoint.bundle.b64 | base64 -d > "$RUNNER_TEMP/i02b-fixture.bundle"
           echo "e5943766a7fd42cabe705125a40238ef2316ea42c8c59d8e8db1e091dd252bbc  $RUNNER_TEMP/i02b-fixture.bundle" | sha256sum -c
-          git clone --bare --no-tags --single-branch --branch main . "$RUNNER_TEMP/cons-fixture.git"
+          git init --bare "$RUNNER_TEMP/cons-fixture.git"
+          git -C "$RUNNER_TEMP/cons-fixture.git" fetch --no-tags "$GITHUB_WORKSPACE" 08942f02f3cbeba0cb7ed32f11bb19aff1226684:refs/heads/exact-base
+          test "$(git -C "$RUNNER_TEMP/cons-fixture.git" rev-parse refs/heads/exact-base)" = 08942f02f3cbeba0cb7ed32f11bb19aff1226684
           git -C "$RUNNER_TEMP/cons-fixture.git" bundle verify "$RUNNER_TEMP/i02b-fixture.bundle"
           git -C "$RUNNER_TEMP/cons-fixture.git" fetch "$RUNNER_TEMP/i02b-fixture.bundle" refs/heads/candidate/AT04-I02B:refs/heads/fixture-only
           git -C "$RUNNER_TEMP/cons-fixture.git" show 76e4921e00ee467971e34412908ce7d13177f4d7:tests/helpers/at04_integrity_cases.js > "$RUNNER_TEMP/cons-demo/original-cases.js"
